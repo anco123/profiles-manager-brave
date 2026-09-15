@@ -1,0 +1,16 @@
+{
+  "name": "profile-manager",
+  "version": "1.0.0",
+  "description": "A local multi-profile browser session manager built on Playwright",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check-chrome": "node update-chrome-portable.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@e965/xlsx": "^0.20.3",
+    "express": "^4.19.2",
+    "playwright": "^1.47.0"
+  }
+}
