@@ -99,9 +99,20 @@ if (fs.existsSync(ENV_FILE)) {
 // Windows user accounts with the same PROJECT folder copied onto them
 // -- no per-machine .env edit needed. An explicit CHROME_PATH in .env
 // still always wins over this guess.
+// Dò tối đa 4 cấp thư mục cha (không chỉ đúng 1 cấp như trước) -- lúc
+// đầu profile-manager và GoogleChromePortable nằm ngang hàng nhau
+// (1 cấp), nhưng sau khi nhét profile-manager vào 1 folder con "_main"
+// mà KHÔNG dời GoogleChromePortable theo, khoảng cách giữa 2 thư mục
+// giờ là 2 cấp (_main/profile-manager -> lên 1 là _main -> lên 2 mới
+// tới chỗ GoogleChromePortable nằm). Dò rộng ra vài cấp như vầy để lần
+// tái cấu trúc SAU (nếu có) cũng tự nhận ra được, không phải quay lại
+// sửa .env mỗi lần đổi cấu trúc thư mục.
 function autoDetectPortableChrome() {
-  const guess = path.join(__dirname, '..', 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
-  return fs.existsSync(guess) ? guess : '';
+  for (let levelsUp = 1; levelsUp <= 4; levelsUp++) {
+    const guess = path.join(__dirname, ...Array(levelsUp).fill('..'), 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
+    if (fs.existsSync(guess)) return guess;
+  }
+  return '';
 }
 const CHROME_PATH = process.env.CHROME_PATH || autoDetectPortableChrome();
 
