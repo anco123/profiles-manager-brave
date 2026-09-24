@@ -33,69 +33,46 @@ const {
 // DOM / CLICK
 // ============================================================
 
-const {
-  clickElementOnScreen,
-} = require('./xlv1_clickElementOnScreen');
+const {clickElementOnScreen,} = require('./xlv1_clickElementOnScreen');
 
-const {
-  pickSafeClickPoint,
-} = require('./xlv1_safeClickPoint');
+const {pickSafeClickPoint,} = require('./xlv1_safeClickPoint');
 
+let loginTextBtn 
+await loginTextBtn.first().waitFor({state: 'visible',timeout: 20000});
 
 // ============================================================
 // EXCEL
 // ============================================================
 
-const {
-  readExcelCell,
-} = require('./xlv1_readExcelCell');
+const {readExcelCell,} = require('./xlv1_readExcelCell');
 
-const {
-  writeExcelCell,
-} = require('./writeExcelCell');
+const {writeExcelCell,} = require('./writeExcelCell');
 
-const {
-  exportSnapshotToExcel,
-} = require('./xlv1_exportSnapshotToExcel');
+const {exportSnapshotToExcel,} = require('./xlv1_exportSnapshotToExcel');
 
 
 // ============================================================
 // TWEET
 // ============================================================
 
-const {
-  findTweetInTimeline,
-} = require('./xlv1_findTweetInTimeline');
+const {findTweetInTimeline,} = require('./xlv1_findTweetInTimeline');
 
-const {
-  openTweetDetail,
-} = require('./xlv2_openTweetDetail');
+const {openTweetDetail,} = require('./xlv2_openTweetDetail');
 
-const {
-  xlv2_seeTweetInTimeline,
-} = require('./xlv2_seeTweetInTimeline');
+const {xlv2_seeTweetInTimeline,} = require('./xlv2_seeTweetInTimeline');
 
 
 // ============================================================
 // PROFILE / NAVIGATION
 // ============================================================
 
-const {
-  gotoProfile,
-} = require('./xlv2_gotoProfile');
+const {gotoProfile,} = require('./xlv2_gotoProfile');
 
-const {
-  getXStatus,
-} = require('./xlv1_getXStatus');
+const {getXStatus,} = require('./xlv1_getXStatus');
 
-const {
-  getDeviceInfo,
-} = require('./xlv1_getDeviceInfo');
+const {getDeviceInfo,} = require('./xlv1_getDeviceInfo');
 
-const {
-  changeProxy,
-  getProxyResetUrl,
-} = require('./xlv1_changeProxy');
+const {changeProxy,getProxyResetUrl,} = require('./xlv1_changeProxy');
 
 const {
   markProfileForRecreate,
@@ -106,61 +83,38 @@ const {
 // X INTERACTION
 // ============================================================
 
-const {
-  xlv3_like_tweet,
-} = require('./xlv3_like_tweet');
+const {xlv3_like_tweet,} = require('./xlv3_like_tweet');
 
-const {
-  xlv3_retweet_targettw,
-} = require('./xlv3_retweet_targettw');
+const {xlv3_retweet_targettw,} = require('./xlv3_retweet_targettw');
 
-const {
-  xlv3_follow_friends,
-} = require('./xlv3_follow_friends');
+const {xlv3_follow_friends,} = require('./xlv3_follow_friends');
 
-const {
-  interactX,
-} = require('./xlv3_Interactx');
+const {interactX,} = require('./xlv3_Interactx');
 
-const {
-  browseHomeVaried,
-  ambientMouseMove,
-  momentumScroll,
-} = require('./xlv3_interactXHome');
+const {browseHomeVaried,ambientMouseMove,momentumScroll,} = require('./xlv3_interactXHome');
 
 
 // ============================================================
 // LOGIN
 // ============================================================
 
-const {
-  loginToX,
-} = require('./xlv3_loginX');
+const {loginToX,} = require('./xlv3_loginX');
 
-const {
-  loginByCookie,
-  parseCookies,
-} = require('./xlv3_loginByCookie');
+const {loginByCookie,parseCookies,} = require('./xlv3_loginByCookie');
 
 
 // ============================================================
 // MAIL
 // ============================================================
 
-const {
-  getMailTmToken,
-  waitForVerificationCode,
-} = require('./mailtm');
+const {getMailTmToken,waitForVerificationCode,} = require('./mailtm');
 
 
 // ============================================================
 // OTHER
 // ============================================================
 
-const {
-  cleanupOldDebugFiles,
-  DEBUG_FILE_PATTERN,
-} = require('./cleanupDebugFiles');
+const {cleanupOldDebugFiles,DEBUG_FILE_PATTERN,} = require('./cleanupDebugFiles');
 
 
 // ============================================================
@@ -169,11 +123,7 @@ const {
 // có thể lấy path thông qua core.js.
 // ============================================================
 
-const {
-  DATA_DIR,
-  EXCEL_SNAPSHOT_FILE,
-  EXCEL_RESULTS_FILE,
-} = require('./datapaths');
+const {DATA_DIR,EXCEL_SNAPSHOT_FILE,EXCEL_RESULTS_FILE,} = require('./datapaths');
 
 
 // ============================================================

@@ -41,6 +41,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const { exec } = require('child_process');
 const { chromium } = require('playwright');
 const { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion } = require('./chrome-version-check');
@@ -98,11 +99,29 @@ if (fs.existsSync(ENV_FILE)) {
 // Windows user accounts with the same PROJECT folder copied onto them
 // -- no per-machine .env edit needed. An explicit CHROME_PATH in .env
 // still always wins over this guess.
+// Dò tối đa 4 cấp thư mục cha (không chỉ đúng 1 cấp như trước) -- lúc
+// đầu profile-manager và GoogleChromePortable nằm ngang hàng nhau
+// (1 cấp), nhưng sau khi nhét profile-manager vào 1 folder con "_main"
+// mà KHÔNG dời GoogleChromePortable theo, khoảng cách giữa 2 thư mục
+// giờ là 2 cấp (_main/profile-manager -> lên 1 là _main -> lên 2 mới
+// tới chỗ GoogleChromePortable nằm). Dò rộng ra vài cấp như vầy để lần
+// tái cấu trúc SAU (nếu có) cũng tự nhận ra được, không phải quay lại
+// sửa .env mỗi lần đổi cấu trúc thư mục.
 function autoDetectPortableChrome() {
-  const guess = path.join(__dirname, '..', 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
-  return fs.existsSync(guess) ? guess : '';
+  for (let levelsUp = 1; levelsUp <= 4; levelsUp++) {
+    const guess = path.join(__dirname, ...Array(levelsUp).fill('..'), 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
+    if (fs.existsSync(guess)) return guess;
+  }
+  return '';
 }
 const CHROME_PATH = process.env.CHROME_PATH || autoDetectPortableChrome();
+
+// Bật/tắt qua Settings panel (gear icon, topbar) -- xem
+// clearProfileCache()/CACHE_ONLY_DIR_NAMES phía dưới để biết chính xác
+// những gì bị xoá (chỉ cache, không đụng cookie/session). Đọc 1 lần lúc
+// khởi động, giống CHROME_PATH/DATA_DIR -- lưu ở Settings xong vẫn cần
+// khởi động lại server mới áp dụng.
+const AUTO_CLEAR_CACHE_AFTER_RUN = /^(1|true|yes)$/i.test(process.env.AUTO_CLEAR_CACHE_AFTER_RUN || '');
 
 // DATA_DIR defaults to ./data (next to this file) but can be pointed
 // anywhere via DATA_DIR in .env -- see the Settings panel (gear icon,
@@ -193,6 +212,32 @@ function scopedRequire(modulePath) {
   const resolvedFile = require.resolve(resolved);
   delete require.cache[resolvedFile];
   return require(resolvedFile);
+}
+
+// scopedRequire() above only busts the Node require cache for whichever
+// ONE file it's asked for directly -- exactly the file main.js (or
+// whatever script the Run modal picked) itself requires. The problem:
+// once that file is actually loaded, ITS OWN require('./whatever')
+// calls run through THAT module's native Node require, completely
+// bypassing scopedRequire -- so anything a script requires INTERNALLY
+// (helpers.js, xlv2_gotoProfile.js, xlv3_retweet_targettw.js, and so on,
+// however many levels deep) stays cached from whenever it was FIRST
+// loaded, for the rest of this server process's life, no matter how
+// many times it's edited and saved afterward. In practice this looked
+// like "editing main.js/interactX.js just works, editing anything they
+// call into silently keeps running the old code" -- confusing, since
+// which files "worked" depended on how deep they sat in the require
+// graph, not on anything the person watching did differently.
+//
+// Fix: before every run, forget EVERY module currently cached from
+// inside scripts/ -- not just the entry point -- so the WHOLE
+// dependency tree reloads fresh off disk each time, regardless of
+// nesting depth.
+function clearScriptsRequireCache() {
+  const prefix = SCRIPTS_DIR + path.sep;
+  for (const cachedPath of Object.keys(require.cache)) {
+    if (cachedPath.startsWith(prefix)) delete require.cache[cachedPath];
+  }
 }
 
 // Giới hạn mặc định của express.json() là 100KB -- quá nhỏ cho snapshot
@@ -293,14 +338,15 @@ function writeEnvValues(updates) {
 }
 
 app.get('/api/settings', (req, res) => {
-  res.json({ dataDir: DATA_DIR, chromePath: CHROME_PATH });
+  res.json({ dataDir: DATA_DIR, chromePath: CHROME_PATH, autoClearCacheAfterRun: AUTO_CLEAR_CACHE_AFTER_RUN });
 });
 
 app.post('/api/settings', (req, res) => {
-  const { dataDir, chromePath } = req.body;
+  const { dataDir, chromePath, autoClearCacheAfterRun } = req.body;
   const updates = {};
   if (typeof dataDir === 'string') updates.DATA_DIR = dataDir.trim();
   if (typeof chromePath === 'string') updates.CHROME_PATH = chromePath.trim();
+  if (typeof autoClearCacheAfterRun === 'boolean') updates.AUTO_CLEAR_CACHE_AFTER_RUN = autoClearCacheAfterRun ? 'true' : 'false';
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Nothing to update' });
 
   try {
@@ -400,6 +446,39 @@ app.delete('/api/snippets/:id', (req, res) => {
   const next = snippets.filter((s) => s.id !== req.params.id);
   writeSnippets(next);
   res.json({ success: true });
+});
+
+// -------------------------------------------------------------------
+// "Open in VS Code" -- launches the REAL VS Code app on this machine,
+// with its Open Folder pointed at this project's own root (__dirname:
+// the folder server.js itself lives in, same level as scripts/ and
+// public/) so scripts/, package.json, etc. all show up in one workspace
+// exactly like opening it by hand via File > Open Folder would.
+//
+// Runs through a shell (exec, not execFile) specifically because VS
+// Code's own CLI is a `code.cmd` shim on Windows -- a plain child-process
+// launch without a shell can't execute a .cmd file at all, only exec's
+// shell-wrapped form reliably works across Windows/macOS/Linux here.
+// Quoting the path handles folders with spaces in them (e.g. "My
+// Projects") on both cmd.exe and POSIX shells.
+// -------------------------------------------------------------------
+app.post('/api/open-in-vscode', (req, res) => {
+  const projectRoot = __dirname;
+  exec(`code "${projectRoot}"`, (err) => {
+    if (err) {
+      // By far the most common cause: the "code" command isn't on PATH.
+      // That's a one-time setup step inside VS Code itself (Command
+      // Palette -> "Shell Command: Install 'code' command in PATH"),
+      // not something this server can fix for you -- send back the
+      // folder path too so you can at least open it by hand
+      // (File > Open Folder) in the meantime.
+      return res.status(500).json({
+        error: `Couldn't launch VS Code (${err.message}). Make sure the "code" command is installed on your PATH (VS Code's Command Palette \u2192 "Shell Command: Install 'code' command in PATH"), or open this folder manually instead:`,
+        path: projectRoot,
+      });
+    }
+    res.json({ success: true, path: projectRoot });
+  });
 });
 
 // -------------------------------------------------------------------
@@ -1055,6 +1134,30 @@ async function launchProfileById(id) {
     console.warn(`Couldn't pre-set Preferences (password/notification popups) for profile ${id}: ${err.message}`);
   }
 
+  // "Continue running background apps when Google Chrome is closed"
+  // (chrome://settings/system) is NOT a per-profile pref -- Chromium
+  // registers background_mode.enabled on the BROWSER-level "Local State"
+  // pref store (chrome/browser/background/background_mode_manager.cc),
+  // which lives as its own JSON file at the ROOT of userDataDir, one
+  // level up from Default/Preferences above. Writing it into
+  // Default/Preferences (as an earlier attempt at this did) has no
+  // effect at all -- Chrome never reads that key from there, so the
+  // toggle kept showing ON no matter what. --disable-background-mode
+  // below still does the actual job (no background process survives
+  // closing the window) regardless of this toggle's on-disk value; this
+  // is only so chrome://settings itself reports the correct state too.
+  try {
+    const localStatePath = path.join(userDataDir, 'Local State');
+    const localState = fs.existsSync(localStatePath)
+      ? JSON.parse(fs.readFileSync(localStatePath, 'utf-8'))
+      : {};
+    localState.background_mode = localState.background_mode || {};
+    localState.background_mode.enabled = false;
+    fs.writeFileSync(localStatePath, JSON.stringify(localState));
+  } catch (err) {
+    console.warn(`Couldn't pre-set Local State (background mode) for profile ${id}: ${err.message}`);
+  }
+
   const launchOptions = {
     headless: false, // a profile manager's whole point is a real window you can drive by hand
     viewport: { width: profile.viewportWidth, height: profile.viewportHeight },
@@ -1089,6 +1192,15 @@ async function launchProfileById(id) {
       '--no-default-browser-check',
       '--disable-session-crashed-bubble',
       '--password-store=basic',
+      // Tắt hẳn "Continue running background apps when Google Chrome is
+      // closed" (chrome://settings > System) ở cấp process -- không phải
+      // chỉ uncheck ô đó, mà tắt LUÔN cơ chế background-mode-manager của
+      // Chromium. Nếu không, đóng cửa sổ (context.close()) có thể để lại
+      // 1 tiến trình chrome.exe "nền" vẫn sống, tự nó giữ khoá userDataDir
+      // -- lần launch KẾ TIẾP của đúng profile này gặp lỗi kiểu "Couldn't
+      // launch Chrome" dù path chrome.exe hoàn toàn đúng, chỉ vì tiến
+      // trình cũ chưa thật sự thoát hẳn.
+      '--disable-background-mode',
     ],
     // Playwright bakes --disable-extensions into EVERY launch's default
     // args, silently and unconditionally, unless explicitly told not to.
@@ -1265,74 +1377,103 @@ async function launchProfileById(id) {
     }
   }
 
+  let context;
   try {
     // The core mechanic: launchPersistentContext keeps everything
     // (cookies, localStorage, IndexedDB, cache) in userDataDir, so
     // closing and relaunching this profile later picks up where it left off.
-    const context = await chromium.launchPersistentContext(userDataDir, launchOptions);
+    context = await chromium.launchPersistentContext(userDataDir, launchOptions);
 
-    // Must be registered before the first real navigation -- addInitScript
-    // only affects documents created/navigated AFTER it's added, and we
-    // want it in place for this very first page.goto() below, not just
-    // future ones.
-    //
-    // Base stealth (navigator.webdriver) is unconditional -- every profile
-    // launched by this app goes through CDP automation, whether or not it
-    // also wants the deep canvas/WebGL/audio/font layer below.
-    await context.addInitScript(buildBaseStealthInitScript());
+    try {
+      // Must be registered before the first real navigation -- addInitScript
+      // only affects documents created/navigated AFTER it's added, and we
+      // want it in place for this very first page.goto() below, not just
+      // future ones.
+      //
+      // Base stealth (navigator.webdriver) is unconditional -- every profile
+      // launched by this app goes through CDP automation, whether or not it
+      // also wants the deep canvas/WebGL/audio/font layer below.
+      await context.addInitScript(buildBaseStealthInitScript());
 
-    // A small "which profile is this?" badge pinned to the corner of
-    // every page this profile's window ever shows -- also unconditional.
-    // Unlike the Run-script visible-cursor overlay (scripts/helpers.js),
-    // this needs no script to be running: addInitScript re-injects it on
-    // every navigation (new tab, page.goto, back/forward) automatically,
-    // for as long as the window stays open, purely so a desk full of
-    // open profile windows is identifiable at a glance.
-    await context.addInitScript(buildProfileBadgeInitScript(profile.name));
+      // A small "which profile is this?" badge pinned to the corner of
+      // every page this profile's window ever shows -- also unconditional.
+      // Unlike the Run-script visible-cursor overlay (scripts/helpers.js),
+      // this needs no script to be running: addInitScript re-injects it on
+      // every navigation (new tab, page.goto, back/forward) automatically,
+      // for as long as the window stays open, purely so a desk full of
+      // open profile windows is identifiable at a glance.
+      await context.addInitScript(buildProfileBadgeInitScript(profile.name));
 
-    // Same idea, but for the OS taskbar/Alt+Tab instead of the on-page
-    // view -- prefixes every tab's document.title with the profile name.
-    await context.addInitScript(buildProfileTitleInitScript(profile.name));
+      // Same idea, but for the OS taskbar/Alt+Tab instead of the on-page
+      // view -- prefixes every tab's document.title with the profile name.
+      await context.addInitScript(buildProfileTitleInitScript(profile.name));
 
-    // Deep fingerprint layer stays opt-in: profiles with `fingerprint: null`
-    // launch exactly as before, just with the base stealth patch above.
-    // Only profiles with a `fingerprint` object pay the extra cost of this one.
-    if (profile.fingerprint) {
-      await context.addInitScript(buildFingerprintInitScript(profile.fingerprint, profile.userAgent));
-    }
-
-    const page = context.pages()[0] || (await context.newPage());
-
-    await page.goto('https://example.com');
-
-    runningContexts[id] = { context, page };
-    context.on('close', () => {
-      delete runningContexts[id];
-      // If this profile was part of the queue's active batch, freeing its
-      // slot is what lets the next pending profile launch -- see fillQueue().
-      // Exception: a close between retry attempts (retryingIds) should NOT
-      // free the slot or advance the queue -- the same profile is about to
-      // relaunch right back into that slot. Only the FINAL close of a
-      // retry cycle (success or attempts exhausted) reaches here with
-      // retryingIds NOT containing this id.
-      if (queue.active.has(id) && !retryingIds.has(id)) {
-        queue.active.delete(id);
-        fillQueue();
+      // Deep fingerprint layer stays opt-in: profiles with `fingerprint: null`
+      // launch exactly as before, just with the base stealth patch above.
+      // Only profiles with a `fingerprint` object pay the extra cost of this one.
+      if (profile.fingerprint) {
+        await context.addInitScript(buildFingerprintInitScript(profile.fingerprint, profile.userAgent));
       }
-    });
+
+      // Không tự mở sẵn trang nào ở đây nữa -- main.js (script được chọn
+      // để Run) đã tự gọi changeProxy() làm việc ĐẦU TIÊN rồi mới tự điều
+      // hướng trang theo nhu cầu của nó, nên không cần (và không nên) tốn
+      // thêm 1 lượt goto + đổi IP THỪA ở đây chỉ để có cái gì đó hiện ra
+      // lúc mới mở Chrome. Cửa sổ mở lên là trang mặc định của Chromium
+      // (hoặc trống), đợi bấm Run.
+      const page = context.pages()[0] || (await context.newPage());
+
+      runningContexts[id] = { context, page };
+      context.on('close', () => {
+        delete runningContexts[id];
+        // If this profile was part of the queue's active batch, freeing its
+        // slot is what lets the next pending profile launch -- see fillQueue().
+        // Exception: a close between retry attempts (retryingIds) should NOT
+        // free the slot or advance the queue -- the same profile is about to
+        // relaunch right back into that slot. Only the FINAL close of a
+        // retry cycle (success or attempts exhausted) reaches here with
+        // retryingIds NOT containing this id.
+        if (queue.active.has(id) && !retryingIds.has(id)) {
+          queue.active.delete(id);
+          fillQueue();
+        }
+      });
+    } catch (innerErr) {
+      // Context ĐÃ MỞ THẬT (browser process đã chạy) nhưng 1 bước sau đó
+      // (addInitScript, ví dụ) lại throw TRƯỚC KHI kịp gán vào
+      // runningContexts[id]. Trước đây: context này bị bỏ rơi vĩnh viễn --
+      // không nằm trong runningContexts nên không API/nút Stop nào biết
+      // nó tồn tại để đóng, cửa sổ cứ đứng đó mãi mãi (1 kiểu window
+      // "treo" khác, không liên quan gì tới script loginTask.js). Đóng nó
+      // ngay tại đây trước khi ném lỗi tiếp ra ngoài.
+      await context.close().catch(() => {});
+      throw innerErr;
+    }
   } catch (err) {
     console.error('Launch failed:', err.message);
 
     let friendly = err.message;
-    if (CHROME_PATH) {
+    // Trước đây: hễ có CHROME_PATH là ĐÈ LUÔN err.message gốc thành câu
+    // "Couldn't launch Chrome at ..." này, BẤT KỂ lỗi thật là gì -- kể cả
+    // addInitScript lỗi vì lý do khác hẳn (Chrome vẫn mở HOÀN TOÀN BÌNH
+    // THƯỜNG, path chrome.exe không hề sai). Log hiện ra sai lệch hoàn
+    // toàn, khiến chẩn đoán sai be bét (y hệt trường hợp vừa xảy ra).
+    // Giờ: chỉ đổi thành message "sai đường dẫn" khi lỗi THẬT SỰ trông
+    // giống không tìm/chạy được executable -- các trường hợp khác GIỮ
+    // NGUYÊN err.message gốc để còn biết lỗi thật.
+    const looksLikeBadExecutable = /ENOENT|EACCES|Executable doesn'?t exist|Failed to launch/i.test(err.message);
+
+    if (CHROME_PATH && looksLikeBadExecutable) {
       friendly = `Couldn't launch Chrome at "${CHROME_PATH}" (set in .env). Double-check that path.`;
     } else if (profile.engineMode === 'chromium' && err.message.includes('Executable doesn\'t exist')) {
       friendly = 'Chromium isn\'t downloaded yet. Run: npx playwright install chromium';
     } else if (profile.engineMode === 'chrome' && /channel|doesn\'t exist|not found/i.test(err.message)) {
       friendly = 'Couldn\'t find a system install of Google Chrome. Install Chrome, or switch this profile\'s engine back to "Bundled Chromium".';
-    } else if (profile.engineMode === 'custom') {
+    } else if (profile.engineMode === 'custom' && looksLikeBadExecutable) {
       friendly = `Couldn't launch the executable at "${profile.executablePath}". Double-check the path.`;
     }
+    // Không khớp mẫu "path sai" nào ở trên -- friendly vẫn là err.message
+    // gốc, không bị che nữa.
 
     throw httpError(500, friendly);
   }
@@ -1418,6 +1559,26 @@ const CACHE_ONLY_DIR_NAMES = [
   'GrShaderCache', 'ShaderCache',
 ];
 
+// These two live nested one level deeper (inside Default/Service
+// Worker/) rather than directly under the profile root or Default/, so
+// they're swept separately below instead of via CACHE_ONLY_DIR_NAMES.
+// CacheStorage in particular is, in practice, the single biggest
+// offender we've seen -- it's the Cache Storage API a site's OWN
+// service worker uses (caches.open()/.put() in the page's own JS) to
+// stash whatever responses IT wants for offline/fast access. For a
+// media-heavy site that can reach into the GBs per profile, dwarfing
+// "Cache"/"Code Cache" above -- but it's still pure re-downloadable
+// cache, not anything resembling login/session state (X/Twitter's own
+// auth lives in cookies, never touched here). Service worker
+// REGISTRATIONS themselves live in Default/Service Worker/Database/,
+// which is deliberately left alone -- that's closer to "site
+// configuration" than "cache", and unregistering it isn't free (the
+// site has to re-register its worker from scratch next visit).
+const SERVICE_WORKER_CACHE_SUBDIRS = [
+  ['Service Worker', 'CacheStorage'],
+  ['Service Worker', 'ScriptCache'],
+];
+
 function dirSizeBytes(dir) {
   let total = 0;
   let entries;
@@ -1451,6 +1612,14 @@ function clearProfileCache(userDataDir) {
       freedBytes += dirSizeBytes(dir);
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  }
+  // Service Worker/* only ever lives under Default/, one level deeper
+  // than the flat names swept above.
+  for (const relParts of SERVICE_WORKER_CACHE_SUBDIRS) {
+    const dir = path.join(userDataDir, 'Default', ...relParts);
+    if (!fs.existsSync(dir)) continue;
+    freedBytes += dirSizeBytes(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
   }
   return freedBytes;
 }
@@ -1511,7 +1680,52 @@ app.post('/api/profiles/clear-cache', async (req, res) => {
 // `require` is real Node require(), scoped to scripts/ (scopedRequire()
 // near the top of this file).
 // -------------------------------------------------------------------
-async function runScriptOnProfile(id, code, input = '') {
+// Dùng chung bởi log() và nhánh catch bên trong runScriptOnProfile bên
+// dưới -- quét cả stack tìm dòng ĐẦU TIÊN trỏ vào 1 file thật của
+// SCRIPT (main.js nhờ sourceURL, hoặc bất kỳ file nào trong scripts/
+// qua require()), bỏ qua các frame nội bộ của Node (dạng "node:fs:...")
+// và của chính server.js -- vì lỗi ném ra từ 1 API có sẵn (VD
+// fs.readFileSync) sẽ có VÀI dòng đầu tiên nằm sâu trong nội bộ Node,
+// dòng thật sự hữu ích (chỗ script gọi fs.readFileSync) nằm sau đó.
+function firstUserFrameLocation(stack, scriptName) {
+  const lines = (stack || '').split('\n');
+
+  // SyntaxError lúc require() 1 file bị hỏng cú pháp có DÒNG ĐẦU TIÊN
+  // của .stack khác hẳn 1 lỗi runtime bình thường: đúng
+  // "duong/dan/file.js:SODONG" (không có số cột, không có "at ...") --
+  // đây MỚI là vị trí lỗi THẬT (file/dòng thật sự bị hỏng cú pháp).
+  // Không bắt riêng dòng này thì các frame "at ..." quét được ở dưới
+  // (nếu có) chỉ dẫn tới chỗ GỌI require() tới file hỏng đó (dòng viết
+  // require() trong file GỌI), không phải dòng cú pháp thật sự sai bên
+  // trong file BỊ GỌI -- vừa bắt được sai đúng kiểu này: file A
+  // require() file B bị lỗi cú pháp, log lại chỉ nhầm sang dòng
+  // require() trong A thay vì dòng hỏng thật trong B.
+  const syntaxErrorHeader = lines[0] && lines[0].match(/^(.+\.[mc]?js):(\d+)$/);
+  if (syntaxErrorHeader) {
+    return `${path.basename(syntaxErrorHeader[1])}:${syntaxErrorHeader[2]}`;
+  }
+
+  for (const raw of lines) {
+    const match = raw.match(/\(?([^()\s]+):(\d+):\d+\)?\s*$/);
+    if (!match) continue;
+    const file = match[1];
+    if (file.startsWith('node:') || file === '<anonymous>' || file.endsWith(`${path.sep}server.js`) || file === 'server.js') continue;
+    const base = path.basename(file);
+    // `new AsyncFunction(...)` luôn tự chèn thêm ĐÚNG 2 dòng vào TRƯỚC
+    // phần thân code thật (dòng khai báo danh sách tham số, rồi dòng
+    // ") {" mở hàm) -- nên dòng 1 thật trong script lại bị V8 báo thành
+    // dòng 3. Trừ ngược lại 2 ở đây để số dòng hiện ra khớp CHÍNH XÁC
+    // với số dòng bạn thấy trong chính editor. Chỉ áp dụng cho đúng file
+    // được gắn sourceURL (script Run modal đang chạy) -- các file thật
+    // trong scripts/ (qua require()) đã đúng dòng thật ngay từ đầu,
+    // không đi qua AsyncFunction nên không dính offset này.
+    const lineNo = base === scriptName ? Math.max(1, parseInt(match[2], 10) - 2) : match[2];
+    return `${base}:${lineNo}`;
+  }
+  return null;
+}
+
+async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName = 'main.js') {
   const running = runningContexts[id];
   if (!running) throw httpError(400, 'This profile is not running.');
   if (!code || !code.trim()) throw httpError(400, 'Write some code first.');
@@ -1550,15 +1764,98 @@ async function runScriptOnProfile(id, code, input = '') {
   }
 
   const logs = [];
-  const log = (...args) => logs.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+  // onLog (nếu có) được gọi NGAY LẬP TỨC mỗi khi script gọi log(...) --
+  // trước đây log(...) chỉ push vào mảng `logs` NẰM TRONG BỘ NHỚ, và mảng
+  // đó chỉ được ai đó nhìn thấy SAU KHI `run(...)` bên dưới resolve hoặc
+  // reject xong (return/throw). Nếu script bị treo vô hạn (không bao giờ
+  // resolve/reject -- ví dụ 1 vòng while(true) không có trần), TOÀN BỘ
+  // log tích luỹ bên trong (kể cả các dòng lỗi lặp lại) không bao giờ lộ
+  // ra ngoài -- nhìn từ UI, 1 profile treo LUÔN hiện log trống trơn, dù
+  // bên trong nó có đang chạy/lỗi liên tục hay không, khiến không cách
+  // nào phân biệt được "treo do đang chạy" với "chưa từng chạy tới".
+  // Giờ runQueueScriptThenClose truyền vào 1 onLog đẩy thẳng ra queueLog()
+  // -- log hiện real-time trên UI ngay cả khi script chưa (và có thể sẽ
+  // không bao giờ) resolve/reject.
+  const log = (...args) => {
+    const line = args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+
+    // Tự thêm [tenFile.js:soDong] vào đầu mỗi dòng -- trước đây log()
+    // chỉ hiện đúng NỘI DUNG bạn truyền vào, không có cách nào biết dòng
+    // đó xuất phát từ file nào/dòng nào trong lúc soi log 1 lần chạy dài
+    // (VD lúc điều tra vụ timeout 120s, hay việc treo giữa chừng ở
+    // notes.txt trước đây -- cả 2 lần đó đều phải tự đọc code đoán mò).
+    //
+    // Cách lấy: new Error().stack tại ĐÚNG chỗ này -- dòng [0] luôn là
+    // "Error", dòng [1] luôn là CHÍNH hàm log() này (bỏ qua, vô nghĩa vì
+    // luôn là server.js), dòng [2] mới là nơi THẬT SỰ đã gọi log(...):
+    //   - Nếu gọi từ ngay trong main.js (hay bất kỳ script nào được chọn
+    //     làm entry point) -- SẼ hiện đúng "scriptName:dòng" nhờ
+    //     //# sourceURL bên dưới (không có dòng đó, V8 chỉ hiện
+    //     "<anonymous>" vì code này được build bằng `new AsyncFunction`
+    //     từ 1 CHUỖI, không phải từ 1 file thật trên đĩa).
+    //   - Nếu gọi từ 1 file trong scripts/ (interactX.js,
+    //     xlv3_follow_friends.js, ...) qua require() -- TỰ ĐỘNG đúng
+    //     luôn, không cần làm gì thêm, vì đây là file thật, Node vốn đã
+    //     biết chính xác đường dẫn + dòng của nó.
+    const loc = firstUserFrameLocation((new Error().stack || '').split('\n')[2], scriptName);
+    const tagged = loc ? `[${loc}] ${line}` : line;
+
+    logs.push(tagged);
+    if (onLog) onLog(tagged);
+  };
 
   try {
+    clearScriptsRequireCache();
     const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
-    const run = new AsyncFunction('page', 'context', 'log', 'require', 'input', 'proxyInfo', code);
+    // //# sourceURL cho V8 1 "tên file" để gắn vào stack trace của code
+    // này -- không có dòng này, code build từ chuỗi qua `new
+    // AsyncFunction` không có file thật nào đứng sau nó cả, nên mọi
+    // stack trace/log() gọi từ NGAY TRONG main.js (không qua require())
+    // sẽ hiện "<anonymous>" thay vì "main.js:42". Đây LÀ tên file thật
+    // (main.js) khi chạy tự động qua queue; khi Run modal chọn 1 tab
+    // khác làm entry point, server.js truyền đúng tên file đó vào qua
+    // tham số scriptName (xem /api/queue/start).
+    const run = new AsyncFunction('page', 'context', 'log', 'require', 'input', 'proxyInfo', `${code}\n//# sourceURL=${scriptName}`);
     const result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo);
     return { logs, result: result === undefined ? null : result };
   } catch (err) {
-    const wrapped = httpError(400, err.message);
+    // Chụp màn hình cho MỌI script khi lỗi -- tập trung ở đây thay vì
+    // để từng script tự lo. Trước đây chỉ vài script LOGIN
+    // (xlv3_loginX.js, loginTask.js, Logintaskon.js, xlv3_loginByCookie.js)
+    // tự định nghĩa debugShot() riêng bên trong nó; toàn bộ nhóm script
+    // TƯƠNG TÁC (xlv3_retweet_targettw, xlv2_openTweetDetail,
+    // xlv3_follow_friends, xlv3_like_tweet, interactX...) chưa bao giờ có
+    // dòng screenshot nào cả. Nên khi lỗi chuyển từ khâu login sang khâu
+    // tương tác, ảnh debug "biến mất" -- không phải tính năng bị hỏng, mà
+    // là nó chưa từng tồn tại ở nhánh script đang chạy.
+    //
+    // PHẢI dùng log(...) chứ KHÔNG phải logs.push(...): catch block của
+    // runQueueScriptThenClose cố tình KHÔNG forEach lại err.logs nữa (xem
+    // comment của nó) vì mọi thứ đã được stream real-time qua onLog --
+    // mà onLog chỉ được gọi từ bên trong log(). Push thẳng vào mảng
+    // `logs` thì dòng đó không bao giờ tới được UI, nên nhìn từ ngoài
+    // trông hệt như "không có ảnh nào được chụp".
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true }); // DATA_DIR có thể nằm ở ổ khác (VD F:\) -- đảm bảo tồn tại trước khi ghi
+      const shotPath = path.join(
+        DATA_DIR,
+        `error-${scriptName || 'script'}-${id}-${Date.now()}.png`.replace(/[/\\:*?"<>|]/g, '_')
+      );
+      await running.page.screenshot({ path: shotPath });
+      log(`[error-screenshot] Đã chụp màn hình lúc lỗi: ${shotPath}`);
+      console.log(`[error-screenshot] ${shotPath}`); // hiện cả ở terminal chạy server -- kiểm chứng được kể cả khi bỏ lỡ log trên UI
+    } catch (shotErr) {
+      log(`[error-screenshot] Không chụp được màn hình lúc lỗi: ${shotErr.message}`);
+      console.warn(`[error-screenshot] failed: ${shotErr.message}`);
+    }
+
+    // Cùng 1 kiểu gắn vị trí như log() ở trên, nhưng quét CẢ stack (xem
+    // firstUserFrameLocation) thay vì chỉ đúng 1 dòng cố định -- lỗi ném
+    // từ 1 API có sẵn (VD fs.readFileSync bị ENOENT, xem vụ notes.txt
+    // trước đây) có vài dòng đầu nằm trong nội bộ Node, phải bỏ qua
+    // chúng mới tới được dòng thật sự hữu ích: chỗ script gọi API đó.
+    const loc = firstUserFrameLocation(err.stack, scriptName);
+    const wrapped = httpError(400, loc ? `[${loc}] ${err.message}` : err.message);
     wrapped.logs = logs;
     throw wrapped;
   }
@@ -1566,7 +1863,7 @@ async function runScriptOnProfile(id, code, input = '') {
 
 app.post('/api/profiles/:id/run', async (req, res) => {
   try {
-    const { logs, result } = await runScriptOnProfile(req.params.id, req.body.code, req.body.input);
+    const { logs, result } = await runScriptOnProfile(req.params.id, req.body.code, req.body.input, null, req.body.scriptName);
     res.json({ success: true, logs, result });
   } catch (err) {
     res.status(err.status || 500).json({ success: false, logs: err.logs || [], error: err.message });
@@ -1650,10 +1947,41 @@ const retryingIds = new Set(); // ids currently between retry attempts -- see th
 // reviewing a whole run's history, so the same 50-entry cap would
 // start silently dropping early profiles' logs on any queue bigger
 // than a handful of profiles.
+// Cap RIÊNG theo từng profileId, KHÔNG dùng chung 1 cap cho cả mảng.
+// Trước đây `if (queue.log.length > 2000) queue.log.shift()` xoá dòng
+// CŨ NHẤT của TOÀN BỘ mảng bất kể thuộc profile nào -- 1 run 100 profile,
+// mỗi profile log vài chục dòng (login/link X/retweet/follow...) là thừa
+// sức vượt 2000 dòng rất lâu trước khi chạy tới profile ~99, kéo theo
+// log chi tiết của profile 1..45 bị đẩy ra mất sạch dù ROW của chúng
+// (lấy từ resultsById, không phải từ đây) vẫn còn hiển thị bình thường.
+// Giờ: mỗi profileId (và cả các dòng "Queue" chung, profileId = null)
+// được giữ tối đa LOG_CAP_PER_KEY dòng riêng của nó -- 1 profile chạy
+// lặp/log nhiều không còn đẩy mất log của profile khác nữa. Vẫn giữ
+// thêm 1 trần tổng LOG_CAP_TOTAL để mảng không phình vô hạn nếu 1 run
+// có hàng nghìn profile.
+const LOG_CAP_PER_KEY = 500;
+const LOG_CAP_TOTAL = 50000;
+
 function queueLog(message, profileId = null, profileName = null) {
   const stamp = new Date().toLocaleTimeString();
   queue.log.push({ time: stamp, profileId, profileName, message: `${stamp}  ${message}` });
-  if (queue.log.length > 2000) queue.log.shift();
+
+  // Đếm ngược từ cuối mảng lên: đủ LOG_CAP_PER_KEY dòng của CÙNG profileId
+  // (kể cả dòng vừa push) thì dòng CŨ NHẤT của riêng profileId đó (dòng
+  // đầu tiên gặp khi đếm ngược, tức xa cuối mảng nhất trong số đã đếm) bị
+  // xoá. Chỉ cần xoá đúng 1 dòng mỗi lần push là đủ giữ cap ổn định.
+  let countForKey = 0;
+  for (let i = queue.log.length - 1; i >= 0; i--) {
+    if (queue.log[i].profileId === profileId) {
+      countForKey++;
+      if (countForKey > LOG_CAP_PER_KEY) {
+        queue.log.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  if (queue.log.length > LOG_CAP_TOTAL) queue.log.shift();
 }
 
 // Runs queue.script against a just-launched profile, retrying (relaunch +
@@ -1700,65 +2028,103 @@ async function consumePendingRecreate(id) {
     return;
   }
 
-  let matched = null;
+  // Giữ khoá này XUYÊN SUỐT tới hết việc xoá + ghi profiles.json bên
+  // dưới -- KHÔNG chỉ lúc đọc/ghi PENDING_RECREATE_FILE như bản trước
+  // (bản trước nhả khoá ra ngay sau đoạn try/finally nhỏ này, RỒI MỚI
+  // đọc/ghi profiles.json ở ngoài khoá). 2 profile được đánh dấu
+  // recreate gần như cùng lúc cũng đang cùng gọi readProfiles() +
+  // writeProfiles() lên CHUNG 1 file profiles.json -- không khoá xuyên
+  // suốt thì request thứ 2 hoàn toàn có thể readProfiles() TRƯỚC KHI
+  // request thứ nhất kịp writeProfiles() xong, rồi ghi đè lại đúng bản
+  // CŨ đó, xoá mất luôn profile mới mà request thứ nhất vừa tạo. Đây
+  // chính là lý do một số profile về sau trong 1 lô lớn bị "mất tên":
+  // server không còn tìm thấy entry tương ứng trong profiles.json nữa
+  // nên phải hiện tạm ID thay cho tên.
   try {
-    const list = fs.existsSync(PENDING_RECREATE_FILE) ? JSON.parse(fs.readFileSync(PENDING_RECREATE_FILE, 'utf-8')) : [];
-    matched = list.find((item) => item.profileId === id);
-    if (matched) {
-      fs.writeFileSync(PENDING_RECREATE_FILE, JSON.stringify(list.filter((item) => item.profileId !== id)));
+    let matched = null;
+    try {
+      const list = fs.existsSync(PENDING_RECREATE_FILE) ? JSON.parse(fs.readFileSync(PENDING_RECREATE_FILE, 'utf-8')) : [];
+      matched = list.find((item) => item.profileId === id);
+      if (matched) {
+        fs.writeFileSync(PENDING_RECREATE_FILE, JSON.stringify(list.filter((item) => item.profileId !== id)));
+      }
+    } catch (err) {
+      queueLog(`[recreate] Lỗi đọc/ghi phiếu hẹn cho "${id}": ${err.message}`);
+      return;
     }
+
+    if (!matched) return; // không có phiếu hẹn nào cho profile này -- không có gì để làm
+
+    const profiles = readProfiles();
+    const oldProfile = profiles.find((p) => p.id === id);
+    if (!oldProfile) {
+      queueLog(`[recreate] "${matched.profileName}" (${id}) đã bị xoá từ trước bằng cách khác -- bỏ qua phiếu hẹn này.`);
+      return;
+    }
+
+    queueLog(`[recreate] "${oldProfile.name}" được đánh dấu là tài khoản mới -- xoá và tạo lại (giữ nguyên proxy/viewport/locale/timezone/engine, fingerprint mới)...`, id, oldProfile.name);
+
+    // Xoá thư mục dữ liệu cũ có thể fail -- đặc biệt trên Windows, nơi
+    // Chrome vừa đóng đôi khi vẫn giữ khoá thêm một nhịp trên vài file
+    // trong đó (lỗi kiểu EBUSY/EPERM). Trước đây lỗi này ném thẳng ra
+    // ngoài, làm consumePendingRecreate() chết giữa chừng -- profile
+    // MỚI không bao giờ được tạo, còn id cũ thì coi như "mồ côi" khỏi
+    // hệ thống (không còn trong profiles.json, không có gì thay thế).
+    // Giờ bắt lại, log cảnh báo, rồi vẫn tiếp tục tạo profile mới bình
+    // thường; thư mục cũ nếu còn sót chỉ là rác trên đĩa, dọn tay sau
+    // cũng được, không ảnh hưởng gì tới profile mới.
+    try {
+      await deleteProfileById(id);
+    } catch (err) {
+      queueLog(`[recreate] Không xoá được thư mục dữ liệu cũ của "${oldProfile.name}" (${id}): ${err.message} -- vẫn tiếp tục tạo profile mới.`, id, oldProfile.name);
+    }
+
+    const remaining = readProfiles().filter((p) => p.id !== id);
+
+    const newProfile = buildProfileObject(
+      {
+        name: oldProfile.name,
+        userAgent: oldProfile.userAgent,
+        viewportWidth: oldProfile.viewportWidth,
+        viewportHeight: oldProfile.viewportHeight,
+        locale: oldProfile.locale,
+        timezoneId: oldProfile.timezoneId,
+        proxyServer: oldProfile.proxyServer,
+        proxyUsername: oldProfile.proxyUsername,
+        proxyPassword: oldProfile.proxyPassword,
+        engineMode: oldProfile.engineMode,
+        executablePath: oldProfile.executablePath,
+        autoFingerprint: true, // luôn sinh fingerprint MỚI -- không copy fingerprint cũ
+      },
+      oldProfile.name
+    );
+    remaining.push(newProfile);
+    writeProfiles(remaining);
+
+    queueLog(
+      `[recreate] Đã tạo lại "${newProfile.name}" (id mới: ${newProfile.id}, fingerprint mới: ${newProfile.fingerprint ? newProfile.fingerprint.label : '(không có)'}).`,
+      newProfile.id,
+      newProfile.name
+    );
+
+    if (matched.excelRow !== undefined && matched.excelRow !== null) {
+      try {
+        const { writeExcelCell } = require('./scripts/writeExcelCell');
+        await writeExcelCell(matched.excelRow, 'C', '');
+        queueLog(`[recreate] Đã xoá giá trị "new_account" ở cột C dòng ${matched.excelRow}.`);
+      } catch (err) {
+        queueLog(`[recreate] [lỗi] Không xoá được cột C dòng ${matched.excelRow}: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    // Lưới an toàn cuối cùng -- KHÔNG được để lỗi ở đây thoát ra ngoài
+    // thành unhandled rejection: hàm này được `await` từ cuối
+    // runQueueScriptThenClose(), nhưng CHÍNH runQueueScriptThenClose lại
+    // được fillQueue() gọi mà KHÔNG await (chạy nền) -- nếu nó throw,
+    // không có ai bắt cả.
+    queueLog(`[recreate] Lỗi không lường trước khi tái tạo "${id}": ${err.message}`);
   } finally {
     fs.unlinkSync(lockFile);
-  }
-
-  if (!matched) return; // không có phiếu hẹn nào cho profile này -- không có gì để làm
-
-  const profiles = readProfiles();
-  const oldProfile = profiles.find((p) => p.id === id);
-  if (!oldProfile) {
-    queueLog(`[recreate] "${matched.profileName}" (${id}) đã bị xoá từ trước bằng cách khác -- bỏ qua phiếu hẹn này.`);
-    return;
-  }
-
-  queueLog(`[recreate] "${oldProfile.name}" được đánh dấu là tài khoản mới -- xoá và tạo lại (giữ nguyên proxy/viewport/locale/timezone/engine, fingerprint mới)...`, id, oldProfile.name);
-
-  await deleteProfileById(id);
-  const remaining = readProfiles().filter((p) => p.id !== id);
-
-  const newProfile = buildProfileObject(
-    {
-      name: oldProfile.name,
-      userAgent: oldProfile.userAgent,
-      viewportWidth: oldProfile.viewportWidth,
-      viewportHeight: oldProfile.viewportHeight,
-      locale: oldProfile.locale,
-      timezoneId: oldProfile.timezoneId,
-      proxyServer: oldProfile.proxyServer,
-      proxyUsername: oldProfile.proxyUsername,
-      proxyPassword: oldProfile.proxyPassword,
-      engineMode: oldProfile.engineMode,
-      executablePath: oldProfile.executablePath,
-      autoFingerprint: true, // luôn sinh fingerprint MỚI -- không copy fingerprint cũ
-    },
-    oldProfile.name
-  );
-  remaining.push(newProfile);
-  writeProfiles(remaining);
-
-  queueLog(
-    `[recreate] Đã tạo lại "${newProfile.name}" (id mới: ${newProfile.id}, fingerprint mới: ${newProfile.fingerprint ? newProfile.fingerprint.label : '(không có)'}).`,
-    newProfile.id,
-    newProfile.name
-  );
-
-  if (matched.excelRow !== undefined && matched.excelRow !== null) {
-    try {
-      const { writeExcelCell } = require('./scripts/writeExcelCell');
-      await writeExcelCell(matched.excelRow, 'C', '');
-      queueLog(`[recreate] Đã xoá giá trị "new_account" ở cột C dòng ${matched.excelRow}.`);
-    } catch (err) {
-      queueLog(`[recreate] [lỗi] Không xoá được cột C dòng ${matched.excelRow}: ${err.message}`);
-    }
   }
 }
 
@@ -1777,25 +2143,33 @@ async function runQueueScriptThenClose(id, name) {
       // profile's context right below regardless of which side of the race
       // won, and whatever the abandoned call eventually does with a closed
       // page/context is simply ignored (its logs/result are never read).
-      const { logs } = queue.scriptTimeoutMs > 0
-        ? await Promise.race([
-            runScriptOnProfile(id, queue.script, input),
+      //
+      // onLog đẩy từng dòng log(...) của script ra queueLog() NGAY LẬP
+      // TỨC, không đợi runScriptOnProfile() resolve/reject -- trước đây
+      // chỉ forEach mảng `logs` SAU KHI đã có kết quả (xem lịch sử ngay
+      // dưới), nghĩa là 1 script treo vô hạn (không resolve/reject bao
+      // giờ) sẽ không bao giờ lộ ra dòng log nào cả, dù bên trong nó có
+      // đang chạy/lỗi liên tục hay không -- không cách nào phân biệt
+      // "đang treo" với "chưa từng chạy tới" chỉ bằng cách nhìn log.
+      const onLog = (line) => queueLog(line, id, name);
+      await (queue.scriptTimeoutMs > 0
+        ? Promise.race([
+            runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName),
             new Promise((_, reject) =>
               setTimeout(() => reject(httpError(408, `Script timed out after ${queue.scriptTimeoutMs}ms`)), queue.scriptTimeoutMs)
             ),
           ])
-        : await runScriptOnProfile(id, queue.script, input);
-      // Surface the script's OWN log(...) calls into the queue log too --
-      // runScriptOnProfile only returns/attaches them, it doesn't push
-      // them anywhere on its own, so without this the Running log view
-      // only ever showed the one pass/fail summary line below, never
-      // what the script actually did step by step.
-      logs.forEach((line) => queueLog(line, id, name));
+        : runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName));
+      // Không cần forEach `logs` ở đây nữa -- onLog ở trên đã đẩy từng
+      // dòng ra real-time trong lúc script chạy rồi, forEach lại sẽ hiện
+      // trùng lặp mỗi dòng 2 lần.
       queueLog(`"${name}" succeeded (attempt ${attempt}/${maxAttempts}), closing`, id, name);
       setQueueResult(id, name, 'success');
       succeeded = true;
     } catch (err) {
-      (err.logs || []).forEach((line) => queueLog(line, id, name)); // same, for however far a failed attempt got
+      // Tương tự -- err.logs không cần forEach lại nữa, đã lên màn hình
+      // real-time qua onLog trong lúc script còn đang chạy (kể cả tới
+      // đúng dòng làm nó throw).
       queueLog(`"${name}" attempt ${attempt}/${maxAttempts} failed: ${err.message}`, id, name);
     }
 
@@ -1839,6 +2213,24 @@ async function runQueueScriptThenClose(id, name) {
   // trên đều đã .close() xong), nên an toàn để đụng vào thư mục dữ
   // liệu của nó nếu có phiếu hẹn từ xlv1_markProfileForRecreate.js.
   await consumePendingRecreate(id);
+
+  // Tự xoá cache SAU KHI đã xử lý xong phiếu hẹn tái tạo ở trên -- nếu
+  // profile này vừa bị xoá-tạo-lại thì thư mục cũ (đúng "id" này) đã
+  // không còn nữa, clearProfileCache() chỉ đơn giản không tìm thấy gì
+  // để xoá (mọi fs.existsSync bên trong nó trả về false), không lỗi gì
+  // cả. Chỉ xoá đúng các thư mục cache (xem CACHE_ONLY_DIR_NAMES) --
+  // cookie/localStorage/IndexedDB/session đăng nhập không đụng tới,
+  // dùng chung logic với nút "Clear cache" thủ công trên dashboard.
+  if (AUTO_CLEAR_CACHE_AFTER_RUN) {
+    try {
+      const freedBytes = clearProfileCache(path.join(PROFILES_ROOT, id));
+      if (freedBytes > 0) {
+        queueLog(`[cache] Đã xoá cache của "${name}" (${(freedBytes / (1024 * 1024)).toFixed(1)} MB).`, id, name);
+      }
+    } catch (err) {
+      queueLog(`[cache] Không xoá được cache của "${name}": ${err.message}`, id, name);
+    }
+  }
 }
 
 // Đếm bao nhiêu profile ĐANG CHẠY (queue.active) dùng CHUNG 1
@@ -1905,9 +2297,23 @@ async function fillQueue(generation = queueGeneration) {
     queue.active.add(id);
     try {
       await launchProfileById(id);
-      // The queue may have been stopped while launchProfileById() was awaiting.
-      // Never let an old fillQueue continuation mutate a newer queue.
-      if (generation !== queueGeneration || !queue.running) break;
+      // The queue may have been stopped (hoặc restart sang generation mới)
+      // NGAY TRONG LÚC launchProfileById() đang await -- cửa sổ của profile
+      // này lúc này ĐÃ MỞ THÀNH CÔNG và đã có trong runningContexts[id] rồi.
+      // Trước đây chỉ `break` ở đây, bỏ mặc cửa sổ đó -- vì runQueueScriptThenClose()
+      // (nơi DUY NHẤT gọi .context.close()) chưa bao giờ được gọi cho id
+      // này, cửa sổ đứng mãi ở trang example.com, không bao giờ tự đóng
+      // (queue.active cũng giữ nguyên id này luôn, dù việc đó vô hại vì
+      // generation/running đã đổi nên fillQueue() sau này bỏ qua nó).
+      // Đóng luôn context vừa mở ở đây -- .close() sẽ tự bắn listener
+      // 'close' đã đăng ký trong launchProfileById() để dọn runningContexts
+      // và queue.active như mọi nhánh đóng khác trong file này.
+      if (generation !== queueGeneration || !queue.running) {
+        if (runningContexts[id]) {
+          await runningContexts[id].context.close().catch(() => {});
+        }
+        break;
+      }
       const profile = profiles.find((p) => p.id === id);
       queueLog(`Launched "${profile ? profile.name : id}"`, id, profile ? profile.name : id);
       setQueueResult(id, profile ? profile.name : id, 'running');
@@ -1929,7 +2335,7 @@ async function fillQueue(generation = queueGeneration) {
 }
 
 app.post('/api/queue/start', async (req, res) => {
-  const { profileIds, maxConcurrent, maxPerProxy, script, retryCount, inputs, scriptTimeoutMs } = req.body;
+  const { profileIds, maxConcurrent, maxPerProxy, script, scriptName, retryCount, inputs, scriptTimeoutMs } = req.body;
   if (!Array.isArray(profileIds) || profileIds.length === 0) {
     return res.status(400).json({ error: 'Pick at least one profile for the queue.' });
   }
@@ -1967,6 +2373,15 @@ app.post('/api/queue/start', async (req, res) => {
     maxPerProxy: Math.max(0, parseInt(maxPerProxy, 10) || 0),
     running: true,
     script: (script || '').trim(),
+    // Tên file THẬT của script đang chạy (VD "main.js", hay bất kỳ tab
+    // nào được chọn trong Run modal) -- không phải để hiển thị, mà để
+    // gắn vào //# sourceURL khi build AsyncFunction bên dưới, cho log()
+    // tự biết log(...) này đang được gọi từ dòng nào trong CHÍNH FILE
+    // NÀY. Không có tên thật thì mặc định "main.js", vì đó vẫn luôn
+    // đúng cho tuyệt đại đa số các lần chạy (chỉ sai khi ai đó chủ động
+    // chọn 1 tab khác làm entry point trong Run modal mà lại không gửi
+    // kèm tên file -- một client cũ/lỗi, không phải hành vi bình thường).
+    scriptName: (scriptName || '').trim() || 'main.js',
     retryCount: Math.max(0, parseInt(retryCount, 10) || 0),
     inputsById,
     log: [],

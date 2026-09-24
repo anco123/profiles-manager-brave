@@ -84,9 +84,9 @@ async function interactX(page, context, log, require, input) {
         throw new Error( '[interactX] Thiếu __excelRow trong input -- dòng này phải được IMPORT từ Excel (không phải gõ tay), vì follow_friends cần biết số dòng để tính dòng lùi.' ); 
       }
       // SỐ BẠN LÙI
-      const Y = 4; 
+      const Y = 9; 
       const usernameColumn = 'D';
-      if (currentExcelRow <= Y) { log( `[interactX] Dòng hiện tại ${currentExcelRow} <= ${Y} -- bỏ qua follow_friends.` ); }
+      if (currentExcelRow <= Y + 1) { log( `[interactX] Dòng hiện tại ${currentExcelRow} <= ${Y} -- bỏ qua follow_friends.` ); }
       else { 
         const targetExcelRow = currentExcelRow - Y; 
         const targetUsername = readExcelCell( targetExcelRow, usernameColumn );
@@ -111,9 +111,9 @@ async function interactX(page, context, log, require, input) {
         throw new Error( '[interactX] Thiếu __excelRow trong input -- dòng này phải được IMPORT từ Excel (không phải gõ tay), vì follow_friends cần biết số dòng để tính dòng lùi.' ); 
       }
       // SỐ BẠN LÙI
-      const Y = 4; 
+      const Y = 10; 
       const usernameColumn = 'D';
-      if (currentExcelRow <= Y) { log( `[interactX] Dòng hiện tại ${currentExcelRow} <= ${Y} -- bỏ qua follow_friends.` ); }
+      if (currentExcelRow <= Y + 1) { log( `[interactX] Dòng hiện tại ${currentExcelRow} <= ${Y} -- bỏ qua follow_friends.` ); }
       else { 
         const targetExcelRow = currentExcelRow - Y; 
         const targetUsername = readExcelCell( targetExcelRow, usernameColumn );
@@ -130,7 +130,7 @@ async function interactX(page, context, log, require, input) {
       console.log("✓ Done A");
   }
 
-  const postUrl = "https://x.com/Avin_lucia/status/2099168506772373594";
+  const postUrl = "https://x.com/auraseaonly/status/2099970529965060381";
 
   async function b(page) {
       console.log("▶ Running B");
@@ -147,7 +147,7 @@ async function interactX(page, context, log, require, input) {
   async function c(page) {
       console.log("▶ Running C");
 
-      const targetUsername = "Avin_lucia";
+      const targetUsername = "auraseaonly";
       await xlv3_follow_friends( page, log, deps, targetUsername);
 
       console.log("✓ Done C");
@@ -189,15 +189,15 @@ async function interactX(page, context, log, require, input) {
   // RUN RANDOM
   // ================================
 
-//   log('Bắt đầu lướt Home...');
-//   await browseHomeVaried(page, log, deps);
-//   log('Đã lướt Home xong');
+  log('Bắt đầu lướt Home...');
+  await browseHomeVaried(page, log, deps);
+  log('Đã lướt Home xong');
 
 
   async function runRandom(page) {
 
       //const functions = [b,c,e,d,f];
-      const functions = [ab];
+      const functions = [ac,ab];
 
       // Random thứ tự
       const randomOrder = shuffle(functions);

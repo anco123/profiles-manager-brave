@@ -17,6 +17,10 @@ const { getDeviceInfo } = require('./xlv1_getDeviceInfo');
 const { getXStatus } = require('./xlv1_getXStatus');
 const { changeProxy } = require('./xlv1_changeProxy');
 
+const { loginPhantom } = require('./xlv3_loginPhantom');
+const { bindAndLoginToTesseract } = require('./xlv3_bindAndLoginToTesseract');
+
+
 // Đổi IP proxy TRƯỚC TIÊN, trước khi làm bất kỳ việc gì khác. `proxyInfo`
 // do CHÍNH server.js truyền vào (tham số thứ 6, xem runScriptOnProfile
 // trong server.js) -- đã tự tra đúng proxy của PROFILE ĐANG CHẠY này,
@@ -32,6 +36,10 @@ const username = row.D;
 if (!username) {
   throw new Error('Thiếu username X (kiểm tra cột D trong Excel)');
 }
+
+const phantomSeedPharse = row.R;
+
+const phantomResult = await loginPhantom(page, context, log, require, phantomSeedPharse);
 
 // ---------- Lấy giá trị row hiện tại + khả năng đọc row khác ----------
 // __excelRow = số dòng Excel THẬT (vd: 5, 6, 7...) của dòng đang chạy --
@@ -121,6 +129,9 @@ log(`User-Agent: ${deviceInfo.userAgent}`);
 // của nhà cung cấp proxy này đang bị x.com để ý, không riêng gì 1 IP.
 
 
+
+
+
 let xStatus;
 try {
   xStatus = await getXStatus(username, proxyInfo, log);
@@ -136,6 +147,7 @@ try {
 
 
 log(`Kiểm tra X trước tiên -- trạng thái: ${xStatus}`);
+
 
 if (xStatus === 'Suspended') {
   log('Tài khoản X đang bị suspend -- dừng lại ngay, không làm gì thêm.');
@@ -165,11 +177,22 @@ if (result.status !== 'Done_X') {
 
 await writeStatusColumnM('Done_X');
 
-const { interactX } = require('./xlv3_Interactx');
-await interactX(page, context, log, require, input);
+// const { interactX } = require('./xlv3_Interactx');
+// await interactX(page, context, log, require, input);
+
+
+
+const bindAndLoginToTesseractRéult = await bindAndLoginToTesseract(page, context, log);
+
+//log(`.status`);
+
+
 
 const { exportSnapshotToExcel } = require('./xlv1_exportSnapshotToExcel');
 await exportSnapshotToExcel();
+
+
+
 
 // const { runLoginTask } = require('./loginTask');
 // await runLoginTask(page, context, log, require, input);

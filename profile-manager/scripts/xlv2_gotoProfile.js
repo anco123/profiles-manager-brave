@@ -164,7 +164,8 @@ function buildSelectors(username) {
   return {
     searchBox: `xpath=//input[@data-testid="SearchBox_Search_Input"]`,
     following: `xpath=//*[@aria-label="Following @${username}"]`,
-    follow: `xpath=//*[@aria-label="Follow @${username}"]`,
+    follow: `xpath=//*[@aria-label="Follow @${username}" or @aria-label="Follow back @${username}"]`,
+    //followBack: `xpath=//*[@aria-label="Follow back @${username}"]`,
     suspended: `xpath=//*[text()='Account suspended']`,
     // FIX: bản gốc dùng "\\u2019" (2 dấu backslash) trong string JS -> ra literal
     // 6 ký tự \u2019 chứ KHÔNG phải ký tự dấu nháy đơn cong (’, U+2019) thật mà

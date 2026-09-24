@@ -1819,6 +1819,36 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     const result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo);
     return { logs, result: result === undefined ? null : result };
   } catch (err) {
+    // Chụp màn hình cho MỌI script khi lỗi -- tập trung ở đây thay vì
+    // để từng script tự lo. Trước đây chỉ vài script LOGIN
+    // (xlv3_loginX.js, loginTask.js, Logintaskon.js, xlv3_loginByCookie.js)
+    // tự định nghĩa debugShot() riêng bên trong nó; toàn bộ nhóm script
+    // TƯƠNG TÁC (xlv3_retweet_targettw, xlv2_openTweetDetail,
+    // xlv3_follow_friends, xlv3_like_tweet, interactX...) chưa bao giờ có
+    // dòng screenshot nào cả. Nên khi lỗi chuyển từ khâu login sang khâu
+    // tương tác, ảnh debug "biến mất" -- không phải tính năng bị hỏng, mà
+    // là nó chưa từng tồn tại ở nhánh script đang chạy.
+    //
+    // PHẢI dùng log(...) chứ KHÔNG phải logs.push(...): catch block của
+    // runQueueScriptThenClose cố tình KHÔNG forEach lại err.logs nữa (xem
+    // comment của nó) vì mọi thứ đã được stream real-time qua onLog --
+    // mà onLog chỉ được gọi từ bên trong log(). Push thẳng vào mảng
+    // `logs` thì dòng đó không bao giờ tới được UI, nên nhìn từ ngoài
+    // trông hệt như "không có ảnh nào được chụp".
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true }); // DATA_DIR có thể nằm ở ổ khác (VD F:\) -- đảm bảo tồn tại trước khi ghi
+      const shotPath = path.join(
+        DATA_DIR,
+        `error-${scriptName || 'script'}-${id}-${Date.now()}.png`.replace(/[/\\:*?"<>|]/g, '_')
+      );
+      await running.page.screenshot({ path: shotPath });
+      log(`[error-screenshot] Đã chụp màn hình lúc lỗi: ${shotPath}`);
+      console.log(`[error-screenshot] ${shotPath}`); // hiện cả ở terminal chạy server -- kiểm chứng được kể cả khi bỏ lỡ log trên UI
+    } catch (shotErr) {
+      log(`[error-screenshot] Không chụp được màn hình lúc lỗi: ${shotErr.message}`);
+      console.warn(`[error-screenshot] failed: ${shotErr.message}`);
+    }
+
     // Cùng 1 kiểu gắn vị trí như log() ở trên, nhưng quét CẢ stack (xem
     // firstUserFrameLocation) thay vì chỉ đúng 1 dòng cố định -- lỗi ném
     // từ 1 API có sẵn (VD fs.readFileSync bị ENOENT, xem vụ notes.txt

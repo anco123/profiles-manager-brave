@@ -213,6 +213,7 @@ async function dismissRandomNotice(page, log, deps) {
     if (hasB) {
         await elementB.scrollIntoViewIfNeeded().catch(() => {});
         await deps.ambientMouseMove(page, deps.moveMouseVisibly);
+       
         await deps.clickVisibly(page, elementB);
         log('[Home] Đã đóng thông báo.');
         await humanPause(page, 1000, 2000);
@@ -228,10 +229,23 @@ async function dismissRandomNotice(page, log, deps) {
     if (hasB) {
         await elementB.scrollIntoViewIfNeeded().catch(() => {});
         await deps.ambientMouseMove(page, deps.moveMouseVisibly);
+    
         await deps.clickVisibly(page, elementB);
         log('[Home] Đã đóng thông báo.');
         await humanPause(page, 1000, 2000);
     }
+  }
+
+  elementB = page.locator('xpath=//*[text()="Got it"]/ancestor::button[1]');
+
+  hasB = await elementB.isVisible({ timeout: 1000 }).catch(() => false);
+  if (hasB) {
+      await elementB.scrollIntoViewIfNeeded().catch(() => {});
+      await deps.ambientMouseMove(page, deps.moveMouseVisibly);
+
+      await deps.clickVisibly(page, elementB);
+      log('[Keep less relevant ads] Đã đóng thông báo.');
+      await humanPause(page, 1000, 2000);
   }
 
   elementB = page.locator('xpath=//*[text()="Keep less relevant ads"]/ancestor::button[1]');
@@ -240,6 +254,7 @@ async function dismissRandomNotice(page, log, deps) {
   if (hasB) {
       await elementB.scrollIntoViewIfNeeded().catch(() => {});
       await deps.ambientMouseMove(page, deps.moveMouseVisibly);
+
       await deps.clickVisibly(page, elementB);
       log('[Keep less relevant ads] Đã đóng thông báo.');
       await humanPause(page, 1000, 2000);
@@ -255,10 +270,22 @@ async function dismissRandomNotice(page, log, deps) {
     if (hasB) {
         await elementB.scrollIntoViewIfNeeded().catch(() => {});
         await deps.ambientMouseMove(page, deps.moveMouseVisibly);
+
         await deps.clickVisibly(page, elementB);
         log('[Home] Đã đóng thông báo.');
         await humanPause(page, 1000, 2000);
     }
+  }
+
+  elementB = page.locator('xpath=//*[text()="Yes, that is my number"]/ancestor::button[1]');
+
+  hasB = await elementB.isVisible({ timeout: 1000 }).catch(() => false);
+  if (hasB) {
+      await elementB.scrollIntoViewIfNeeded().catch(() => {});
+      await deps.ambientMouseMove(page, deps.moveMouseVisibly);
+      await deps.clickVisibly(page, elementB);
+      log('[Keep less relevant ads] Đã đóng thông báo.');
+      await humanPause(page, 1000, 2000);
   }
 
 }
@@ -530,7 +557,7 @@ async function firstVisibleLocator(page, locator) {
 // phiên (trừ lúc đang trong 1 "chuyến đi"). Trả về true nếu vừa dùng 1
 // lượt like (để vòng ngoài trừ vào quỹ like còn lại).
 // -------------------------------------------------------------------
-async function readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, canLike, mood) {
+async function readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, canLike, mood,deps) {
   // Thỉnh thoảng KHÔNG cuộn tiếp ngay -- chỉ dừng lại, nhích chuột nhẹ
   // như đang lơ đãng hoặc đọc lại dòng cũ.
   if (Math.random() < 0.08) {
@@ -588,6 +615,7 @@ async function readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, canL
     if (currentTweet && canLike && Math.random() < mood.likeChance) {
       const likeBtn = currentTweet.locator('[data-testid="like"]').first();
       if (await likeBtn.count().catch(() => 0) > 0) {
+        await dismissRandomNotice(page, log, deps);
         await clickVisibly(page, likeBtn).catch(() => {});
         log('[browse] Đã like bài đang đọc.');
         likedThisBeat = true;
@@ -597,6 +625,7 @@ async function readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, canL
     if (currentTweet && Math.random() < 0.18 * openFactor) {
       const photo = currentTweet.locator('[data-testid="tweetPhoto"]').first();
       if (await photo.count().catch(() => 0) > 0) {
+        await dismissRandomNotice(page, log, deps);
         await clickVisibly(page, photo).catch(() => {});
         log('[browse] Xem ảnh/video trong bài đang đọc...');
         await page.waitForTimeout(randomBetween(2000, 5500));
@@ -608,6 +637,7 @@ async function readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, canL
     if (currentTweet && Math.random() < 0.13 * openFactor) {
       const article = currentTweet.locator('[alt="Article cover image"]').first();
       if (await article.count().catch(() => 0) > 0) {
+        await dismissRandomNotice(page, log, deps);
         await clickVisibly(page, article).catch(() => {});
         log('[browse] Mở xem 1 bài báo được đăng lại...');
         await page.waitForTimeout(randomBetween(2000, 6000));
@@ -649,62 +679,135 @@ async function readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, canL
   }
 
   if (Math.random() < 0.1 * openFactor) {
-    const tweets = page.locator('[data-testid="tweet"]');
-    const count = await tweets.count().catch(() => 0);
-    if (count > 0) {
-      const tweet = tweets.nth(Math.floor(Math.random() * count));
-      const tweetText = tweet.locator('[data-testid="tweetText"]').first();
-      const hasText = (await tweetText.count().catch(() => 0)) > 0;
+  const tweets = page.locator('[data-testid="tweet"]');
+  const count = await tweets.count().catch(() => 0);
 
-      log('[browse] Mở xem 1 bài, đang đọc kỹ...');
-      let opened = false;
-      try {
-        if (hasText) {
-          // pickSafeClickPoint (dùng chung với newFile_02.js) tự né
-          // các @mention/#hashtag/link lồng bên trong text -- KHÔNG
-          // dùng openTweetDetail() ở đây vì hàm đó cần biết trước href
-          // bài đích cụ thể để xác nhận, còn đây là mở bài NGẪU NHIÊN
-          // (không biết trước là bài nào) nên tự lo phần click + chờ
-          // riêng, không qua hàm đó.
-          const safePoint = await pickSafeClickPoint(tweetText);
-          if (safePoint) {
-            await ambientMouseMove(page, moveMouseVisibly);
-            await clickVisibly(page, safePoint);
-          } else {
-            // Không tìm được điểm an toàn (hiếm -- toàn bộ text là
-            // link) -- bấm nguyên khối tweet thay thế.
-            await clickVisibly(page, tweet);
-          }
+  if (count > 0) {
+    const tweet = tweets.nth(Math.floor(Math.random() * count));
+    const tweetText = tweet.locator('[data-testid="tweetText"]').first();
+    const hasText = (await tweetText.count().catch(() => 0)) > 0;
+
+    const beforeUrl = page.url();
+    let opened = false;
+
+    log('[browse] Mở xem 1 bài, đang chờ xác nhận...');
+
+    try {
+      let clicked = false;
+
+      if (hasText) {
+        // Tìm điểm click an toàn, tránh mention, hashtag và link.
+        const safePoint = await pickSafeClickPoint(tweetText);
+
+        if (safePoint) {
+          await ambientMouseMove(page, moveMouseVisibly);
+          await dismissRandomNotice(page, log, deps);
+
+          clicked = await clickVisibly(page, safePoint);
         } else {
-          // Hiếm -- bài không có tweetText (VD chỉ có ảnh/video). Bấm
-          // nguyên khối tweet như trước, không có link lồng bên trong
-          // text để mà né.
-          await clickVisibly(page, tweet);
+          await dismissRandomNotice(page, log, deps);
+
+          clicked = await clickVisibly(page, tweet);
         }
-        opened = true;
-      } catch (err) {
-        log(`[browse] Mở bài đọc kỹ thất bại, bỏ qua: ${err.message}`);
+      } else {
+        // Tweet chỉ có ảnh/video hoặc không có tweetText.
+        await dismissRandomNotice(page, log, deps);
+
+        clicked = await clickVisibly(page, tweet);
       }
 
-      // CHỈ goBack() nếu thật sự đã mở được -- goBack() khi chưa từng
-      // điều hướng đi đâu sẽ lùi NHẦM tới trang trước đó trong lịch sử
-      // (có thể ra khỏi hẳn X), không phải quay lại Home như ý muốn.
-      if (opened) {
-        await page.waitForTimeout(randomBetween(2000, 6000));
-        await page.goBack({ timeout: 15000 }).catch(() => {});
-        // Xem comment ở nhánh "mở bài báo" phía trên -- cùng 1 rủi ro,
-        // đã xác nhận xảy ra thật qua log thực tế (tab bị đóng hẳn sau
-        // goBack() ở đúng nhánh này).
-        if (page.isClosed()) {
-          throw new Error('Trang đã bị đóng ngay sau goBack() (mở chi tiết tweet) -- dừng phiên lướt Home tại đây.');
-        }
-        await page.waitForTimeout(randomBetween(1200, 2600));
-        await ensureBackOnHome(page, log, moveMouseVisibly, clickVisibly);
+      if (!clicked) {
+        throw new Error('clickVisibly trả về false');
       }
+
+      // Điều kiện 1: URL phải chuyển sang trang chi tiết post.
+      const reachedPostUrl = await page
+        .waitForURL(
+          url =>
+            url.href !== beforeUrl &&
+            /\/status\/\d+(?:\/|$)/.test(url.pathname),
+          { timeout: 10000 }
+        )
+        .then(() => true)
+        .catch(() => false);
+
+      if (!reachedPostUrl) {
+        throw new Error(
+          'Đã click nhưng URL không chuyển sang trang /status/'
+        );
+      }
+
+      // Điều kiện 2: ô trả lời phải xuất hiện.
+      const tweetTextarea = page
+        .locator('xpath=//*[@data-testid="tweetTextarea_0"]')
+        .first();
+
+      const textareaAppeared = await tweetTextarea
+        .waitFor({
+          state: 'visible',
+          timeout: 10000,
+        })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!textareaAppeared) {
+        throw new Error(
+          'Đã vào URL post nhưng tweetTextarea_0 không xuất hiện'
+        );
+      }
+
+      opened = true;
+      log(
+        '[browse] Đã mở post thành công: tìm thấy tweetTextarea_0.'
+      );
+    } catch (err) {
+      log(`[browse] Mở post thất bại: ${err.message}`);
+    }
+
+    if (page.isClosed()) {
+      throw new Error(
+        'Trang đã bị đóng trong lúc mở chi tiết tweet.'
+      );
+    }
+
+    if (opened) {
+      // Chỉ đọc khi đã xác nhận thật sự vào post.
+      await page.waitForTimeout(randomBetween(2000, 6000));
+
+      // Quay lại bằng tab Home, không dùng page.goBack().
+      await backToHome(
+        page,
+        log,
+        moveMouseVisibly,
+        clickVisibly,
+        deps
+      ).catch(err => {
+        log(`[browse] Không quay lại Home được: ${err.message}`);
+      });
+    } else {
+      // Click không mở được post: không gọi goBack().
+      log(
+        '[browse] Post không tải được, bấm Home để hồi phục...'
+      );
+
+      await page.keyboard.press('Escape').catch(() => {});
+
+      await backToHome(
+        page,
+        log,
+        moveMouseVisibly,
+        clickVisibly,
+        deps
+      ).catch(err => {
+        log(`[browse] Hồi phục về Home thất bại: ${err.message}`);
+      });
+
+      await page.waitForTimeout(randomBetween(1000, 2200));
     }
   }
+}
 
-  return likedThisBeat;
+return likedThisBeat;
 }
 
 // Quay lại Home sau 1 chuyến đi -- LUÔN bấm vào tab Home trên thanh
@@ -715,7 +818,7 @@ async function readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, canL
 // lỡ tay bấm trúng thứ không mong muốn, và nhìn giống hệt bấm F5 liên
 // tục -- đã bỏ hoàn toàn theo yêu cầu, không còn goto() nào trong hàm
 // này nữa.
-async function backToHome(page, log, moveMouseVisibly, clickVisibly) {
+async function backToHome(page, log, moveMouseVisibly, clickVisibly,deps) {
   // Lớp bảo vệ THỨ 2 (bên cạnh check ngay sau goBack() ở
   // readAndScrollBeat) -- phòng trường hợp việc đóng tab xảy ra KHÔNG
   // đồng bộ (Chrome xử lý xong việc đóng chậm hơn vài chục ms so với
@@ -733,7 +836,7 @@ async function backToHome(page, log, moveMouseVisibly, clickVisibly) {
     log('[browse] Không thấy tab Home trên toolbar để bấm -- bỏ qua, không tải lại trang.');
     return;
   }
-
+  await dismissRandomNotice(page, log, deps);
   await clickVisibly(page, homeTab.first()).catch(() => {});
   await ambientMouseMove(page, moveMouseVisibly);
   await page.locator('xpath=//*[text()="For you"]').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
@@ -763,11 +866,12 @@ async function ensureBackOnHome(page, log, moveMouseVisibly, clickVisibly) {
 // Thỉnh thoảng ghé qua tab "Following" trên chính Home rồi quay lại
 // "For you" -- thêm 1 trục biến thể mới, trước đây phiên nào cũng chỉ
 // ở đúng 1 tab "For you" suốt.
-async function visitFollowingTab(page, log, moveMouseVisibly, clickVisibly) {
+async function visitFollowingTab(page, log, moveMouseVisibly, clickVisibly,deps) {
   const followingTab = page.locator('xpath=//*[text()="Following"]').first();
   const visible = await followingTab.isVisible({ timeout: 1000 }).catch(() => false);
   if (!visible) return;
 
+  await dismissRandomNotice(page, log, deps);
   await clickVisibly(page, followingTab).catch(() => {});
   log('[browse] Ghé xem tab Following một lát...');
   await page.waitForTimeout(randomBetween(1500, 3500));
@@ -782,6 +886,7 @@ async function visitFollowingTab(page, log, moveMouseVisibly, clickVisibly) {
   const forYouTab = page.locator('xpath=//*[text()="For you"]').first();
   const forYouVisible = await forYouTab.isVisible({ timeout: 1000 }).catch(() => false);
   if (forYouVisible) {
+    await dismissRandomNotice(page, log, deps);
     await clickVisibly(page, forYouTab).catch(() => {});
     await forYouTab.waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
   }
@@ -807,7 +912,7 @@ async function locateNotificationItems(page) {
   return null;
 }
 
-async function checkNotifications(page, log, moveMouseVisibly, clickVisibly, mood) {
+async function checkNotifications(page, log, moveMouseVisibly, clickVisibly, mood,deps) {
   const tab = page.locator('[data-testid="AppTabBar_Notifications_Link"]');
   const tabVisible = await tab.first().isVisible({ timeout: 1000 }).catch(() => false);
   if (!tabVisible) return;
@@ -817,6 +922,7 @@ async function checkNotifications(page, log, moveMouseVisibly, clickVisibly, moo
   // -- trước đây nếu click nút back lỗi thì backToHome() bị bỏ qua
   // luôn, để script kẹt lại ở màn chi tiết 1 thông báo.
   try {
+    await dismissRandomNotice(page, log, deps);
     await clickVisibly(page, tab.first());
     log('[browse] Ghé xem Thông báo...');
     const scale = moodDwellScale(mood);
@@ -834,6 +940,7 @@ async function checkNotifications(page, log, moveMouseVisibly, clickVisibly, moo
       const count = items ? await items.count().catch(() => 0) : 0;
       if (count > 0) {
         const item = items.nth(Math.floor(Math.random() * count));
+        await dismissRandomNotice(page, log, deps);
         await clickVisibly(page, item).catch(() => {});
         log('[browse] Xem 1 thông báo...');
         await page.waitForTimeout(randomBetween(1500, 3500) * scale);
@@ -846,12 +953,13 @@ async function checkNotifications(page, log, moveMouseVisibly, clickVisibly, moo
   }
 }
 
-async function checkExplore(page, log, moveMouseVisibly, clickVisibly, mood) {
+async function checkExplore(page, log, moveMouseVisibly, clickVisibly, mood,deps) {
   const tab = page.locator('[data-testid="AppTabBar_Explore_Link"]');
   const tabVisible = await tab.first().isVisible({ timeout: 1000 }).catch(() => false);
   if (!tabVisible) return;
 
   try {
+    await dismissRandomNotice(page, log, deps);
     await clickVisibly(page, tab.first());
     log('[browse] Ghé xem Explore/Trending...');
     const scale = moodDwellScale(mood);
@@ -869,12 +977,13 @@ async function checkExplore(page, log, moveMouseVisibly, clickVisibly, mood) {
   }
 }
 
-async function checkMessages(page, log, moveMouseVisibly, clickVisibly, mood) {
+async function checkMessages(page, log, moveMouseVisibly, clickVisibly, mood,deps) {
   const tab = page.locator('[data-testid="AppTabBar_DirectMessage_Link"]');
   const tabVisible = await tab.first().isVisible({ timeout: 1000 }).catch(() => false);
   if (!tabVisible) return;
 
   try {
+    await dismissRandomNotice(page, log, deps);
     await clickVisibly(page, tab.first());
     log('[browse] Ghé check tin nhắn...');
     await page.waitForTimeout(humanBetween(1500, 4000) * moodDwellScale(mood));
@@ -906,12 +1015,13 @@ async function checkProfile(page, log, moveMouseVisibly, clickVisibly, mood) {
   }
 }
 
-async function checkBookmarks(page, log, moveMouseVisibly, clickVisibly, mood) {
+async function checkBookmarks(page, log, moveMouseVisibly, clickVisibly, mood,deps) {
   const link = page.locator('[aria-label="History"]');
   const linkVisible = await link.first().isVisible({ timeout: 1000 }).catch(() => false);
   if (!linkVisible) return;
 
   try {
+    await dismissRandomNotice(page, log, deps);
     await clickVisibly(page, link.first());
     log('[browse] Ghé xem Bookmarks...');
     const scale = moodDwellScale(mood);
@@ -945,10 +1055,11 @@ const EXCURSION_HANDLERS = {
 // popup", đẩy trang vào trạng thái lạ rồi kéo theo hàng loạt lượt
 // backToHome() không cần thiết (nhìn giống F5 liên tục) -- xác nhận từ
 // quan sát thực tế lúc chạy, không phải suy đoán.
-async function dismissCloseButtonIfPresent(page, log, clickVisibly) {
+async function dismissCloseButtonIfPresent(page, log, clickVisibly,deps) {
   const closeBtn = page.locator('[data-testid="app-bar-close"]');
   const present = await closeBtn.first().isVisible({ timeout: 500 }).catch(() => false);
   if (!present) return false;
+  await dismissRandomNotice(page, log, deps);
   await clickVisibly(page, closeBtn.first()).catch(() => closeBtn.first().click({ timeout: 3000 }).catch(() => {}));
   log('[browse] Đóng 1 popup/overlay bất ngờ hiện ra (app-bar-close)');
   return true;
@@ -967,7 +1078,7 @@ async function dismissCloseButtonIfPresent(page, log, clickVisibly) {
 // DỪNG HẲN phiên ngay nếu phát hiện đã lùi ra khỏi x.com -- an toàn hơn
 // nhiều so với cố lùi thêm (dễ lùi xa hơn nữa) hoặc cứ chạy tiếp mù
 // trên 1 trang hoàn toàn không liên quan.
-async function recoverIfOnLoginPage(page, log, lastAction, moveMouseVisibly, clickVisibly, recoveryState) {
+async function recoverIfOnLoginPage(page, log, lastAction, moveMouseVisibly, clickVisibly, recoveryState,deps) {
   const url = page.url();
   if (!url.includes('/i/flow/login') && !url.includes('/login')) return false;
 
@@ -991,6 +1102,7 @@ async function recoverIfOnLoginPage(page, log, lastAction, moveMouseVisibly, cli
   const homeTab = page.locator('[data-testid="AppTabBar_Home_Link"]');
   const homeTabVisible = await homeTab.first().isVisible({ timeout: 3000 }).catch(() => false);
   if (homeTabVisible) {
+    await dismissRandomNotice(page, log, deps);
     await clickVisibly(page, homeTab.first()).catch(() => {});
     await ambientMouseMove(page, moveMouseVisibly);
   } else {
@@ -1139,6 +1251,7 @@ async function browseHomeVaried(page, log, deps = {}) {
     // Hành vi nền: đọc + cuộn
     lastAction = 'readAndScroll';
     try {
+      await dismissRandomNotice(page, log, deps);
       const liked = await readAndScrollBeat(page, log, moveMouseVisibly, clickVisibly, likesLeft > 0, mood);
       if (liked) likesLeft--;
       consecutiveErrors = 0;

@@ -58,7 +58,7 @@ function getProxyResetUrl(proxyServer, proxyUsername, proxyPassword) {
 // Mở THẬT link reset bằng 1 tab riêng (không phải page chính) -- xem
 // lý do ở đầu file. Chỉ log lại phản hồi (nếu đọc được) để dễ theo dõi,
 // KHÔNG quyết định gì dựa vào đó -- việc IP mới đã dùng được hay chưa
-// giờ xác nhận hoàn toàn bằng bước checkNetworkOnce() (vào example.org)
+// giờ xác nhận hoàn toàn bằng bước checkNetworkOnce() (tải thử 1 trang)
 // ở dưới, đúng như yêu cầu.
 async function openResetLink(context, resetUrl, proxyServer, log) {
   const resetTab = await context.newPage();
@@ -89,35 +89,66 @@ async function openResetLink(context, resetUrl, proxyServer, log) {
   }
 }
 
-// Xác nhận mạng đã sống qua context (đúng proxy vừa đổi) bằng cách vào
-// https://example.org/ và đợi PHẦN TỬ THỨ 2 khớp text "Example Domain"
-// (//*[text()="Example Domain"])[2] -- trang này có 2 chỗ trùng chữ đó
-// (<title> và <h1>), lấy đúng phần tử thứ 2 (<h1>, hiển thị thật trên
-// trang) là bằng chứng trang đã tải xong thật sự qua proxy, không phải
-// chỉ HTTP trả về suông. Toàn bộ bước này (vào trang + đợi phần tử) có
-// ngân sách 15s -- không thấy trong 15s coi như CHƯA có mạng, trả về
-// false, không throw (changeProxy() bên dưới quyết định lặp lại).
-async function checkNetworkOnce(context, log, timeoutMs = 15000) {
+// Xác nhận mạng đã sống qua context (đúng proxy vừa đổi) -- và QUAN
+// TRỌNG HƠN, xác nhận nó THỰC SỰ TỐT chứ không chỉ "có phản hồi".
+//
+// Bản đầu tiên chỉ vào https://example.org/ (vài trăm byte) -- quá nhẹ,
+// mạng yếu vẫn tải xong dễ dàng, không phản ánh đúng "có tốt hay
+// không". Bản thứ hai đổi sang tải 300KB từ endpoint đo tốc độ của
+// Cloudflare rồi tính KB/s -- gặp đúng vấn đề NGƯỢC LẠI: nhiều proxy/
+// ISP xử lý traffic tới domain "speedtest" khác hẳn traffic bình
+// thường (route riêng, giới hạn riêng), nên endpoint đó có thể báo
+// "kém" dù duyệt web bình thường (đã tự tay thử tinhte.vn) vẫn mượt.
+//
+// Bản này: tải THẬT 1 trang web bình thường, phổ biến, không có bot-
+// detection/CAPTCHA để lo (Wikipedia -- CDN toàn cầu cực ổn định,
+// không bị chặn ở hầu hết mọi nơi, kích thước 1 trang vừa phải), rồi
+// chỉ đánh giá bằng ĐÚNG tiêu chí đơn giản, thực tế: "trang có tải
+// XONG (đủ nội dung thật, không phải trang chặn/rỗng) TRONG thời gian
+// cho phép hay không" -- không tính KB/s, không phụ thuộc 1 công thức
+// nào cả, đúng cách 1 người bình thường tự đánh giá "mạng có mượt
+// không" khi thử load 1 trang.
+async function checkNetworkOnce(context, log, timeoutMs = 20000, opts = {}) {
+  const {
+    url = 'https://www.wikipedia.org/',
+    minContentLength = 10_000, // trang thật của Wikipedia luôn > mức này -- lọc trường hợp 1 trang chặn/rỗng trả về "thành công" giả
+  } = opts;
+
   const checkTab = await context.newPage();
   try {
-    await checkTab.goto('https://example.org/', { timeout: timeoutMs, waitUntil: 'domcontentloaded' });
-    await checkTab.locator('xpath=(//*[text()="Example Domain"])[1]').waitFor({ state: 'visible', timeout: timeoutMs });
+    const startedAt = Date.now();
+    // waitUntil: 'load' -- đợi tải xong CẢ ảnh/CSS, không chỉ HTML thô
+    // (domcontentloaded), để phản ánh đúng trải nghiệm "trang mượt hay
+    // không" như khi tự tay mở trang xem.
+    const response = await checkTab.goto(url, { timeout: timeoutMs, waitUntil: 'load' });
+    const elapsedMs = Date.now() - startedAt;
+
+    if (!response || !response.ok()) {
+      if (log) log(`[changeProxy] Kiểm tra mạng: HTTP ${response ? response.status() : 'không có phản hồi'} -- coi như chưa có mạng.`);
+      return false;
+    }
+
+    const contentLength = (await checkTab.content()).length;
+    if (contentLength < minContentLength) {
+      if (log) log(`[changeProxy] Kiểm tra mạng: trang tải xong trong ${elapsedMs}ms nhưng nội dung chỉ ${contentLength} ký tự (dưới ngưỡng ${minContentLength}) -- nghi ngờ đây là trang chặn của proxy/captive portal, không phải trang thật.`);
+      return false;
+    }
+
+    if (log) log(`[changeProxy] Kiểm tra mạng: tải xong trang thử (${contentLength} ký tự) trong ${elapsedMs}ms -- kết nối tốt.`);
     return true;
   } catch (err) {
-    // Trang CÓ TẢI (không throw ở bước goto) nhưng không thấy phần tử
-    // mong đợi thường KHÔNG phải "chưa có mạng" mà là đang thấy 1 trang
-    // khác hẳn example.org thật (trang chặn của proxy, captive portal,
-    // IANA rate-limit IP đó...) -- log lại URL/tiêu đề thật của trang
-    // lúc fail để biết chính xác đang thấy gì, thay vì đoán mò.
+    // Không tải xong trong timeoutMs (chậm/đứt giữa chừng), DNS fail,
+    // proxy từ chối kết nối... -- log lại URL/tiêu đề trang hiện tại
+    // nếu tab còn sống, để biết đang thấy gì thay vì đoán mò.
     let diag = '';
     try {
-      const url = checkTab.url();
+      const currentUrl = checkTab.url();
       const title = await checkTab.title();
-      diag = ` [trang đang thấy: url="${url}" title="${title}"]`;
+      diag = ` [trang đang thấy: url="${currentUrl}" title="${title}"]`;
     } catch (_) {
       // tab đã hỏng hẳn -- bỏ qua, không có gì thêm để log
     }
-    if (log) log(`[changeProxy] Kiểm tra mạng qua example.org: không thấy nội dung trang trong ${timeoutMs}ms (${err.message}).${diag}`);
+    if (log) log(`[changeProxy] Kiểm tra mạng: không tải xong trong ${timeoutMs}ms (${err.message}) -- coi là không ổn định.${diag}`);
     return false;
   } finally {
     await checkTab.close().catch(() => {});
@@ -128,13 +159,13 @@ async function checkNetworkOnce(context, log, timeoutMs = 15000) {
 // proxyInfo: { proxyServer, proxyUsername, proxyPassword } -- do
 // server.js tự truyền vào script (tham số thứ 6, xem runScriptOnProfile
 // trong server.js), không cần tự dựng object này.
-// opts.checkTimeoutMs: ngân sách cho bước vào example.org + đợi phần tử
-// (mặc định 15s, đúng yêu cầu).
-// opts.retryDelayMs: đây là proxy XOAY, không thấy mạng trong
-// checkTimeoutMs thì đợi thêm 45s (mặc định) rồi TRUY CẬP LẠI link
-// reset (chứ không chỉ check suông), rồi kiểm tra lại. Lặp vô hạn --
-// không có số lần thử tối đa, vì đây là proxy xoay nên kiểu gì cũng sẽ
-// có IP mới dùng được, chỉ là sớm hay muộn.
+// opts.checkTimeoutMs: ngân sách cho bước tải dữ liệu kiểm tra mạng
+// (mặc định 20s -- xem checkNetworkOnce() ở trên).
+// opts.retryDelayMs: đây là proxy XOAY, không có mạng TỐT trong
+// checkTimeoutMs thì đợi thêm 40s (mặc định, theo đúng yêu cầu) rồi
+// TRUY CẬP LẠI link reset (chứ không chỉ check suông), rồi kiểm tra
+// lại. Lặp vô hạn -- không có số lần thử tối đa, vì đây là proxy xoay
+// nên kiểu gì cũng sẽ có IP mới dùng được, chỉ là sớm hay muộn.
 async function changeProxy(context, proxyInfo, log, opts = {}) {
   const { proxyServer, proxyUsername, proxyPassword } = proxyInfo || {};
 
@@ -152,24 +183,40 @@ async function changeProxy(context, proxyInfo, log, opts = {}) {
   }
 
   const {
-    checkTimeoutMs = 15000, // ngân sách vào example.org + đợi phần tử "Example Domain" thứ 2
-    retryDelayMs = 45000, // không thấy mạng trong checkTimeoutMs thì đợi thêm ngần này rồi bắn lại link reset
+    checkTimeoutMs = 20000, // ngân sách cho mỗi lần checkNetworkOnce() -- xem giải thích ở hàm đó
+    retryDelayMs = 40000, // không có mạng TỐT trong checkTimeoutMs thì đợi thêm ngần này rồi bắn lại link reset
   } = opts;
 
   let attempt = 0;
   while (true) {
     attempt++;
     if (log) log(`[changeProxy] Lần ${attempt}: mở link reset...`);
-    await openResetLink(context, resetUrl, proxyServer, log);
-
-    if (log) log('[changeProxy] Kiểm tra mạng qua example.org...');
-    const ok = await checkNetworkOnce(context, log, checkTimeoutMs);
-    if (ok) {
-      if (log) log(`[changeProxy] Lần ${attempt}: đã có mạng -- tiếp tục các bước sau.`);
-      return; // break -- IP mới đã dùng được, đi tiếp các bước sau trong main.js
+    try {
+      await openResetLink(context, resetUrl, proxyServer, log);
+    } catch (err) {
+      // BUG ĐÃ SỬA: trước đây 1 lỗi ở CHÍNH bước mở link reset (proxy
+      // tunnel chết, timeout, DNS fail -- VD thực tế:
+      // ERR_TUNNEL_CONNECTION_FAILED) bay thẳng ra ngoài while loop này,
+      // crash luôn cả profile ngay sau ĐÚNG 1 lần thử -- dù đây là
+      // proxy XOAY và đây chính xác là kiểu lỗi tạm thời mà cả vòng
+      // lặp này sinh ra để chịu đựng (checkNetworkOnce() trả false đã
+      // được xử lý đúng từ đầu, chỉ riêng lỗi ở BƯỚC TRƯỚC ĐÓ thì
+      // không). Coi như 1 lượt thất bại bình thường -- chờ rồi thử lại,
+      // y hệt khi checkNetworkOnce() trả về false. Không log lại chi
+      // tiết lỗi ở đây vì openResetLink() đã tự log rồi (xem hàm đó).
+      if (log) log(`[changeProxy] Lần ${attempt}: mở link reset thất bại -- đợi ${retryDelayMs}ms rồi thử lại.`);
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+      continue;
     }
 
-    if (log) log(`[changeProxy] Lần ${attempt}: chưa có mạng sau ${checkTimeoutMs}ms -- đợi ${retryDelayMs}ms rồi reset lại IP...`);
+    if (log) log('[changeProxy] Kiểm tra chất lượng mạng...');
+    const ok = await checkNetworkOnce(context, log, checkTimeoutMs);
+    if (ok) {
+      if (log) log(`[changeProxy] Lần ${attempt}: kết nối tốt -- tiếp tục các bước sau.`);
+      return; // break -- IP mới đã dùng được VÀ đủ tốt, đi tiếp các bước sau trong main.js
+    }
+
+    if (log) log(`[changeProxy] Lần ${attempt}: mạng chưa đạt yêu cầu -- đợi ${retryDelayMs}ms rồi reset lại IP...`);
     await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
   }
 }
