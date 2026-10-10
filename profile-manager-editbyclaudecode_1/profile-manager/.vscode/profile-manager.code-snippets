@@ -25,6 +25,11 @@
     "body": ["await page.waitForTimeout(${1:1000} + Math.floor(Math.random() * ${2:2000}));$0"]
   },
 
+  "Chung: chờ + bấm theo chữ (nhiều ngôn ngữ)": {
+    "scope": "javascript", "prefix": "pm-clickText",
+    "body": ["const ${1:el} = ${2:page}.locator('xpath=//*[text()=\"${3:English text}\" or text()=\"${4:Chữ tiếng Việt}\"]').first();", "await $1.waitFor({ state: 'visible', timeout: 15000 }); await $1.click();$0"]
+  },
+
   // ---------- xlv1 ----------
   "xlv1: đổi IP proxy": {
     "scope": "javascript", "prefix": "pm-changeProxy",
@@ -82,6 +87,48 @@
     "body": ["const { xlv2_attachFile } = require('./xlv2_attachFile');", "const attached = await xlv2_attachFile(page, log, ${1:'input_image_element'}, ${2:shotFile}, { previewElement: ${3:null} });$0"]
   },
 
+  // ---------- phantom (tách từ xlv3_loginPhantom.js -- dùng chung biến wp = tab làm việc của Phantom) ----------
+  "phantom: hằng số (ID, mật khẩu, URL)": {
+    "scope": "javascript", "prefix": "pm-phConst",
+    "body": ["const PHANTOM_ID = 'bfnaelmomeimhlpmgjnjophhpkkoljpa'; const PHANTOM_PASSWORD = '${1:11111111}';", "const POPUP_URL = `chrome-extension://\\${PHANTOM_ID}/popup.html`; const ONBOARDING_URL = `chrome-extension://\\${PHANTOM_ID}/onboarding.html`;$0"]
+  },
+  "phantom: mở tab riêng + popup.html": {
+    "scope": "javascript", "prefix": "pm-phOpenPopup",
+    "body": ["const wp = await context.newPage(); // tab làm việc riêng cho Phantom, tab gốc (page) giữ nguyên", "await wp.goto(${1:POPUP_URL}, { waitUntil: 'domcontentloaded', timeout: 15000 }).catch((e) => log(`[phantom] mở popup lỗi: \\${e.message}`));", "await wp.waitForTimeout(${2:5000}); await wp.bringToFront().catch(() => {});$0"]
+  },
+  "phantom: đóng tab thừa (chỉ giữ tab chỉ định)": {
+    "scope": "javascript", "prefix": "pm-phCloseOthers",
+    "body": ["for (const p of context.pages()) if (!p.isClosed() && ![${1:page, wp}].includes(p)) await p.close({ runBeforeUnload: false }).catch(() => {});$0"]
+  },
+  "phantom: kiểm tra trạng thái ví (khoá / đã vào / cần import)": {
+    "scope": "javascript", "prefix": "pm-phState",
+    "body": ["// Chờ 1 trong 3 màn: chưa có ví / màn khoá / đã vào ví (Swap)", "await wp.locator('xpath=//*[text()=\"I already have a wallet\" or text()=\"Tôi đã có Ví rồi\" or text()=\"I Already Have a Wallet\" or @data-testid=\"unlock-form-password-input\" or text()=\"Swap\"]').first().waitFor({ state: 'visible', timeout: 15000 });", "const phLocked = await wp.locator('xpath=//*[@data-testid=\"unlock-form-password-input\"]').first().isVisible().catch(() => false);", "const phReady = await wp.locator('xpath=//*[text()=\"Swap\"]').first().isVisible().catch(() => false);", "const phNeedImport = !phLocked && !phReady;$0"]
+  },
+  "phantom: mở khoá bằng mật khẩu (nếu đang ở màn khoá)": {
+    "scope": "javascript", "prefix": "pm-phUnlock",
+    "body": ["const unlockInput = wp.locator('xpath=//*[@data-testid=\"unlock-form-password-input\"]').first();", "if (await unlockInput.isVisible().catch(() => false)) {", "  await unlockInput.fill(${1:PHANTOM_PASSWORD}); await wp.waitForTimeout(300); await unlockInput.press('Enter'); log('[phantom] Đã nhập mật khẩu mở khoá.');", "  await wp.locator('xpath=//*[text()=\"Swap\"]').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});", "}$0"]
+  },
+  "phantom: kiểm tra ví hợp lệ (thấy Ethereum trong 8s)": {
+    "scope": "javascript", "prefix": "pm-phCheckValid",
+    "body": ["// Có chữ \"Ethereum\" mới tính là ví thật -- ví import lỗi giữa chừng (vault rỗng) vẫn hiện màn Swap nhưng không có danh sách mạng", "const phValid = await wp.locator('xpath=//*[text()=\"${1:Ethereum}\"]').first().waitFor({ state: 'visible', timeout: ${2:8000} }).then(() => true).catch(() => false);$0"]
+  },
+  "phantom: import seed (onboarding -> điền từ -> submit)": {
+    "scope": "javascript", "prefix": "pm-phImportSeed",
+    "body": ["const seedWords = String(${1:row.R} || '').trim().split(/\\s+/).filter(Boolean);", "if (![12, 24].includes(seedWords.length)) throw new Error(`seed phải có 12 hoặc 24 từ, hiện có \\${seedWords.length} từ.`);", "await wp.goto(${2:ONBOARDING_URL}, { waitUntil: 'domcontentloaded', timeout: 15000 }); await wp.bringToFront();", "for (const xp of ['//*[text()=\"I already have a wallet\" or text()=\"Tôi đã có Ví rồi\" or text()=\"I Already Have a Wallet\"]', '//*[text()=\"Import Recovery Phrase\" or text()=\"Import Secret Recovery Phrase\" or text()=\"Nhập Cụm từ khôi phục\"]']) { const el = wp.locator('xpath=' + xp).first(); await el.waitFor({ state: 'visible', timeout: 15000 }); await el.click(); }", "for (let i = 0; i < seedWords.length; i++) { const inp = wp.locator(`xpath=//input[@data-testid=\"secret-recovery-phrase-word-input-\\${i}\"]`).first(); await inp.waitFor({ state: 'visible', timeout: 15000 }); await inp.fill(seedWords[i]); }", "for (let i = 0; i < 2; i++) { const btn = wp.locator('xpath=//*[@data-testid=\"onboarding-form-submit-button\"]').first(); await btn.waitFor({ state: 'visible', timeout: 15000 }); await btn.click(); await wp.waitForTimeout(200); }$0"]
+  },
+  "phantom: bắt lỗi seed sau khi submit": {
+    "scope": "javascript", "prefix": "pm-phSeedError",
+    "body": ["// Chờ 1 TRONG 2: ô password (seed đúng) HOẶC thông báo lỗi seed", "await wp.locator('xpath=//input[@name=\"password\"] | //*[@data-testid=\"onboarding-import-secret-recovery-phrase-error-message\"]').first().waitFor({ state: 'visible', timeout: 15000 });", "const seedErrorEl = wp.locator('xpath=//*[@data-testid=\"onboarding-import-secret-recovery-phrase-error-message\"]').first();", "const seedError = (await seedErrorEl.isVisible().catch(() => false)) ? ((await seedErrorEl.innerText().catch(() => '')).trim() || '(không đọc được lỗi)') : null;", "if (seedError) throw new Error(`Phantom báo lỗi seed: \\${seedError}`);$0"]
+  },
+  "phantom: đặt mật khẩu + tick điều khoản + hoàn tất": {
+    "scope": "javascript", "prefix": "pm-phSetPassword",
+    "body": ["await wp.locator('xpath=//input[@name=\"password\"]').first().fill(${1:PHANTOM_PASSWORD}); await wp.locator('xpath=//input[@name=\"confirmPassword\"]').first().fill($1);", "for (let i = 0; i < 20 && !(await wp.locator('xpath=//input[@aria-checked=\"true\"]').first().isVisible().catch(() => false)); i++) { const box = wp.locator('xpath=//input[@aria-checked=\"false\"]').first(); if (await box.isVisible().catch(() => false)) await box.click(); await wp.waitForTimeout(1000); } // tick điều khoản", "for (let i = 0; i < 3; i++) { const btn = wp.locator('xpath=//button[@data-testid=\"onboarding-form-submit-button\"]').first(); await btn.waitFor({ state: 'visible', timeout: 15000 }); await btn.click(); if (i < 2) await wp.waitForTimeout(8000); }$0"]
+  },
+  "phantom: tắt Side Panel": {
+    "scope": "javascript", "prefix": "pm-phSidePanel",
+    "body": ["const { disablePhantomSidePanel } = require('./xlv3_loginPhantom');", "await disablePhantomSidePanel(${1:wp}, log);$0"]
+  },
+
   // ---------- xlv3 ----------
   "xlv3: login X (cookie hoặc mật khẩu)": {
     "scope": "javascript", "prefix": "pm-loginX",
@@ -115,7 +162,7 @@
     "scope": "javascript", "prefix": "pm-postTweet",
     "body": ["const { xlv3_postTweet } = require('./xlv3_postTweet');", "await xlv3_postTweet(page, log, deps, ${1:tweetContent});$0"]
   },
-  "xlv3: login Phantom": {
+  "phantom: login đầy đủ (tự kiểm tra + import + mở khoá)": {
     "scope": "javascript", "prefix": "pm-loginPhantom",
     "body": ["const { checkAndLoginPhantom } = require('./xlv3_loginPhantom');", "const phantomResult = await checkAndLoginPhantom(page, context, log, require, ${1:row.R});$0"]
   },
