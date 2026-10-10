@@ -586,6 +586,32 @@ app.post('/api/global-extensions', (req, res) => {
   res.json({ extensionPaths });
 });
 
+// -------------------------------------------------------------------
+// Cài đặt chụp màn hình (thư mục lưu / tiền tố / hậu tố tên file) -- nhập ở
+// ô "Chụp màn hình" trên trang editor, scripts/xlv2_getScreenShot.js đọc lại
+// file này MỖI LẦN gọi (nên đổi xong không cần restart). defaultDir PHẢI
+// khớp DEFAULT_DIR trong xlv2_getScreenShot.js (dùng khi ô thư mục để trống).
+// -------------------------------------------------------------------
+const SCREENSHOT_SETTINGS_FILE = path.join(DATA_DIR, 'screenshot-settings.json');
+const SCREENSHOT_DEFAULT_DIR = path.join(DATA_DIR, 'screenshot', 'kleverWallet');
+
+function readScreenshotSettings() {
+  let s = {};
+  try { s = JSON.parse(fs.readFileSync(SCREENSHOT_SETTINGS_FILE, 'utf-8')) || {}; } catch { /* chưa cấu hình / file hỏng -- coi như trống */ }
+  return { dir: String(s.dir || '').trim(), prefix: String(s.prefix || ''), suffix: String(s.suffix || '') };
+}
+
+app.get('/api/screenshot-settings', (req, res) => {
+  res.json({ ...readScreenshotSettings(), defaultDir: SCREENSHOT_DEFAULT_DIR });
+});
+
+app.post('/api/screenshot-settings', (req, res) => {
+  const { dir, prefix, suffix } = req.body || {};
+  const settings = { dir: String(dir || '').trim(), prefix: String(prefix || ''), suffix: String(suffix || '') };
+  fs.writeFileSync(SCREENSHOT_SETTINGS_FILE, JSON.stringify(settings));
+  res.json({ ...settings, defaultDir: SCREENSHOT_DEFAULT_DIR });
+});
+
 function buildProfileObject(fields, nameOverride) {
   const {
     name, userAgent, viewportWidth, viewportHeight, locale, timezoneId,

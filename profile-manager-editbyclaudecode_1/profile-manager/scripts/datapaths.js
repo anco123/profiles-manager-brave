@@ -54,8 +54,14 @@ const EXCEL_RESULTS_FILE = path.join(DATA_DIR, 'excel-results.xlsx');
 const GOOGLE_SHEET_SNAPSHOT_FILE = path.join(DATA_DIR, 'google-sheet-snapshot.json');
 const GOOGLE_SERVICE_ACCOUNT_FILE = path.join(DATA_DIR, 'google-service-account.json');
 
+// Cài đặt chụp màn hình (thư mục / tiền tố / hậu tố) -- nhập ở ô "Chụp màn
+// hình" trên trang editor, server.js ghi (POST /api/screenshot-settings),
+// xlv2_getScreenShot.js đọc lại MỖI LẦN gọi.
+const SCREENSHOT_SETTINGS_FILE = path.join(DATA_DIR, 'screenshot-settings.json');
+
 module.exports = {
   DATA_DIR,
+  SCREENSHOT_SETTINGS_FILE,
   EXCEL_SNAPSHOT_FILE,
   EXCEL_RESULTS_FILE,
   GOOGLE_SHEET_SNAPSHOT_FILE,

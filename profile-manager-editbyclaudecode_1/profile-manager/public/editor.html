@@ -114,6 +114,27 @@
         </div>
         <p class="field-note" id="gsheetSyncStatus" hidden></p>
       </div>
+
+      <!-- Cài đặt cho scripts/xlv2_getScreenShot.js -- tự lưu khi đổi xong
+           (rời khỏi ô), hàm đọc lại file cài đặt mỗi lần chụp. -->
+      <div class="editor-sidebar-section">
+        <div class="editor-sidebar-head">
+          <span>Ch&#7909;p m&agrave;n h&igrave;nh</span>
+        </div>
+        <label class="field">
+          <span>Th&#432; m&#7909;c l&#432;u <em>(&#273;&#7875; tr&#7889;ng = th&#432; m&#7909;c m&#7863;c &#273;&#7883;nh)</em></span>
+          <input type="text" id="shotDirInput" />
+        </label>
+        <label class="field">
+          <span>Ti&#7873;n t&#7889; t&ecirc;n file</span>
+          <input type="text" id="shotPrefixInput" />
+        </label>
+        <label class="field">
+          <span>H&#7853;u t&#7889; t&ecirc;n file</span>
+          <input type="text" id="shotSuffixInput" />
+        </label>
+        <p class="field-note" id="shotStatus">T&ecirc;n file = ti&#7873;n t&#7889; + d&ograve;ng Excel + h&#7853;u t&#7889; + .png</p>
+      </div>
     </aside>
 
     <main class="editor-main">

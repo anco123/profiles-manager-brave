@@ -1084,6 +1084,54 @@ syncGSheetBtn.addEventListener('click', async () => {
   }
 });
 
+// -------------------------------------------------------------------
+// Chụp màn hình -- 3 ô cài đặt cho scripts/xlv2_getScreenShot.js (thư mục
+// lưu, tiền tố, hậu tố tên file; phần giữa là dòng Excel). Nguồn sự thật là
+// file trên server (GET/POST /api/screenshot-settings) vì script chạy phía
+// server không đọc được localStorage của trình duyệt. Tự lưu khi rời khỏi ô.
+// -------------------------------------------------------------------
+const shotDirInput = document.getElementById('shotDirInput');
+const shotPrefixInput = document.getElementById('shotPrefixInput');
+const shotSuffixInput = document.getElementById('shotSuffixInput');
+const shotStatus = document.getElementById('shotStatus');
+
+function applyShotSettings(s) {
+  shotDirInput.value = s.dir || '';
+  shotDirInput.placeholder = s.defaultDir || '';
+  shotPrefixInput.value = s.prefix || '';
+  shotSuffixInput.value = s.suffix || '';
+}
+
+async function loadShotSettings() {
+  try {
+    const res = await fetch('/api/screenshot-settings');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    applyShotSettings(await res.json());
+  } catch (err) {
+    shotStatus.textContent = `Không đọc được cài đặt chụp màn hình: ${err.message}`;
+  }
+}
+
+async function saveShotSettings() {
+  try {
+    const res = await fetch('/api/screenshot-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dir: shotDirInput.value, prefix: shotPrefixInput.value, suffix: shotSuffixInput.value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    applyShotSettings(data);
+    shotStatus.textContent = 'Đã lưu. Tên file = tiền tố + dòng Excel + hậu tố + .png';
+  } catch (err) {
+    shotStatus.textContent = `Lưu cài đặt chụp màn hình lỗi: ${err.message}`;
+    showToast(`Lưu cài đặt chụp màn hình lỗi: ${err.message}`, true);
+  }
+}
+
+[shotDirInput, shotPrefixInput, shotSuffixInput].forEach((input) => input.addEventListener('change', saveShotSettings));
+loadShotSettings();
+
 // Recomputes excelMatchByProfileId (profile.id -> matched row | null) for
 // the CURRENT file + match column + profile list. Cheap enough (a Map
 // build over however many profiles/rows exist) to just call before
