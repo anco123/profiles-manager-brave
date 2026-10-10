@@ -87,6 +87,11 @@
     "body": ["const { xlv2_attachFile } = require('./xlv2_attachFile');", "const attached = await xlv2_attachFile(page, log, ${1:'input_image_element'}, ${2:shotFile}, { previewElement: ${3:null} });$0"]
   },
 
+  "sp_lv2: tạo cụm từ ví EVM (12/24 từ, lưu Excel)": {
+    "scope": "javascript", "prefix": "pm-createWallet",
+    "body": ["const { sp_lv2_createWalletPharse } = require('./sp_lv2_createWalletPharse');", "const wallet = await sp_lv2_createWalletPharse(log, input, '${1:R}', ${2|12,24|}${3:, { addressColumn: 'S', privateKeyColumn: 'T' \\}});$0"]
+  },
+
   // ---------- phantom (tách từ xlv3_loginPhantom.js -- dùng chung biến wp = tab làm việc của Phantom) ----------
   "phantom: hằng số (ID, mật khẩu, URL)": {
     "scope": "javascript", "prefix": "pm-phConst",

@@ -10,6 +10,7 @@
   "license": "MIT",
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
+    "ethers": "^6.17.0",
     "express": "^4.19.2",
     "googleapis": "^183.0.0",
     "playwright": "^1.47.0"
