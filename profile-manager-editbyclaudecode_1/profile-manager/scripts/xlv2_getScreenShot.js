@@ -7,9 +7,11 @@
  * editor (ô "Chụp màn hình", lưu ở DATA_DIR/screenshot-settings.json, đọc
  * LẠI mỗi lần gọi nên đổi xong có hiệu lực ngay, không cần restart).
  *
- * Tên file = <tiền tố> + <dòng Excel> + <hậu tố> + .png (tiền tố/hậu tố cũng
- * lấy từ ô trên editor, có thể để trống). VD tiền tố "kw_", dòng 602, hậu tố
- * "_ok" -> kw_602_ok.png. Cùng tên thì ghi đè.
+ * Tên file = <tiền tố> + <middleName> + <hậu tố> + .png. Tiền tố/hậu tố lấy từ
+ * ô trên editor (có thể để trống); middleName là tham số thứ 4 -- TỰ CHỌN, truyền
+ * gì cũng được: số dòng Excel, username, chuỗi tự ghép... Để trống thì dùng thời
+ * gian (Date.now()). VD tiền tố "kw_", middleName 602, hậu tố "_ok" -> kw_602_ok.png.
+ * Cùng tên thì ghi đè. Ký tự Windows cấm trong tên file (<>:"/\|?*) đổi thành "_".
  *
  * Mỗi element được CHỜ hiện ra (waitFor visible) trước khi đụng tới -- không
  * dùng chờ theo thời gian. Lỗi (không thấy element, ghi file lỗi...) chỉ ghi
@@ -17,7 +19,8 @@
  *
  * Usage:
  *   const { xlv2_getScreenShot } = require('./xlv2_getScreenShot');
- *   await xlv2_getScreenShot(page, log, [elA, elB, elC], row.__excelRow);
+ *   await xlv2_getScreenShot(page, log, [elA, elB, elC], row.__excelRow);      // phần giữa = số dòng Excel
+ *   await xlv2_getScreenShot(page, log, [elA, elB], `${row.D}_balance`);       // phần giữa tự chọn
  *   // mỗi phần tử: Locator của Playwright hoặc chuỗi selector/xpath ('//*[@data-testid="x"]')
  *   // trả về đường dẫn file đã lưu, hoặc null nếu không chụp được
  * -----------------------------------------------------------------------
@@ -36,7 +39,7 @@ function readSettings() {
 
 const safePart = (v) => String(v).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_'); // ký tự Windows cấm trong tên file
 
-async function xlv2_getScreenShot(page, log, elements, excelRow, opts = {}) {
+async function xlv2_getScreenShot(page, log, elements, middleName, opts = {}) {
   const tag = '[xlv2_getScreenShot]';
   try {
     const { padding = 12, timeout = 15000 } = opts;
@@ -64,9 +67,9 @@ async function xlv2_getScreenShot(page, log, elements, excelRow, opts = {}) {
 
     const { dir, prefix, suffix } = readSettings();
     fs.mkdirSync(dir, { recursive: true });
-    const hasRow = excelRow !== undefined && excelRow !== null && String(excelRow).trim() !== '';
-    if (!hasRow) log(`${tag} thiếu excelRow -- đặt tên file theo thời gian thay cho số dòng.`);
-    const file = path.join(dir, `${safePart(prefix)}${safePart(hasRow ? excelRow : Date.now())}${safePart(suffix)}.png`);
+    const hasMiddle = middleName !== undefined && middleName !== null && String(middleName).trim() !== '';
+    if (!hasMiddle) log(`${tag} thiếu middleName -- đặt phần giữa tên file theo thời gian.`);
+    const file = path.join(dir, `${safePart(prefix)}${safePart(hasMiddle ? String(middleName).trim() : Date.now())}${safePart(suffix)}.png`);
 
     await page.screenshot({ path: file, clip, fullPage: !fits });
     log(`${tag} Đã chụp ${locs.length} element (${Math.round(clip.width)}x${Math.round(clip.height)}px) -> ${file}`);

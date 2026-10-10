@@ -1086,7 +1086,7 @@ syncGSheetBtn.addEventListener('click', async () => {
 
 // -------------------------------------------------------------------
 // Chụp màn hình -- 3 ô cài đặt cho scripts/xlv2_getScreenShot.js (thư mục
-// lưu, tiền tố, hậu tố tên file; phần giữa là dòng Excel). Nguồn sự thật là
+// lưu, tiền tố, hậu tố tên file; phần giữa do script tự truyền -- tham số middleName). Nguồn sự thật là
 // file trên server (GET/POST /api/screenshot-settings) vì script chạy phía
 // server không đọc được localStorage của trình duyệt. Tự lưu khi rời khỏi ô.
 // -------------------------------------------------------------------
@@ -1122,7 +1122,7 @@ async function saveShotSettings() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     applyShotSettings(data);
-    shotStatus.textContent = 'Đã lưu. Tên file = tiền tố + dòng Excel + hậu tố + .png';
+    shotStatus.textContent = 'Đã lưu. Tên file = tiền tố + phần giữa (middleName trong script) + hậu tố + .png';
   } catch (err) {
     shotStatus.textContent = `Lưu cài đặt chụp màn hình lỗi: ${err.message}`;
     showToast(`Lưu cài đặt chụp màn hình lỗi: ${err.message}`, true);

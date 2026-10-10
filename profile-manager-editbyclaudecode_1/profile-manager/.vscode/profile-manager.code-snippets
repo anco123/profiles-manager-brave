@@ -75,7 +75,7 @@
 
   "xlv2: chụp màn hình vùng element": {
     "scope": "javascript", "prefix": "pm-screenshot",
-    "body": ["const { xlv2_getScreenShot } = require('./xlv2_getScreenShot');", "const shotFile = await xlv2_getScreenShot(page, log, [${1:'elA'}, ${2:'elB'}], row.__excelRow);$0"]
+    "body": ["const { xlv2_getScreenShot } = require('./xlv2_getScreenShot');", "const shotFile = await xlv2_getScreenShot(page, log, [${1:'elA'}, ${2:'elB'}], ${3:row.__excelRow});$0"]
   },
   "xlv2: đính file (ảnh) vào ô comment/post": {
     "scope": "javascript", "prefix": "pm-attachFile",
