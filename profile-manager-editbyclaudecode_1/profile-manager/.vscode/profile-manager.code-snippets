@@ -8,10 +8,6 @@
     "scope": "javascript", "prefix": "pm-deps",
     "body": ["const helpers = require('./helpers'); const { ambientMouseMove } = require('./xlv3_interactXHome');", "const deps = { ...helpers, ambientMouseMove };"]
   },
-  "Chung: đọc dòng Excel hiện tại (input)": {
-    "scope": "javascript", "prefix": "pm-row",
-    "body": ["const row = input ? JSON.parse(input) : {}; const currentExcelRow = row.__excelRow;", "const ${1:username} = row.${2:D};$0"]
-  },
   "Chung: module xlv mới": {
     "scope": "javascript", "prefix": "pm-module",
     "body": ["async function ${1:${TM_FILENAME_BASE}}(page, log, deps${2:, arg}) {", "  log('[$1] bắt đầu');", "  $0", "}", "", "module.exports = { $1 };"]
@@ -31,18 +27,6 @@
   },
 
   // ---------- xlv1 ----------
-  "xlv1: đổi IP proxy": {
-    "scope": "javascript", "prefix": "pm-changeProxy",
-    "body": ["const { changeProxy } = require('./xlv1_changeProxy');", "await changeProxy(context, proxyInfo, log);$0"]
-  },
-  "xlv1: check X suspend": {
-    "scope": "javascript", "prefix": "pm-getXStatus",
-    "body": ["const { getXStatus } = require('./xlv1_getXStatus');", "const xStatus = await getXStatus(${1:username}, proxyInfo, log);$0"]
-  },
-  "xlv1: thông tin thiết bị": {
-    "scope": "javascript", "prefix": "pm-deviceInfo",
-    "body": ["const { getDeviceInfo } = require('./xlv1_getDeviceInfo');", "const deviceInfo = await getDeviceInfo(page, log);$0"]
-  },
   "xlv1: đóng bớt tab thừa": {
     "scope": "javascript", "prefix": "pm-singleTab",
     "body": ["const { ensureSingleTab } = require('./xlv1_ensureSingleTab');", "await ensureSingleTab(context, log);$0"]
@@ -55,17 +39,9 @@
     "scope": "javascript", "prefix": "pm-writeExcel",
     "body": ["const { writeExcelCell } = require('./writeExcelCell');", "await writeExcelCell(${1:currentExcelRow}, '${2:M}', ${3:'Done'});$0"]
   },
-  "xlv1: xuất snapshot ra Excel": {
-    "scope": "javascript", "prefix": "pm-exportExcel",
-    "body": ["const { exportSnapshotToExcel } = require('./xlv1_exportSnapshotToExcel');", "await exportSnapshotToExcel();$0"]
-  },
   "xlv1: đọc ô Google Sheet": {
     "scope": "javascript", "prefix": "pm-readGSheet",
     "body": ["const { readGoogleSheetCell } = require('./readGoogleSheetCell');", "const ${1:content} = readGoogleSheetCell(row, '${2:C}', '${3:REPLY}');$0"]
-  },
-  "xlv1: đánh dấu xoá-tạo-lại profile": {
-    "scope": "javascript", "prefix": "pm-markRecreate",
-    "body": ["const { markProfileForRecreate } = require('./xlv1_markProfileForRecreate');", "await markProfileForRecreate(proxyInfo.profileId, proxyInfo.profileName, currentExcelRow, log);$0"]
   },
 
   // ---------- xlv2 ----------
@@ -135,14 +111,6 @@
   },
 
   // ---------- xlv3 ----------
-  "xlv3: login X (cookie hoặc mật khẩu)": {
-    "scope": "javascript", "prefix": "pm-loginX",
-    "body": ["const loginResult = (row.I || '').toString().includes('Cookie')", "  ? await require('./xlv3_loginByCookie').loginByCookie(page, context, log, require, input)", "  : await require('./xlv3_loginX').loginToX(page, context, log, require, input);$0"]
-  },
-  "xlv3: tương tác X (interactX)": {
-    "scope": "javascript", "prefix": "pm-interactX",
-    "body": ["const { interactX } = require('./xlv3_Interactx');", "await interactX(page, context, log, require, input, ${1:soFollower});$0"]
-  },
   "xlv3: lướt Home": {
     "scope": "javascript", "prefix": "pm-browseHome",
     "body": ["const { browseHomeVaried } = require('./xlv3_interactXHome');", "await browseHomeVaried(page, log, deps);$0"]
@@ -166,13 +134,5 @@
   "xlv3: đăng tweet": {
     "scope": "javascript", "prefix": "pm-postTweet",
     "body": ["const { xlv3_postTweet } = require('./xlv3_postTweet');", "await xlv3_postTweet(page, log, deps, ${1:tweetContent});$0"]
-  },
-  "phantom: login đầy đủ (tự kiểm tra + import + mở khoá)": {
-    "scope": "javascript", "prefix": "pm-loginPhantom",
-    "body": ["const { checkAndLoginPhantom } = require('./xlv3_loginPhantom');", "const phantomResult = await checkAndLoginPhantom(page, context, log, require, ${1:row.R});$0"]
-  },
-  "xlv3: bind + login Tesseract": {
-    "scope": "javascript", "prefix": "pm-tesseract",
-    "body": ["const { bindAndLoginToTesseract } = require('./xlv3_bindAndLoginToTesseract');", "await bindAndLoginToTesseract(page, context, log);$0"]
   }
 }
