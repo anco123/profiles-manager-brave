@@ -8,9 +8,10 @@
  *   U1. Ô "Show N posts" (bài mới) trên Home: thấy thì (thường) bấm, lướt lên vài
  *       cú xem bài mới, đứng đọc 1 lúc, rồi lướt xuống đọc tiếp. Có lúc "kệ" nó
  *       (người thật không phải lần nào cũng bấm) -- kệ thì một lúc sau mới xét lại.
- *   U2. Explore: sau khi vào, có lúc chuyển sang 1 tab con (Trending/News/Sports/
- *       Entertainment...), có lúc bấm 1 "trend" (data-testid="trend") vào xem kết
- *       quả rồi cuộn đọc -- trước đây chỉ cuộn trang Explore rồi về.
+ *   U2. Explore: xem 1-3 tab con (For you/Trending/News/Sports/Entertainment...). Ở
+ *       MỖI tab: lướt danh sách trend 0-2 cú rồi LUÔN bấm 1 "trend" (data-testid=
+ *       "trend") vào xem kết quả + cuộn đọc. Xem xong 1 tab thì bấm lại Explore ở
+ *       thanh trái để sang tab kế (không goBack). Trước đây chỉ cuộn trang Explore rồi về.
  *   U3. Chuyến đi Settings (SIÊU ÍT, roll riêng 1 lần/phiên, không nằm trong bể
  *       chọn có trọng số): More -> Settings -> xem 1-3 mục (Your account / Privacy
  *       and safety / Accessibility / Security and account access), rê chuột đọc mô
@@ -216,8 +217,8 @@ const CONFIG = {
   showNewPostsReadPauseMsRange: [2500, 7000], // "đợi 1 lúc" đọc bài mới trước khi lướt xuống lại
 
   // [UPDATE U2] Explore
-  exploreSwitchTabChance: 0.55, // xác suất chuyển sang 1 tab con của Explore
-  exploreOpenTrendChance: 0.45, // xác suất mở 1 trend (nhân thêm OPEN_EXTRA_FACTOR theo tâm trạng)
+  exploreTabsRange: [1, 3], // số tab con của Explore xem trong 1 chuyến (skimmer tối đa 2); MỖI tab đều bấm 1 trend
+  exploreStayFirstTabChance: 0.35, // tab đầu tiên: xác suất ở lại luôn tab đang mở sẵn (For you) thay vì bấm sang tab khác
 
   // [UPDATE U3] Settings -- tần suất SIÊU ÍT
   settingsVisitChance: 0.04, // xác suất CẢ PHIÊN có 1 chuyến vào Settings (jitter theo hồ sơ, kẹp 1%-8%)
@@ -1015,12 +1016,13 @@ async function inViewportIndexes(page, locator, clip = null) {
 
 // [UPDATE U2] Chuyển sang 1 tab con của Explore (For you/Trending/News/Sports/Entertainment) --
 // chỉ chọn tab CHƯA được chọn và đang thực sự hiện trong dải tab.
-async function switchExploreTab(page, log, clickVisibly, mood, deps) {
+async function switchExploreTab(page, log, clickVisibly, mood, deps, visited = new Set()) {
   const list = page.locator('[data-testid="ScrollSnap-List"]').first();
-  if (!(await list.isVisible({ timeout: 3000 }).catch(() => false))) return false;
+  if (!(await list.isVisible({ timeout: 3000 }).catch(() => false))) return null;
   const tabs = list.locator('a[role="tab"][aria-selected="false"]');
-  const idxs = await inViewportIndexes(page, tabs, list);
-  if (idxs.length === 0) return false;
+  const hrefs = await tabs.evaluateAll((els) => els.map((e) => e.getAttribute('href'))).catch(() => []);
+  const idxs = (await inViewportIndexes(page, tabs, list)).filter((i) => !visited.has(hrefs[i])); // bỏ tab đã xem trong chuyến này
+  if (idxs.length === 0) return null;
   const tab = tabs.nth(idxs[randomInt(0, idxs.length - 1)]);
   const href = await tab.getAttribute('href').catch(() => null);
   await page.waitForTimeout(randomBetween(400, 1200)); // liếc dải tab trước khi bấm
@@ -1029,15 +1031,17 @@ async function switchExploreTab(page, log, clickVisibly, mood, deps) {
   if (href) await page.locator(`a[role="tab"][href="${href}"][aria-selected="true"]`).first().waitFor({ state: 'visible', timeout: 8000 }).catch(() => {});
   log(`[explore] Chuyển sang tab ${href ? href.split('/').pop() : '(?)'}`);
   await page.waitForTimeout(humanBetween(1500, 3500) * moodDwellScale(mood));
-  return true;
+  return href || '?';
 }
 
 // [UPDATE U2] Mở 1 trend đang hiện trên màn hình -> đọc kết quả tìm kiếm của trend đó.
 async function openRandomTrend(page, log, moveMouseVisibly, clickVisibly, mood, deps) {
   const trends = page.locator('[data-testid="trend"]');
   let idxs = await inViewportIndexes(page, trends);
-  if (idxs.length === 0) { // chưa thấy trend nào trọn trong màn hình -> cuộn nhẹ 1 cú rồi thử lại 1 lần
-    await momentumScroll(page, randomBetween(200, 420));
+  // Chưa thấy trend nào trọn trong màn hình: cuộn xuống 1 cú, vẫn không có (VD đã lướt quá hết danh sách) thì cuộn NGƯỢC lên tối đa 2 cú
+  for (const delta of [randomBetween(200, 420), -randomBetween(350, 650), -randomBetween(350, 650)]) {
+    if (idxs.length > 0) break;
+    await momentumScroll(page, delta);
     await page.waitForTimeout(randomBetween(700, 1500));
     idxs = await inViewportIndexes(page, trends);
   }
@@ -1069,7 +1073,20 @@ async function openRandomTrend(page, log, moveMouseVisibly, clickVisibly, mood, 
   return true;
 }
 
-async function checkExplore(page, log, moveMouseVisibly, clickVisibly, mood, deps) {
+// [UPDATE U2] Xem xong 1 tab (đang ở trang kết quả trend) -> bấm lại Explore ở thanh trái để quay về dải tab.
+async function returnToExplore(page, log, clickVisibly, deps) {
+  const exploreLink = page.locator('[data-testid="AppTabBar_Explore_Link"]').first();
+  if (!(await exploreLink.isVisible({ timeout: 2000 }).catch(() => false))) return false;
+  await dismissRandomNotice(page, log, deps);
+  await clickVisibly(page, exploreLink);
+  const ok = await page.locator('[data-testid="ScrollSnap-List"]').first().waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+  if (ok) await page.waitForTimeout(randomBetween(1000, 2500));
+  return ok;
+}
+
+// [UPDATE U2] Explore: xem 1-3 tab con, MỖI tab lướt 0-2 cú rồi LUÔN bấm 1 trend xem kết quả.
+// ctx.deadline (hạn phiên) -- hết giờ thì không sang tab kế, nhưng tab đầu luôn xem trọn (lướt + trend).
+async function checkExplore(page, log, moveMouseVisibly, clickVisibly, mood, deps, ctx = {}) {
   const tab = page.locator('[data-testid="AppTabBar_Explore_Link"]');
   const tabVisible = await tab.first().isVisible({ timeout: 1000 }).catch(() => false);
   if (!tabVisible) return;
@@ -1081,20 +1098,29 @@ async function checkExplore(page, log, moveMouseVisibly, clickVisibly, mood, dep
     const scale = moodDwellScale(mood);
     await page.waitForTimeout(humanBetween(1500, 3500) * scale);
 
-    // [UPDATE U2] có lúc chuyển sang 1 tab con trước khi lướt
-    if (Math.random() < CONFIG.exploreSwitchTabChance) await switchExploreTab(page, log, clickVisibly, mood, deps);
+    const [minTabs, maxTabs] = CONFIG.exploreTabsRange;
+    const plannedTabs = maybeAbandonEarly(mood, randomInt(minTabs, mood.name === 'skimmer' ? Math.min(2, maxTabs) : maxTabs));
+    const visited = new Set();
+    for (let t = 0; t < plannedTabs; t++) {
+      if (t > 0) {
+        if (ctx.deadline && Date.now() > ctx.deadline - 5000) { log('[explore] Sắp hết giờ phiên -- không xem thêm tab.'); break; }
+        if (!(await returnToExplore(page, log, clickVisibly, deps))) { log('[explore] Không quay lại được dải tab Explore -- dừng.'); break; }
+      }
+      // Tab đầu có lúc ở lại luôn tab đang mở sẵn; từ tab thứ 2 luôn bấm sang 1 tab CHƯA xem
+      let href = null;
+      if (t > 0 || Math.random() >= CONFIG.exploreStayFirstTabChance) href = await switchExploreTab(page, log, clickVisibly, mood, deps, visited);
+      if (!href) href = await page.locator('[data-testid="ScrollSnap-List"] a[role="tab"][aria-selected="true"]').first().getAttribute('href').catch(() => null);
+      if (href) visited.add(href);
 
-    let scrollCount = mood.name === 'skimmer' ? randomInt(0, 2) : randomInt(1, 3);
-    scrollCount = maybeAbandonEarly(mood, scrollCount);
-    for (let i = 0; i < scrollCount; i++) {
-      if (Math.random() < 0.6) await ambientMouseMove(page, moveMouseVisibly); // không phải lần cuộn nào cũng cần di chuột trước
-      await momentumScroll(page, randomBetween(200, 550));
-      await page.waitForTimeout(randomBetween(1000, 2500) * scale);
+      // Lướt danh sách trend 0-2 cú
+      for (let i = 0, n = mood.name === 'skimmer' ? randomInt(0, 1) : randomInt(0, 2); i < n; i++) {
+        if (Math.random() < 0.6) await ambientMouseMove(page, moveMouseVisibly); // không phải lần cuộn nào cũng cần di chuột trước
+        await momentumScroll(page, randomBetween(200, 500));
+        await page.waitForTimeout(randomBetween(1000, 2500) * scale);
+      }
+      // LUÔN bấm 1 trend vào xem tiếp
+      await openRandomTrend(page, log, moveMouseVisibly, clickVisibly, mood, deps);
     }
-
-    // [UPDATE U2] có lúc bấm hẳn vào 1 trend xem kết quả
-    const trendChance = Math.min(0.9, CONFIG.exploreOpenTrendChance * (OPEN_EXTRA_FACTOR[mood.name] ?? 1));
-    if (Math.random() < trendChance) await openRandomTrend(page, log, moveMouseVisibly, clickVisibly, mood, deps);
   } finally {
     await backToHome(page, log, moveMouseVisibly, clickVisibly, deps).catch(() => {}); // [UPDATE U4] truyền deps
   }
@@ -1471,7 +1497,7 @@ async function browseHomeVaried(page, log, deps = {}) {
       excursionIndex++;
       lastAction = name;
       try {
-        await EXCURSION_HANDLERS[name](page, log, moveMouseVisibly, clickVisibly, mood, deps); // [UPDATE U4] trước đây không truyền deps
+        await EXCURSION_HANDLERS[name](page, log, moveMouseVisibly, clickVisibly, mood, deps, { deadline }); // [UPDATE U4] trước đây không truyền deps; [UPDATE U2] + hạn phiên cho Explore
         consecutiveErrors = 0;
       } catch (err) {
         // Kiểm tra NGAY TẠI ĐÂY (trong catch), không phải đoán trước --
