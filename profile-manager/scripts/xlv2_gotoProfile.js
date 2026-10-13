@@ -50,17 +50,17 @@ async function gotoProfile(page, log, deps, username) {
   //    TRỎ TỚI @username SẴN KHÔNG
   // ============================================================
   // Có thể có NHIỀU phần tử cùng khớp selectors.mentionText (ví dụ
-  // @TherosHQ xuất hiện ở nhiều chỗ trong DOM cùng lúc) -- đếm số lượng
-  // rồi RANDOM chọn 1 trong số đó mỗi lần (khi thì phần tử 1, khi thì
-  // phần tử 2...), không luôn luôn là phần tử đầu tiên như trước, để
-  // hành vi click đỡ bị đoán được/lặp lại giống nhau mỗi lần chạy.
+  // @TherosHQ xuất hiện ở nhiều chỗ trong DOM cùng lúc) -- chọn giống
+  // người thật: ưu tiên link ĐANG HIỆN trên màn hình (random 1 trong số
+  // đó), không có thì lấy link GẦN màn hình nhất rồi lướt tới. Bỏ qua
+  // link có kích thước 0 (ẩn, nằm trong hover card đã đóng...).
   const existingTargets = page.locator(selectors.mentionText);
-  const existingCount = await existingTargets.count();
+  const candidates = await pickOnScreenFirst(page, existingTargets);
+  const existingCount = candidates.length;
 
-  // Tỷ lệ nhỏ: dù đã thấy sẵn link trong DOM vẫn CHỦ ĐỘNG bỏ qua, đi
-  // qua luồng search bình thường ở bước 3 -- giống các tỷ lệ nhỏ khác
-  // trong dự án dùng để tạo độ ngẫu nhiên tự nhiên, tránh việc LUÔN
-  // LUÔN click thẳng mỗi khi có sẵn link trông quá máy móc/đều đặn.
+  // 12%: dù đã thấy sẵn link trên trang vẫn CHỦ ĐỘNG bỏ qua, đi qua
+  // luồng search bình thường ở bước 3 -- 88% còn lại click thẳng vào
+  // link có sẵn (người thật thấy tên trên màn hình thì bấm luôn).
   const SKIP_EXISTING_TARGET_CHANCE = 0.12;
   const skipExistingTarget = existingCount > 0 && Math.random() < SKIP_EXISTING_TARGET_CHANCE;
   if (skipExistingTarget) {
@@ -71,13 +71,13 @@ async function gotoProfile(page, log, deps, username) {
   }
 
   const hasExistingTarget = existingCount > 0 && !skipExistingTarget;
-  const pickedIndex = hasExistingTarget ? Math.floor(Math.random() * existingCount) : -1;
+  const pickedIndex = hasExistingTarget ? candidates[Math.floor(Math.random() * existingCount)] : -1;
   const existingTarget = hasExistingTarget ? existingTargets.nth(pickedIndex) : null;
 
   if (hasExistingTarget) {
     log(
       `[gotoProfile] Đã có sẵn ${existingCount} kết quả @${username} trong DOM -- ` +
-      `click phần tử #${pickedIndex + 1}/${existingCount} (chọn ngẫu nhiên).`
+      `click phần tử #${pickedIndex + 1} (ưu tiên cái đang hiện trên màn hình).`
     );
 
     // Dùng đúng clickElementOnScreen mà code gốc định gọi (file thật, không
@@ -91,7 +91,7 @@ async function gotoProfile(page, log, deps, username) {
     // phần đang hiện trong viewport -- nhưng click thì bắt buộc phần tử
     // phải NẰM TRONG viewport hiện tại. Nếu phần tử vừa chọn rơi ra
     // ngoài (phía trên/dưới màn hình), lướt tới trước khi click.
-    await scrollTargetIntoViewportIfNeeded(page, moveMouseVisibly, momentumScroll, existingTarget, log, username);
+    await require('./xlv1_scrollToElement').scrollToElement(page, log, deps, existingTarget, `link @${username}`);
 
     let clicked = false;
     try {
@@ -310,43 +310,18 @@ async function scrollDropdownIntoView(page, moveMouseVisibly, momentumScroll, dr
 }
 
 /**
- * Kiểm tra phần tử (đã tìm thấy trong DOM nhưng có thể nằm ngoài vùng
- * nhìn thấy hiện tại) có đang NẰM TRONG viewport không; nếu không thì
- * lướt tới trước (có quán tính giống scrollDropdownIntoView ở trên,
- * fallback về wheel() thô nếu deps không có momentumScroll). Không
- * throw nếu không lấy được kích thước viewport/toạ độ -- để
- * clickElementOnScreen tự lo bằng scrollIntoViewIfNeeded() của nó như
- * lưới an toàn cuối.
+ * Trả về chỉ số (trong locator) các phần tử nên chọn để click: những cái
+ * ĐANG nằm trong màn hình; không có cái nào thì trả về đúng 1 cái gần
+ * giữa màn hình nhất. Phần tử kích thước 0 (ẩn) bị loại hẳn.
  */
-async function scrollTargetIntoViewportIfNeeded(page, moveMouseVisibly, momentumScroll, target, log, username) {
-  const viewport = page.viewportSize();
-  if (!viewport) return;
-
-  const box = await target.boundingBox().catch(() => null);
-  if (!box) return;
-
-  const alreadyInViewport =
-    box.y >= 0 && box.x >= 0 &&
-    box.y + box.height <= viewport.height &&
-    box.x + box.width <= viewport.width;
-  if (alreadyInViewport) return;
-
-  log(`[gotoProfile] Kết quả @${username} đang nằm ngoài viewport -- lướt tới trước khi click.`);
-
-  // box.y/box.x tính theo toạ độ viewport hiện tại (có thể âm hoặc vượt
-  // quá chiều cao/rộng màn hình nếu đang ở ngoài vùng nhìn thấy) --
-  // dùng để tính cần cuộn bao nhiêu để đưa phần tử về giữa màn hình.
-  // delta > 0 = cuộn xuống, delta < 0 = cuộn lên (đúng quy ước
-  // momentumScroll/wheel đang dùng ở các chỗ khác trong dự án).
-  const delta = (box.y + box.height / 2) - (viewport.height / 2);
-
-  await moveMouseVisibly(page, viewport.width / 2, viewport.height / 2);
-  if (typeof momentumScroll === 'function') {
-    await momentumScroll(page, delta);
-  } else {
-    await page.mouse.wheel(0, delta);
-  }
-  await humanPause(page, 500, 700);
+async function pickOnScreenFirst(page, locator) {
+  const rects = await locator.evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { top: r.top, h: r.height, w: r.width }; })).catch(() => []);
+  const vh = (page.viewportSize() || { height: 800 }).height;
+  const usable = rects.map((r, i) => ({ ...r, i })).filter((r) => r.h > 0 && r.w > 0);
+  const onScreen = usable.filter((r) => r.top >= 0 && r.top + r.h <= vh);
+  if (onScreen.length) return onScreen.map((r) => r.i);
+  usable.sort((a, b) => Math.abs(a.top - vh / 2) - Math.abs(b.top - vh / 2));
+  return usable.slice(0, 1).map((r) => r.i);
 }
 
 async function retypeSearch(page, deps, searchBoxSelector, username) {

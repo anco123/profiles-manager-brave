@@ -1,8 +1,9 @@
 /**
  * scripts/xlv1_findTweetInTimeline.js
  * -----------------------------------------------------------------------
- * Dùng chung cho MỌI nơi cần "cuộn xuống dần để tìm 1 tweet cụ thể trên
- * timeline" -- newFile_02.js (tìm bài để retweet), và các file sau này
+ * Dùng chung cho MỌI nơi cần "tìm 1 tweet cụ thể" -- tìm ngay trên trang đang
+ * xem trước (VD đang lướt Home), không có mới vào profile cuộn xuống dần tìm trên
+ * timeline -- newFile_02.js (tìm bài để retweet), và các file sau này
  * (like, reply, quote...) đều cần lại đúng việc này.
  *
  * Timeline của X ảo hoá (virtualized) -- tweet nằm xa dưới CHƯA TỪNG
@@ -18,15 +19,27 @@
  * -----------------------------------------------------------------------
  */
 
+// Thứ tự giống người thật:
+//   1) Bài ĐÃ CÓ trên trang đang xem (VD đang lướt Home thấy bài) -> lướt tới bằng con lăn luôn, không vào profile tìm làm gì.
+//   2) Không có -> vào profile @username (gotoProfile tự chọn: 80% click link @username có sẵn trên trang, 20% search),
+//      rồi cuộn dần xuống tìm; thấy bài trong DOM thì lướt tới cho nằm giữa màn hình.
+// Trả về true khi bài đã nằm trong vùng nhìn thấy.
 async function findTweetInTimeline(page, log, deps, targetLocator,username, label, maxScrollAttempts = 25) {
   const { ambientMouseMove, moveMouseVisibly } = deps;
   const { gotoProfile } = require('./xlv2_gotoProfile');
+  const { scrollToElement } = require('./xlv1_scrollToElement');
+  const inDom = (timeout) => targetLocator.first().waitFor({ state: 'attached', timeout }).then(() => true).catch(() => false);
+
+  if (await inDom(500)) {
+    log(`[findTweetInTimeline] ${label} đang có sẵn trên trang hiện tại -- lướt tới, không cần vào profile @${username}.`);
+    if (await scrollToElement(page, log, deps, targetLocator, label)) return true;
+    log(`[findTweetInTimeline] Lướt tới ${label} không được -- vào profile @${username} tìm.`);
+  }
 
   await gotoProfile(page, log, deps, username);
 
   for (let scrollAttempt = 1; scrollAttempt <= maxScrollAttempts; scrollAttempt++) {
-    const found = await targetLocator.waitFor({ state: 'visible', timeout: 3000 }).then(() => true).catch(() => false);
-    if (found) return true;
+    if (await inDom(3000) && await scrollToElement(page, log, deps, targetLocator, label)) return true;
 
     log(`[findTweetInTimeline] Chưa thấy ${label} (lần ${scrollAttempt}/${maxScrollAttempts}) -- cuộn xuống tìm tiếp.`);
 
@@ -39,7 +52,8 @@ async function findTweetInTimeline(page, log, deps, targetLocator,username, labe
     if (Math.random() < 0.6) {
       await ambientMouseMove(page, moveMouseVisibly);
     }
-    await page.mouse.wheel(0, 400 + Math.random() * 400);
+    const delta = 400 + Math.random() * 400;
+    if (typeof deps.momentumScroll === 'function') await deps.momentumScroll(page, delta); else await page.mouse.wheel(0, delta);
     await page.waitForTimeout(1000 + Math.random() * 1000); // cho DOM ảo hoá kịp render thêm bài mới sau khi cuộn
   }
 

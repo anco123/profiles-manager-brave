@@ -31,6 +31,7 @@ async function xlv3_retweet_targettw(page, log, deps, postUrl, maxInlineAttempts
   const { gotoProfile } = require('./xlv2_gotoProfile');
   const { openTweetDetail } = require('./xlv2_openTweetDetail');
   const { findTweetInTimeline } = require('./xlv1_findTweetInTimeline');
+  const { scrollToElement } = require('./xlv1_scrollToElement');
   const { humanPause } = require('./helpers');
 
   
@@ -86,18 +87,10 @@ async function xlv3_retweet_targettw(page, log, deps, postUrl, maxInlineAttempts
   const retweetConfirmSelector = '[data-testid="retweetConfirm"]';
 
   
-  const postTweetContainerCheckVisible = await postTweetContainerToFind.isVisible({ timeout: 3000 }).catch(() => false);
-  if (postTweetContainerCheckVisible) {
-    await postTweetContainerToFind.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(300 + Math.random() * 400);
-  }
-  if (!postTweetContainerCheckVisible) {
-    await gotoProfile(page, log, deps, username);
-    const foundPost = await findTweetInTimeline(page, log, deps, postTweetContainerToFind,username, `bài viết statusId=${statusId}`);
-
-    if (!foundPost) {
-      throw new Error(`[newFile_02] Cuộn nhiều lần vẫn không tìm thấy bài viết statusId=${statusId} trên trang @${username}.`);
-    }
+  // Bài có sẵn trên trang đang xem (VD đang lướt Home) -> lướt tới luôn; không có mới vào profile @username tìm (xem findTweetInTimeline.js).
+  const foundPost = await findTweetInTimeline(page, log, deps, postTweetContainerToFind,username, `bài viết statusId=${statusId}`);
+  if (!foundPost) {
+    throw new Error(`[newFile_02] Cuộn nhiều lần vẫn không tìm thấy bài viết statusId=${statusId} trên trang @${username}.`);
   }
   
 
@@ -114,7 +107,7 @@ async function xlv3_retweet_targettw(page, log, deps, postUrl, maxInlineAttempts
   // cuộn mượt hơn) -- cuộn thêm cho chắc trước khi làm bất cứ gì tiếp
   // theo (kiểm tra nút inline, tính điểm click...), không làm gì nếu
   // đã trong tầm nhìn rồi.
-  await postTweetContainer.scrollIntoViewIfNeeded().catch(() => {});
+  // (findTweetInTimeline đã lướt bài vào giữa màn hình bằng con lăn -- không nhảy scrollIntoViewIfNeeded nữa)
   await page.waitForTimeout(300 + Math.random() * 400);
 
   // ---- Quyết định NGẪU NHIÊN dùng cách nào: 1) retweet trực tiếp tại
@@ -154,7 +147,7 @@ async function xlv3_retweet_targettw(page, log, deps, postUrl, maxInlineAttempts
         // cuộn đủ xa tới nút RT ở cuối bài). Tự cuộn thêm nếu cần,
         // không làm gì nếu đã trong tầm nhìn -- an toàn gọi mỗi lần,
         // kể cả bài ngắn không cần cuộn thêm.
-        await inlineRetweetBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await scrollToElement(page, log, deps, inlineRetweetBtn, 'nút trên bài'); // lướt bằng con lăn, không nhảy tức thời
         await page.waitForTimeout(300 + Math.random() * 400); // 1 nhịp sau khi cuộn, trước khi thao tác
 
         await ambientMouseMove(page, moveMouseVisibly);
@@ -230,7 +223,7 @@ async function xlv3_retweet_targettw(page, log, deps, postUrl, maxInlineAttempts
     const canRetweet = await page.locator(retweetSelector).first().isVisible({ timeout: 8000 }).catch(() => false);
     if (canRetweet) {
       const retweetBtn = page.locator(retweetSelector).first();
-      await retweetBtn.scrollIntoViewIfNeeded().catch(() => {}); // bài dài -- nút RT có thể ngoài khung nhìn dù trang đã load xong
+      await scrollToElement(page, log, deps, retweetBtn, 'nút Retweet'); // bài dài -- nút RT có thể ngoài khung nhìn; lướt bằng con lăn
       await page.waitForTimeout(300 + Math.random() * 400);
 
       await ambientMouseMove(page, moveMouseVisibly);

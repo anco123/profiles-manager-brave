@@ -210,6 +210,8 @@ const CONFIG = {
   // quá số này mà vẫn chưa thoát thì DỪNG hẳn phiên thay vì cứ goBack()
   // thêm (dễ lùi ra khỏi x.com luôn).
   maxLoginRecoveryAttempts: 3,
+  // Sau mỗi chuyến đi/task (follow, post...) phải lướt Home thật ít nhất khoảng này rồi mới làm việc đặc biệt tiếp -- không làm dồn liền nhau.
+  specialGapMsRange: [6000, 15000],
 
   // [UPDATE U1] Ô "Show N posts" trên Home
   showNewPostsClickChance: 0.7, // thấy ô thì bấm với xác suất này (jitter theo hồ sơ), không bấm = "kệ nó"
@@ -1423,9 +1425,16 @@ function rollLikesBudget(mood) {
 // phiên, xen giữa hành vi nền (đọc + cuộn / ghé Following) diễn ra liên
 // tục. Có watchdog tự hồi phục nếu lỗi liên tiếp quá nhiều lần.
 // -------------------------------------------------------------------
-async function browseHomeVaried(page, log, deps = {}) {
+// options.tasks: mảng HÀM BẤT KỲ dạng async (page) => {...} (follow/post/reply/retweet... -- file này không cần biết hàm làm gì).
+//   Mỗi hàm được CHÈN VÀO GIỮA phiên lướt ở 1 thời điểm ngẫu nhiên, thứ tự xáo ngẫu nhiên. Hàm nào chạy THÀNH CÔNG thì bị XOÁ khỏi
+//   chính mảng truyền vào -- sau khi gọi xong, mảng chỉ còn các hàm bị LỖI hoặc CHƯA chạy (VD phiên dừng sớm), nơi gọi tự chạy lại.
+//   Thời gian chạy hàm KHÔNG trừ vào thời lượng lướt -- deadline tự lùi lại đúng bằng thời gian hàm chiếm.
+async function browseHomeVaried(page, log, deps = {}, options = {}) {
   deps = { ambientMouseMove, ...deps }; // [UPDATE U4] nơi gọi chỉ truyền helpers (như ví dụ Usage) thì vẫn có ambientMouseMove cho dismissRandomNotice
   const { moveMouseVisibly, clickVisibly, showVisibleCursor } = deps;
+  const taskQueue = options.tasks || [];
+  const tasks = shuffle(taskQueue);
+  const taskName = (fn) => fn.name || 'task';
   if (!moveMouseVisibly || !clickVisibly) {
     throw new Error(
       'browseHomeVaried needs moveMouseVisibly and clickVisibly -- call it as ' +
@@ -1439,8 +1448,12 @@ async function browseHomeVaried(page, log, deps = {}) {
 
   const [minDuration, maxDuration] = CONFIG.sessionDurationMsRange;
   const durationMs = randomBetween(minDuration, maxDuration);
-  const deadline = Date.now() + durationMs;
+  let deadline = Date.now() + durationMs;
   log(`[browse] Phiên lướt Home lần này dài ${Math.round(durationMs / 1000)}s, tâm trạng: ${mood.name}.`);
+
+  // Có thể được gọi khi đang ở trang khác (VD vừa check followers ở trang Profile) -- về Home trước khi bắt đầu lướt.
+  const onHome = await page.locator('xpath=//*[text()="For you"]').first().isVisible().catch(() => false);
+  if (!onHome) await backToHome(page, log, moveMouseVisibly, clickVisibly, deps).catch(() => {});
 
   // "Khựng lại" định thần vài giây ngay khi vừa vào Home -- người thật
   // không bấm cuộn ngay tích tắc khi trang vừa load xong.
@@ -1473,14 +1486,28 @@ async function browseHomeVaried(page, log, deps = {}) {
     .map(() => Date.now() + humanBetween(earliestMs, latestMs))
     .sort((a, b) => a - b);
 
+  // Mốc thời gian ngẫu nhiên cho từng task, rải trong cùng khoảng với các chuyến đi.
+  const taskTimes = tasks.map(() => Date.now() + humanBetween(earliestMs, latestMs)).sort((a, b) => a - b);
+  if (tasks.length) log(`[browse] Việc chèn vào giữa phiên (${tasks.length}): ${tasks.map(taskName).join(' → ')}`);
+
   let likesLeft = rollLikesBudget(mood);
   let excursionIndex = 0;
+  let taskIndex = 0;
+  let nextSpecialAt = 0; // mốc sớm nhất được làm chuyến đi/task tiếp theo (xem CONFIG.specialGapMsRange)
   let lastAction = 'start';
   let consecutiveErrors = 0;
   const recoveryState = { count: 0, giveUp: false }; // theo dõi số lần thử goBack() thoát login xuyên suốt cả phiên
   const showPostsState = { ignoredUntil: 0 }; // [UPDATE U1] nhớ lần "kệ" ô Show posts
 
-  while (Date.now() < deadline) {
+  // Lùi deadline + mọi mốc chưa tới thêm đúng thời gian task vừa chiếm -- thời gian lướt thật không bị task "ăn" mất.
+  const shiftSchedule = (ms) => {
+    deadline += ms;
+    for (let i = excursionIndex; i < excursionTimes.length; i++) excursionTimes[i] += ms;
+    for (let i = taskIndex; i < taskTimes.length; i++) taskTimes[i] += ms;
+  };
+
+  while (Date.now() < deadline || taskIndex < tasks.length) { // hết giờ mà còn task chưa chạy thì vẫn lướt tiếp tới khi chạy hết
+    const special = Date.now() >= nextSpecialAt;
     const recovered = await recoverIfOnLoginPage(page, log, lastAction, moveMouseVisibly, clickVisibly, recoveryState, deps); // [UPDATE U4]
     
     await dismissRandomNotice(page, log, deps);
@@ -1507,7 +1534,7 @@ async function browseHomeVaried(page, log, deps = {}) {
     }
 
     // Tới lúc cho chuyến đi tiếp theo chưa?
-    if (excursionIndex < excursions.length && Date.now() >= excursionTimes[excursionIndex]) {
+    if (special && excursionIndex < excursions.length && Date.now() >= excursionTimes[excursionIndex]) {
       const name = excursions[excursionIndex];
       excursionIndex++;
       lastAction = name;
@@ -1528,6 +1555,36 @@ async function browseHomeVaried(page, log, deps = {}) {
         log(`[browse] Chuyến đi "${name}" bị lỗi, bỏ qua: ${err.message}`);
         await page.waitForTimeout(500);
       }
+      nextSpecialAt = Date.now() + humanBetween(...CONFIG.specialGapMsRange);
+      continue;
+    }
+
+    // Tới lúc chèn task (follow/post/reply/retweet...) chưa? Lỗi của task KHÔNG tính vào watchdog -- log rồi lướt tiếp.
+    if (special && taskIndex < tasks.length && Date.now() >= taskTimes[taskIndex]) {
+      const task = tasks[taskIndex];
+      taskIndex++;
+      lastAction = `task:${taskName(task)}`;
+      const t0 = Date.now();
+      log(`[browse] Chèn việc "${taskName(task)}" vào giữa phiên lướt...`);
+      let lastTaskOk = false;
+      try {
+        await task(page);
+        lastTaskOk = true;
+        log(`[browse] Việc "${taskName(task)}" xong, quay lại lướt Home.`);
+      } catch (err) {
+        if (page.isClosed()) {
+          log(`[browse] Trang đã đóng (khi chạy việc "${taskName(task)}") -- dừng hẳn phiên lướt Home.`);
+          return false; // dừng sớm -- hàm này + các hàm sau vẫn còn trong mảng tasks của nơi gọi
+        }
+        log(`[browse] Việc "${taskName(task)}" bị lỗi, để chạy lại sau phiên lướt: ${err.message}`);
+      }
+      if (lastTaskOk) taskQueue.splice(taskQueue.indexOf(task), 1); // chạy thành công -- xoá khỏi mảng của nơi gọi; lỗi thì giữ lại để nơi gọi chạy lại
+      // Task làm ngay trên Home (VD retweet bài đang thấy trên feed) thì đứng nguyên đó lướt tiếp -- bấm tab Home lúc này sẽ đẩy feed về đầu.
+      const stillOnHome = /^\/home\/?$/.test(new URL(page.url()).pathname);
+      if (!stillOnHome) await backToHome(page, log, moveMouseVisibly, clickVisibly, deps).catch(() => {});
+      shiftSchedule(Date.now() - t0);
+      nextSpecialAt = Date.now() + humanBetween(...CONFIG.specialGapMsRange);
+      deadline = Math.max(deadline, nextSpecialAt); // task cuối xong thì vẫn lướt thêm 1 đoạn, không thoát phiên ngay sau khi post/follow
       continue;
     }
 
