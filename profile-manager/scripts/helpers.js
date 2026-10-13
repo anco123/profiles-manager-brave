@@ -280,6 +280,7 @@ async function clickVisibly(page, locatorOrBox, timeout = 15000) {
   await page.mouse.down();
   await page.waitForTimeout(40 + Math.random() * 90);
   await page.mouse.up();
+  return true; // click xong -- lỗi thì đã throw ở trên. Nơi gọi kiểu `clicked = await clickVisibly(...); if (!clicked)` (mở post khi lướt Home, follow_friends) trước đây luôn nhận undefined -> tưởng click hỏng
 }
 
 async function typeVisibly(page, locator, text, delay = 70, timeout = 15000) {
