@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Input Test</title>
+<link rel="stylesheet" href="style.css" />
+<style>
+  /* Trang đo thao tác chuột / touchpad / bàn phím THẬT trên máy này -- chỉ đo thông số thời gian & độ lớn sự kiện, lưu vào data/input-test/ trên máy, không gửi đi đâu. */
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); margin: 0; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 24px 16px 80px; }
+  h1 { font-family: var(--font-display); margin: 0 0 6px; }
+  .muted { color: var(--text-muted); font-size: 0.9rem; line-height: 1.55; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; margin-top: 18px; }
+  .card h2 { margin: 0 0 6px; font-size: 1.05rem; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  button { font: inherit; padding: 8px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-raised); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .status { font-family: var(--font-mono); font-size: 0.82rem; color: var(--running); }
+  .scrollbox { height: 360px; overflow-y: auto; margin-top: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius); padding: 0 16px; }
+  .scrollbox p { margin: 0; padding: 14px 0; border-bottom: 1px solid var(--border-soft); color: var(--text-muted); line-height: 1.5; }
+  .arena { position: relative; height: 380px; margin-top: 12px; border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; }
+  .target { position: absolute; border-radius: 50%; background: var(--accent); border: 0; padding: 0; }
+  .sample { font-family: var(--font-mono); background: var(--surface-raised); padding: 12px; border-radius: var(--radius); line-height: 1.6; user-select: none; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 110px; margin-top: 10px; font: inherit; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; }
+  pre { white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); margin: 10px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Input Test</h1>
+  <p class="muted">Đo thông số thao tác <b>thật</b> trên máy này để bộ giả lập chuột / con lăn / bàn phím khớp với thiết bị thật. Chỉ ghi số liệu sự kiện
+    (độ lớn mỗi lần lăn, khoảng thời gian, tốc độ chuột, thời gian giữ phím...) trên chính trang này, lưu vào thư mục <code>data/input-test/</code> trên máy, không gửi đi đâu.
+    Nên mở trang này <b>trong 1 profile GPM</b> (cùng kiểu cửa sổ/scale như lúc chạy thật). Làm phần nào cũng được, không cần làm hết.</p>
+
+  <div class="card" data-kind="mouse-wheel">
+    <h2>1. Con lăn chuột</h2>
+    <p class="muted">Bấm Bắt đầu, rồi dùng <b>nút lăn chuột</b> cuộn lên xuống trong khung dưới như đang đọc bình thường (~30 giây), xong bấm Dừng.</p>
+    <div class="row"><button class="primary" data-start>Bắt đầu</button><button data-stop disabled>Dừng</button><span class="status" data-status></span></div>
+    <div class="scrollbox"></div>
+  </div>
+
+  <div class="card" data-kind="touchpad">
+    <h2>2. Touchpad</h2>
+    <p class="muted">Như trên nhưng cuộn bằng <b>2 ngón trên touchpad</b> (~30 giây). Máy không có touchpad thì bỏ qua.</p>
+    <div class="row"><button class="primary" data-start>Bắt đầu</button><button data-stop disabled>Dừng</button><span class="status" data-status></span></div>
+    <div class="scrollbox"></div>
+  </div>
+
+  <div class="card" data-kind="mouse-move">
+    <h2>3. Di chuột và click</h2>
+    <p class="muted">Bấm Bắt đầu rồi click lần lượt vào 15 hình tròn hiện ra (to nhỏ, xa gần khác nhau), bằng tốc độ bình thường. Dùng chuột hay touchpad đều được.</p>
+    <div class="row"><button class="primary" data-start>Bắt đầu</button><button data-stop disabled>Dừng</button><span class="status" data-status></span>
+      <label class="muted"><input type="radio" name="pointer" value="mouse" checked /> chuột</label><label class="muted"><input type="radio" name="pointer" value="touchpad" /> touchpad</label></div>
+    <div class="arena"></div>
+  </div>
+
+  <div class="card" data-kind="keyboard">
+    <h2>4. Bàn phím</h2>
+    <p class="muted">Bấm Bắt đầu rồi gõ lại đoạn mẫu dưới vào ô trống, tốc độ bình thường, gõ sai thì cứ xoá sửa như thường lệ (không cần chính xác 100%).</p>
+    <div class="sample">Just saw the latest update from the team, and honestly it looks great. Can't wait to try the new features this weekend! Who else is joining the event? Let's go, 2026 is going to be a big year.</div>
+    <div class="row"><button class="primary" data-start>Bắt đầu</button><button data-stop disabled>Dừng</button><span class="status" data-status></span></div>
+    <textarea placeholder="Gõ lại đoạn mẫu ở đây..." disabled></textarea>
+  </div>
+
+  <div class="card">
+    <h2>Kết quả</h2>
+    <p class="muted">Sau mỗi phần đo, tóm tắt hiện ở đây. Bấm Lưu để ghi tất cả các phần đã đo ra file.</p>
+    <div class="row"><button class="primary" id="saveBtn" disabled>Lưu kết quả</button><span class="status" id="saveStatus"></span></div>
+    <pre id="summary"></pre>
+  </div>
+</div>
+
+<script>
+const results = {};
+const env = { devicePixelRatio: window.devicePixelRatio, viewport: [innerWidth, innerHeight], screen: [screen.width, screen.height], platform: navigator.platform };
+const r1 = (v) => Math.round(v * 10) / 10;
+const median = (a) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return r1(s[Math.floor(s.length / 2)]); };
+const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return r1(s[Math.min(s.length - 1, Math.floor(s.length * p))]); };
+const topVals = (a, n = 8) => Object.entries(a.reduce((m, v) => ((m[v] = (m[v] || 0) + 1), m), {})).sort((x, y) => y[1] - x[1]).slice(0, n).map(([v, c]) => `${v}×${c}`).join(' ');
+
+// Mỗi khung có Bắt đầu / Dừng riêng; listener chỉ ghi trong lúc đang đo.
+function setupCard(card, { start, stop, summarize }) {
+  const kind = card.dataset.kind, startBtn = card.querySelector('[data-start]'), stopBtn = card.querySelector('[data-stop]'), status = card.querySelector('[data-status]');
+  let t0 = 0, timer = null;
+  startBtn.onclick = () => { startBtn.disabled = true; stopBtn.disabled = false; t0 = performance.now(); start(card); timer = setInterval(() => { status.textContent = `đang đo... ${Math.round((performance.now() - t0) / 1000)}s`; }, 250); };
+  stopBtn.onclick = () => {
+    clearInterval(timer); startBtn.disabled = false; stopBtn.disabled = true;
+    const data = stop(card); results[kind] = { ...data, durationMs: Math.round(performance.now() - t0), summary: summarize(data) };
+    status.textContent = `xong (${Math.round(results[kind].durationMs / 1000)}s)`; renderSummary();
+  };
+}
+
+function fillScrollbox(box) { box.innerHTML = Array.from({ length: 200 }, (_, i) => `<p>Dòng ${i + 1} -- nội dung giả để cuộn, đọc lướt như một bài viết trên mạng xã hội. Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>`).join(''); }
+
+// 1 + 2: con lăn chuột / touchpad -- ghi nguyên từng sự kiện wheel (độ lớn, kiểu đơn vị, thời điểm).
+for (const kind of ['mouse-wheel', 'touchpad']) {
+  const card = document.querySelector(`[data-kind="${kind}"]`), box = card.querySelector('.scrollbox');
+  fillScrollbox(box);
+  let events = [], onWheel = null;
+  setupCard(card, {
+    start: () => { events = []; box.addEventListener('wheel', onWheel = (e) => events.push({ t: r1(e.timeStamp), dx: e.deltaX, dy: e.deltaY, mode: e.deltaMode, wdy: e.wheelDeltaY, ctrl: e.ctrlKey }), { passive: true }); },
+    stop: () => { box.removeEventListener('wheel', onWheel); return { env, events }; },
+    summarize: ({ events: ev }) => {
+      const gaps = ev.slice(1).map((e, i) => e.t - ev[i].t), ady = ev.map((e) => Math.abs(e.dy)).filter((v) => v > 0);
+      const bursts = []; let cur = 0; ev.forEach((e, i) => { if (i && e.t - ev[i - 1].t > 250) { bursts.push(cur); cur = 0; } cur++; }); if (cur) bursts.push(cur);
+      return { soSuKien: ev.length, deltaMode: topVals(ev.map((e) => e.mode)), deltaY_hayGap: topVals(ev.map((e) => r1(e.dy))), wheelDeltaY_hayGap: topVals(ev.map((e) => e.wdy)), deltaY_trungVi: median(ady),
+        coDeltaX: ev.filter((e) => e.dx).length, msGiuaSuKien_trungVi: median(gaps.filter((g) => g < 250)), msGiuaSuKien_p90: pct(gaps.filter((g) => g < 250), 0.9), suKienMoiLuotLan_trungVi: median(bursts) };
+    },
+  });
+}
+
+// 3: di chuột + click -- ghi đường đi chuột (mousemove) giữa các mục tiêu, thời điểm nhấn/nhả, vị trí click so với tâm mục tiêu.
+{
+  const card = document.querySelector('[data-kind="mouse-move"]'), arena = card.querySelector('.arena');
+  let moves = [], clicks = [], left = 0, target = null, lastDown = null, onMove, onDown, onUp;
+  const spawn = () => {
+    if (target) target.remove();
+    if (left <= 0) { arena.innerHTML = '<p class="muted" style="padding:16px">Xong 15 mục tiêu -- bấm Dừng.</p>'; target = null; return; }
+    left--; const size = [18, 28, 40, 60][Math.floor(Math.random() * 4)], W = arena.clientWidth, H = arena.clientHeight;
+    target = Object.assign(document.createElement('button'), { className: 'target' });
+    Object.assign(target.style, { width: `${size}px`, height: `${size}px`, left: `${Math.random() * (W - size)}px`, top: `${Math.random() * (H - size)}px` });
+    target.dataset.size = size; target.dataset.shownAt = performance.now(); arena.appendChild(target);
+  };
+  setupCard(card, {
+    start: () => {
+      moves = []; clicks = []; left = 15; arena.innerHTML = '';
+      document.addEventListener('mousemove', onMove = (e) => moves.push({ t: r1(e.timeStamp), x: e.clientX, y: e.clientY }));
+      arena.addEventListener('mousedown', onDown = (e) => { lastDown = { t: e.timeStamp, x: e.clientX, y: e.clientY }; });
+      arena.addEventListener('mouseup', onUp = (e) => {
+        if (!target || !lastDown || e.target !== target) return;
+        const r = target.getBoundingClientRect();
+        clicks.push({ shownAt: r1(+target.dataset.shownAt), down: r1(lastDown.t), up: r1(e.timeStamp), size: +target.dataset.size, offX: r1(lastDown.x - (r.left + r.width / 2)), offY: r1(lastDown.y - (r.top + r.height / 2)), driftPx: r1(Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y)) });
+        spawn();
+      });
+      spawn();
+    },
+    stop: () => { document.removeEventListener('mousemove', onMove); arena.removeEventListener('mousedown', onDown); arena.removeEventListener('mouseup', onUp); return { env, pointer: card.querySelector('input[name=pointer]:checked').value, moves, clicks }; },
+    summarize: ({ moves: mv, clicks: ck }) => {
+      const gaps = mv.slice(1).map((m, i) => m.t - mv[i].t).filter((g) => g < 100);
+      // Dừng trước khi nhấn = từ lần mousemove cuối trước lúc nhấn tới lúc nhấn
+      const preClick = ck.map((c) => { const before = mv.filter((m) => m.t <= c.down); return before.length ? c.down - before[before.length - 1].t : null; }).filter((v) => v !== null);
+      return { soClick: ck.length, msGiuChuot_trungVi: median(ck.map((c) => c.up - c.down)), msDungTruocKhiNhan_trungVi: median(preClick), msTuLucHienToiLucNhan_trungVi: median(ck.map((c) => c.down - c.shownAt)),
+        lechKhoiTamPx_trungVi: median(ck.map((c) => Math.hypot(c.offX, c.offY))), xeDichKhiNhanPx_trungVi: median(ck.map((c) => c.driftPx)), msGiuaMousemove_trungVi: median(gaps) };
+    },
+  });
+}
+
+// 4: bàn phím -- ghi thời điểm nhấn/nhả từng phím của đoạn mẫu (phím chữ ghi đúng ký tự để đo theo cặp chữ; đoạn gõ là đoạn mẫu cố định, không phải nội dung riêng).
+{
+  const card = document.querySelector('[data-kind="keyboard"]'), ta = card.querySelector('textarea');
+  let keys = [], downs = {}, onDown, onUp;
+  const kindOf = (k) => (k.length === 1 ? (/[a-z]/i.test(k) ? 'letter' : /\d/.test(k) ? 'digit' : k === ' ' ? 'space' : 'punct') : k.toLowerCase());
+  setupCard(card, {
+    start: () => {
+      keys = []; downs = {}; ta.value = ''; ta.disabled = false; ta.focus();
+      ta.addEventListener('keydown', onDown = (e) => { if (!e.repeat) downs[e.code] = { t: e.timeStamp, key: e.key, shift: e.shiftKey }; });
+      ta.addEventListener('keyup', onUp = (e) => { const d = downs[e.code]; if (!d) return; delete downs[e.code]; keys.push({ down: r1(d.t), up: r1(e.timeStamp), key: d.key.length === 1 ? d.key : d.key, kind: kindOf(d.key), shift: d.shift }); });
+    },
+    stop: () => { ta.removeEventListener('keydown', onDown); ta.removeEventListener('keyup', onUp); ta.disabled = true; keys.sort((a, b) => a.down - b.down); return { env, keys }; },
+    summarize: ({ keys: ks }) => {
+      const typed = ks.filter((k) => k.kind !== 'shift'), flight = typed.slice(1).map((k, i) => k.down - typed[i].down).filter((g) => g < 2000);
+      const byKind = (kind) => median(typed.slice(1).filter((k) => k.kind === kind).map((k, i) => k.down - typed[typed.indexOf(k) - 1].down).filter((g) => g < 2000));
+      const mins = (typed.length ? (typed[typed.length - 1].down - typed[0].down) / 60000 : 0);
+      return { soPhim: typed.length, tuMoiPhut: mins ? Math.round(typed.filter((k) => k.kind !== 'backspace').length / 5 / mins) : null, msGiuPhim_trungVi: median(typed.map((k) => k.up - k.down)),
+        msGiuaPhim_trungVi: median(flight), msGiuaPhim_p90: pct(flight, 0.9), msTruocDauCach_trungVi: byKind('space'), msTruocDauCau_trungVi: byKind('punct'), tiLeBackspace: typed.length ? r1(100 * typed.filter((k) => k.kind === 'backspace').length / typed.length) + '%' : null,
+        soLanDungLau_tren1s: flight.filter((g) => g > 1000).length };
+    },
+  });
+}
+
+function renderSummary() {
+  document.getElementById('summary').textContent = Object.entries(results).map(([k, v]) => `[${k}]\n` + Object.entries(v.summary).map(([a, b]) => `  ${a}: ${b}`).join('\n')).join('\n\n');
+  document.getElementById('saveBtn').disabled = !Object.keys(results).length;
+}
+
+document.getElementById('saveBtn').onclick = async () => {
+  const st = document.getElementById('saveStatus');
+  try {
+    const res = await fetch('/api/input-test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ env, results }) });
+    const data = await res.json(); if (!res.ok) throw new Error(data.error || 'Lưu không thành công');
+    st.textContent = `Đã lưu: ${data.file}`;
+  } catch (err) { st.textContent = `Lỗi: ${err.message}`; }
+};
+</script>
+</body>
+</html>

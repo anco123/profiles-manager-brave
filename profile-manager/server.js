@@ -509,6 +509,21 @@ app.post('/api/home-tasks/reset', (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// Trang đo thao tác THẬT (public/input-test.html): con lăn chuột / touchpad / di chuột + click / bàn phím trên máy này -> số liệu dùng để
+// chỉnh bộ giả lập cho khớp thiết bị thật. Chỉ lưu file vào <DATA_DIR>/input-test/ trên máy, không gửi đi đâu.
+// -------------------------------------------------------------------
+app.get('/input-test', (req, res) => res.sendFile(path.join(__dirname, 'public', 'input-test.html')));
+app.post('/api/input-test', (req, res) => {
+  try {
+    const dir = path.join(DATA_DIR, 'input-test');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `input-test-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    fs.writeFileSync(file, JSON.stringify(req.body));
+    res.json({ success: true, file });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// -------------------------------------------------------------------
 // The standalone full-page script editor (separate from the dashboard's
 // cramped panel). Same origin/port as everything else -- see README
 // section 5 for why a second port wasn't worth it.
