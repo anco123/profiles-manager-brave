@@ -1,0 +1,77 @@
+{
+ "google chrome | microsoft excel | microsoft word | zoom": {
+  "question": "Phần mềm nào sau đây chủ yếu được dùng để soạn thảo văn bản?",
+  "options": [
+   "Google Chrome",
+   "Microsoft Word",
+   "Zoom",
+   "Microsoft Excel"
+  ],
+  "tried": [
+   "microsoft excel"
+  ],
+  "good": null,
+  "key": "google chrome | microsoft excel | microsoft word | zoom",
+  "full": "1. Câu hỏi chọn một đáp án\n1đ\nPhần mềm nào sau đây chủ yếu được dùng để soạn thảo văn bản?\nMicrosoft Excel\nMicrosoft Word\nGoogle Chrome\nZoom"
+ },
+ "cho phép nhiều người cùng chỉnh sửa một tài liệu trong thời gian thực. | giúp máy tính không cần kết nối internet vẫn cập nhật dữ liệu. | ngăn chặn hoàn toàn virus máy tính. | tự động tăng dung lượng file không giới hạn.": {
+  "question": "Lợi ích nổi bật của việc dùng ứng dụng văn phòng trên nền tảng đám mây là gì?",
+  "options": [
+   "Giúp máy tính không cần kết nối Internet vẫn cập nhật dữ liệu.",
+   "Tự động tăng dung lượng file không giới hạn.",
+   "Ngăn chặn hoàn toàn virus máy tính.",
+   "Cho phép nhiều người cùng chỉnh sửa một tài liệu trong thời gian thực."
+  ],
+  "tried": [
+   "cho phép nhiều người cùng chỉnh sửa một tài liệu trong thời gian thực."
+  ],
+  "good": null,
+  "key": "cho phép nhiều người cùng chỉnh sửa một tài liệu trong thời gian thực. | giúp máy tính không cần kết nối internet vẫn cập nhật dữ liệu. | ngăn chặn hoàn toàn virus máy tính. | tự động tăng dung lượng file không giới hạn.",
+  "full": "2. Câu hỏi chọn một đáp án\n1đ\nLợi ích nổi bật của việc dùng ứng dụng văn phòng trên nền tảng đám mây là gì?\nCho phép nhiều người cùng chỉnh sửa một tài liệu trong thời gian thực.\nTự động tăng dung lượng file không giới hạn.\nGiúp máy tính không cần kết nối Internet vẫn cập nhật dữ liệu.\nNgăn chặn hoàn toàn virus máy tính."
+ },
+ "gợi ý nội dung và tự động tóm tắt khi soạn thảo văn bản. | thay thế hoàn toàn con người, tự ra quyết định cuối cùng. | tự động chơi game giải trí trong giờ làm việc. | tự động gửi tài liệu mật cho tất cả mọi người để cùng đọc.": {
+  "question": "Trí tuệ nhân tạo (AI) có thể hỗ trợ gì cho công việc văn phòng?",
+  "options": [
+   "Thay thế hoàn toàn con người, tự ra quyết định cuối cùng.",
+   "Tự động gửi tài liệu mật cho tất cả mọi người để cùng đọc.",
+   "Gợi ý nội dung và tự động tóm tắt khi soạn thảo văn bản.",
+   "Tự động chơi game giải trí trong giờ làm việc."
+  ],
+  "tried": [
+   "tự động gửi tài liệu mật cho tất cả mọi người để cùng đọc."
+  ],
+  "good": null,
+  "key": "gợi ý nội dung và tự động tóm tắt khi soạn thảo văn bản. | thay thế hoàn toàn con người, tự ra quyết định cuối cùng. | tự động chơi game giải trí trong giờ làm việc. | tự động gửi tài liệu mật cho tất cả mọi người để cùng đọc.",
+  "full": "3. Câu hỏi chọn một đáp án\n1đ\nTrí tuệ nhân tạo (AI) có thể hỗ trợ gì cho công việc văn phòng?\nTự động chơi game giải trí trong giờ làm việc.\nTự động gửi tài liệu mật cho tất cả mọi người để cùng đọc.\nThay thế hoàn toàn con người, tự ra quyết định cuối cùng.\nGợi ý nội dung và tự động tóm tắt khi soạn thảo văn bản."
+ },
+ "gửi tài liệu qua mạng xã hội công khai để tiện truy cập. | sử dụng máy tính nơi công cộng để gửi cho nhanh. | đính kèm tài liệu vào email rồi đăng công khai lên diễn đàn. | đặt mật khẩu cho file hoặc nén file có mật khẩu trước khi gửi (và gửi mật khẩu bằng kênh khác).": {
+  "question": "Khi gửi một tài liệu nội bộ quan trọng qua email, việc nào sau đây nên làm để tăng cường bảo mật?",
+  "options": [
+   "Đính kèm tài liệu vào email rồi đăng công khai lên diễn đàn.",
+   "Đặt mật khẩu cho file hoặc nén file có mật khẩu trước khi gửi (và gửi mật khẩu bằng kênh khác).",
+   "Sử dụng máy tính nơi công cộng để gửi cho nhanh.",
+   "Gửi tài liệu qua mạng xã hội công khai để tiện truy cập."
+  ],
+  "tried": [
+   "đặt mật khẩu cho file hoặc nén file có mật khẩu trước khi gửi (và gửi mật khẩu bằng kênh khác)."
+  ],
+  "good": null,
+  "key": "gửi tài liệu qua mạng xã hội công khai để tiện truy cập. | sử dụng máy tính nơi công cộng để gửi cho nhanh. | đính kèm tài liệu vào email rồi đăng công khai lên diễn đàn. | đặt mật khẩu cho file hoặc nén file có mật khẩu trước khi gửi (và gửi mật khẩu bằng kênh khác).",
+  "full": "4. Câu hỏi chọn một đáp án\n1đ\nKhi gửi một tài liệu nội bộ quan trọng qua email, việc nào sau đây nên làm để tăng cường bảo mật?\nGửi tài liệu qua mạng xã hội công khai để tiện truy cập.\nĐặt mật khẩu cho file hoặc nén file có mật khẩu trước khi gửi (và gửi mật khẩu bằng kênh khác).\nĐính kèm tài liệu vào email rồi đăng công khai lên diễn đàn.\nSử dụng máy tính nơi công cộng để gửi cho nhanh."
+ },
+ "hoàn toàn phù hợp, vì ai là công cụ nên tận dụng tối đa cho nhanh. | không phù hợp, vì đưa thông tin mật cho công cụ ai công cộng có thể làm lộ dữ liệu nhạy cảm. | phù hợp, miễn là xóa lịch sử trò chuyện sau khi dùng xong. | phù hợp, nếu chỉ dán một nửa nội dung báo cáo.": {
+  "question": "Anh/Chị muốn dùng ChatGPT để tóm tắt nhanh một báo cáo nội bộ có đóng dấu “Mật” của cơ quan. Việc này có phù hợp không?",
+  "options": [
+   "Phù hợp, miễn là xóa lịch sử trò chuyện sau khi dùng xong.",
+   "Hoàn toàn phù hợp, vì AI là công cụ nên tận dụng tối đa cho nhanh.",
+   "Phù hợp, nếu chỉ dán một nửa nội dung báo cáo.",
+   "Không phù hợp, vì đưa thông tin mật cho công cụ AI công cộng có thể làm lộ dữ liệu nhạy cảm."
+  ],
+  "tried": [
+   "không phù hợp, vì đưa thông tin mật cho công cụ ai công cộng có thể làm lộ dữ liệu nhạy cảm."
+  ],
+  "good": null,
+  "key": "hoàn toàn phù hợp, vì ai là công cụ nên tận dụng tối đa cho nhanh. | không phù hợp, vì đưa thông tin mật cho công cụ ai công cộng có thể làm lộ dữ liệu nhạy cảm. | phù hợp, miễn là xóa lịch sử trò chuyện sau khi dùng xong. | phù hợp, nếu chỉ dán một nửa nội dung báo cáo.",
+  "full": "5. Câu hỏi chọn một đáp án\n1đ\nAnh/Chị muốn dùng ChatGPT để tóm tắt nhanh một báo cáo nội bộ có đóng dấu “Mật” của cơ quan. Việc này có phù hợp không?\nKhông phù hợp, vì đưa thông tin mật cho công cụ AI công cộng có thể làm lộ dữ liệu nhạy cảm.\nHoàn toàn phù hợp, vì AI là công cụ nên tận dụng tối đa cho nhanh.\nPhù hợp, miễn là xóa lịch sử trò chuyện sau khi dùng xong.\nPhù hợp, nếu chỉ dán một nửa nội dung báo cáo."
+ }
+}

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Profile Manager</title>
+<script>
+  // See editor.html for why this is registered this early.
+  window.addEventListener('error', (e) => {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#e1594d;color:#fff;' +
+      'padding:10px 16px;font:12px/1.5 monospace;z-index:99999;white-space:pre-wrap;';
+    banner.textContent = 'JS error: ' + e.message + '  (' + (e.filename || '').split('/').pop() + ':' + e.lineno + ')' +
+      '  \u2014 press F12 for details. Just applied a patch? Try a hard refresh (Ctrl+Shift+R) first.';
+    const attach = () => document.body.prepend(banner);
+    if (document.body) attach(); else document.addEventListener('DOMContentLoaded', attach);
+  });
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/javascript/javascript.min.js"></script>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <h1>Profile Manager</h1>
+    </div>
+    <div class="topbar-actions">
+      <a class="btn btn-ghost" id="openQueueBtn" href="/editor" target="_blank">Queue</a>
+      <button class="btn btn-ghost" id="closeAllRunningBtn" title="Force-close every window this server currently has open">Close all windows</button>
+
+      <span class="topbar-divider" aria-hidden="true"></span>
+
+      <span class="selection-count" id="bulkCountLabel" hidden>0 selected</span>
+      <button class="btn btn-ghost" id="bulkDeselectBtn" disabled>Deselect</button>
+      <button class="btn btn-ghost" id="bulkProxyBtn" disabled>Change proxy&hellip;</button>
+      <button class="btn btn-ghost" id="bulkClearCacheBtn" disabled title="Chỉ xoá Cache/Code Cache/GPUCache... — không đụng đến cookie hay phiên đăng nhập">Clear cache</button>
+      <button class="btn btn-icon-danger" id="bulkDeleteBtn" disabled>Delete selected</button>
+
+      <span class="topbar-divider" aria-hidden="true"></span>
+
+      <button class="btn btn-ghost" id="openImportBtn">Import</button>
+      <button class="btn btn-ghost" id="openBulkCreateBtn">Bulk create</button>
+      <button class="btn btn-ghost" id="openExtensionsBtn" title="Extensions (applies to every profile)">&#129513;</button>
+      <button class="btn btn-ghost" id="openProxyPoolBtn" title="Danh s&aacute;ch proxy d&ugrave;ng chung cho h&agrave;ng &#273;&#7907;i Run">Proxy list</button>
+      <button class="btn btn-ghost" id="openSettingsBtn" title="Settings">&#9881;</button>
+      <button class="btn btn-primary" id="openCreateBtn">+ New profile</button>
+    </div>
+  </header>
+
+  <main class="content">
+    <div class="content-head">
+      <p class="muted" id="countLabel">0 profiles</p>
+      <div class="content-head-actions">
+        <input type="text" class="search-input" id="searchInput" placeholder="Tìm theo tên, nhấn Enter (vd: 001)" />
+        <button class="btn btn-ghost btn-sm" id="sortAlphaBtn" title="Sắp xếp theo tên A-Z thay vì theo thứ tự tạo">Sort A-Z</button>
+      </div>
+    </div>
+
+    <div class="grid" id="profileGrid"></div>
+
+    <div class="empty-state" id="emptyState" hidden>
+      <p>No profiles yet.</p>
+      <p class="muted">Each profile is its own isolated browser window &mdash; own cookies, own storage, own settings.</p>
+      <button class="btn btn-primary" id="emptyCreateBtn">+ Create your first profile</button>
+    </div>
+  </main>
+
+</div>
+
+<!-- Slide-over panel for creating a profile -->
+<div class="overlay" id="overlay" hidden></div>
+<aside class="panel" id="createPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>New profile</h2>
+    <button class="icon-btn" id="closePanelBtn" aria-label="Close">&times;</button>
+  </div>
+
+  <form class="panel-body" id="createForm">
+    <label class="field">
+      <span>Profile name</span>
+      <input type="text" name="name" placeholder="e.g. Client A &ndash; Facebook" required />
+    </label>
+
+    <div class="field-row">
+      <label class="field">
+        <span>Viewport width</span>
+        <input type="number" name="viewportWidth" value="1366" min="320" />
+      </label>
+      <label class="field">
+        <span>Viewport height</span>
+        <input type="number" name="viewportHeight" value="768" min="480" />
+      </label>
+    </div>
+
+    <label class="field">
+      <span>User agent <em>(optional &mdash; leave blank so it always matches whatever engine actually launches, forever, even after you update Chrome Portable)</em></span>
+      <input type="text" name="userAgent" placeholder="Leave blank unless you specifically need a different UA than the real engine's own" />
+    </label>
+
+    <div class="field-row">
+      <label class="field">
+        <span>Locale</span>
+        <input type="text" name="locale" value="en-US" placeholder="en-US" />
+      </label>
+      <label class="field">
+        <span>Timezone</span>
+        <input type="text" name="timezoneId" value="Asia/Ho_Chi_Minh" placeholder="Asia/Ho_Chi_Minh" />
+      </label>
+    </div>
+
+    <div class="divider"><span>Fingerprint</span></div>
+    <label class="field field-checkbox">
+      <input type="checkbox" name="autoFingerprint" checked />
+      <span>Spoof canvas / WebGL / audio / font fingerprint</span>
+    </label>
+    <p class="field-note">
+      On by default: generates a random, internally-consistent identity (GPU string, CPU/RAM, canvas &amp; audio noise, font list) on top of the User-Agent/viewport/locale/timezone above, and turns on WebRTC leak protection for this profile. Uncheck only if you deliberately want this profile to report this machine's real hardware (e.g. every profile without it enabled reports the SAME real GPU/CPU/RAM/canvas/audio, since there's nothing profile-specific being spoofed). See README section 13.
+    </p>
+
+    <div id="engineConfigSection">
+      <div class="divider"><span>Browser engine</span></div>
+
+      <label class="field">
+        <span>Engine</span>
+        <select name="engineMode" id="engineModeSelect">
+          <option value="chromium">Bundled Chromium (default, no setup)</option>
+          <option value="chrome">System Google Chrome</option>
+          <option value="custom" selected>Custom executable (Chrome Portable)</option>
+        </select>
+      </label>
+
+      <label class="field" id="executablePathField">
+        <span>Path to chrome.exe <em>(inside the portable app's <code>App\Chrome-bin\</code> folder)</em></span>
+        <input type="text" name="executablePath" placeholder="C:\PortableApps\GoogleChromePortable\App\Chrome-bin\chrome.exe" />
+      </label>
+    </div>
+
+    <p class="field-note" id="engineConfiguredNote" hidden>
+      Engine: <strong>Chrome Portable</strong>, configured once via <code>.env</code> &mdash; applies to every profile, nothing to set here.
+    </p>
+
+    <div class="divider"><span>Proxy (optional)</span></div>
+
+    <label class="field">
+      <span>Proxy server</span>
+      <input type="text" name="proxyServer" placeholder="http://host:port" />
+    </label>
+    <div class="field-row">
+      <label class="field">
+        <span>Username</span>
+        <input type="text" name="proxyUsername" />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="proxyPassword" />
+      </label>
+    </div>
+
+    <button type="button" class="btn btn-ghost" id="detectLocationBtn">Detect location from proxy &rarr;</button>
+    <div class="field-note" id="detectLocationResult" hidden></div>
+
+    <div class="panel-actions">
+      <button type="button" class="btn btn-ghost" id="cancelCreateBtn">Cancel</button>
+      <button type="submit" class="btn btn-primary">Create profile</button>
+    </div>
+  </form>
+</aside>
+
+<!-- Drag-select marquee box, positioned/sized by app.js during a drag -->
+<div class="selection-box" id="selectionBox" hidden></div>
+
+<!-- Slide-over panel for bulk-creating sequentially numbered profiles -->
+<aside class="panel" id="bulkCreatePanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Bulk create</h2>
+    <button class="icon-btn" id="closeBulkCreateBtn" aria-label="Close">&times;</button>
+  </div>
+
+  <form class="panel-body" id="bulkCreateForm">
+    <p class="muted" style="margin:0;">Creates profiles named by sequential number. Start = 2, count = 200 &rarr; creates "2" through "201".</p>
+
+    <div class="field-row">
+      <label class="field">
+        <span>Starting number</span>
+        <input type="number" name="startNumber" value="1" required />
+      </label>
+      <label class="field">
+        <span>Count</span>
+        <input type="number" name="count" value="1" min="1" required />
+      </label>
+    </div>
+
+    <label class="field">
+      <span>Name prefix <em>(optional &mdash; e.g. "Client " &rarr; "Client 2", "Client 3"&hellip;)</em></span>
+      <input type="text" name="prefix" placeholder="" />
+    </label>
+
+    <div class="field-row">
+      <label class="field">
+        <span>Viewport width</span>
+        <input type="number" name="viewportWidth" value="1366" min="320" />
+      </label>
+      <label class="field">
+        <span>Viewport height</span>
+        <input type="number" name="viewportHeight" value="768" min="480" />
+      </label>
+    </div>
+
+    <div class="field-row">
+      <label class="field">
+        <span>Locale</span>
+        <input type="text" name="locale" value="en-US" />
+      </label>
+      <label class="field">
+        <span>Timezone</span>
+        <input type="text" name="timezoneId" value="Asia/Ho_Chi_Minh" />
+      </label>
+    </div>
+
+    <label class="field field-checkbox">
+      <input type="checkbox" id="bulkUseIpTimezoneCheckbox" name="useProxyLocation" />
+      <span>Fill locale/timezone from a proxy's IP</span>
+    </label>
+    <div id="bulkIpTimezoneFields" hidden>
+      <label class="field">
+        <span>Test proxy <em>(just for detection &mdash; not assigned to any profile; use "Change proxy&hellip;" for that after creating)</em></span>
+        <input type="text" name="testProxyLine" id="bulkTestProxyLine" placeholder="1.2.3.4:8080:user:pass" />
+      </label>
+      <p class="field-note">
+        One line: <code>host:port</code> or <code>host:port:username:password</code>. Checked automatically when you click "Create profiles" &mdash; the whole batch's Locale/Timezone above get filled from this proxy's exit IP. If the check fails (dead proxy, timeout), the Locale/Timezone you typed above are used as-is instead of blocking creation.
+      </p>
+    </div>
+
+    <div class="divider"><span>Fingerprint</span></div>
+    <label class="field field-checkbox">
+      <input type="checkbox" name="autoFingerprint" checked />
+      <span>Spoof canvas / WebGL / audio / font fingerprint</span>
+    </label>
+    <p class="field-note">
+      On by default. Each profile in this batch gets its <strong>own, distinct</strong> generated identity &mdash; not one fingerprint shared by all of them (that would defeat the point). This also varies each profile's viewport size a little, snapped to realistic values close to what you set below (maximized-window or Windows-Snap-half widths, not an arbitrary pixel count) &mdash; so a batch of "independent" profiles doesn't all report the exact same window size either. Locale/timezone/engine are still shared across the batch, same as always. Uncheck only if you deliberately want this batch to report this machine's real, shared hardware instead.
+    </p>
+
+    <div id="bulkEngineConfigSection">
+      <div class="divider"><span>Browser engine</span></div>
+      <label class="field">
+        <span>Engine</span>
+        <select name="engineMode" id="bulkEngineModeSelect">
+          <option value="chromium">Bundled Chromium (default, no setup)</option>
+          <option value="chrome">System Google Chrome</option>
+          <option value="custom" selected>Custom executable (Chrome Portable)</option>
+        </select>
+      </label>
+      <label class="field" id="bulkExecutablePathField">
+        <span>Path to chrome.exe</span>
+        <input type="text" name="executablePath" placeholder="C:\PortableApps\GoogleChromePortable\App\Chrome-bin\chrome.exe" />
+      </label>
+    </div>
+    <p class="field-note" id="bulkEngineConfiguredNote" hidden>
+      Engine: <strong>Chrome Portable</strong>, configured once via <code>.env</code> &mdash; applies to every profile.
+    </p>
+
+    <div class="panel-actions">
+      <button type="button" class="btn btn-ghost" id="cancelBulkCreateBtn">Cancel</button>
+      <button type="submit" class="btn btn-primary" id="bulkCreateSubmitBtn">Create profiles</button>
+    </div>
+  </form>
+</aside>
+
+<!-- Slide-over panel for assigning proxies to the currently-selected profiles, one per line -->
+<aside class="panel" id="bulkProxyPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Change proxy</h2>
+    <button class="icon-btn" id="closeBulkProxyBtn" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="panel-body">
+    <p class="muted" style="margin:0;">One proxy per line, in the order below. Formats: <code>host:port</code> or <code>host:port:user:pass</code>. Leave a line blank to clear that profile's proxy.</p>
+
+    <div class="proxy-target-list" id="proxyTargetList"></div>
+
+    <label class="field">
+      <span>Proxies</span>
+      <textarea id="bulkProxyTextarea" rows="10" spellcheck="false" placeholder="1.2.3.4:8080&#10;5.6.7.8:8080:user:pass"></textarea>
+    </label>
+
+    <div class="panel-actions">
+      <button type="button" class="btn btn-primary" id="applyBulkProxyBtn">Apply</button>
+    </div>
+  </div>
+</aside>
+
+<!-- Slide-over panel for importing profiles from a pasted or uploaded JSON array -->
+<aside class="panel" id="importPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Import profiles</h2>
+    <button class="icon-btn" id="closeImportBtn" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="panel-body">
+    <p class="muted" style="margin:0;">
+      A JSON array, one object per profile. Any field <code>buildProfileObject()</code> understands is accepted &mdash;
+      <code>name</code>, <code>userAgent</code>, <code>viewportWidth</code>/<code>viewportHeight</code>, <code>locale</code>, <code>timezoneId</code>,
+      <code>proxyServer</code>/<code>proxyUsername</code>/<code>proxyPassword</code>, and an optional <code>fingerprint</code> object
+      (any subset of <code>platform</code>, <code>hardwareConcurrency</code>, <code>deviceMemory</code>, <code>webglVendor</code>, <code>webglRenderer</code>, <code>fonts</code>).
+      Missing <code>name</code> &rarr; auto-named "Imported N". Missing/omitted <code>fingerprint</code> &rarr; one is generated for you, so every imported profile still ends up distinct.
+    </p>
+
+    <label class="field">
+      <span>Upload a .json file</span>
+      <input type="file" id="importFileInput" accept="application/json,.json" />
+    </label>
+
+    <div class="divider"><span>or paste JSON</span></div>
+
+    <label class="field">
+      <span>Profiles JSON</span>
+      <textarea id="importTextarea" rows="10" spellcheck="false" placeholder='[&#10;  { "name": "Client 1", "userAgent": "Mozilla/5.0 ...", "fingerprint": { "webglRenderer": "ANGLE (NVIDIA, ...)" } },&#10;  { "name": "Client 2", "locale": "ja-JP" }&#10;]'></textarea>
+    </label>
+
+    <div class="panel-actions">
+      <button type="button" class="btn btn-primary" id="applyImportBtn">Import</button>
+    </div>
+  </div>
+</aside>
+
+<!-- Slide-over panel for .env-backed settings (DATA_DIR, CHROME_PATH) -->
+<aside class="panel" id="extensionsPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Extensions</h2>
+    <button class="icon-btn" id="closeExtensionsBtn" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="panel-body">
+    <label class="field">
+      <span>Extension folders <em>(one path per line &mdash; applies to EVERY profile)</em></span>
+      <textarea id="globalExtensionsInput" rows="6" spellcheck="false" placeholder="C:\extensions\foxyproxy&#10;C:\extensions\another-one"></textarea>
+    </label>
+    <p class="field-note">
+      Every profile loads these PLUS whatever it has in its own "Extension folders" field (set when creating/editing that profile) &mdash; same folder on disk for every window, so there's no extra disk usage, though each open Chrome window still runs its own copy of the extension in its own memory (separate processes can't share that part).
+    </p>
+    <p class="field-note is-warning">
+      Takes effect on a profile's <strong>next launch</strong> &mdash; already-open windows need to be closed and reopened, but the server itself does not need restarting (unlike Settings).
+    </p>
+
+    <div class="panel-actions">
+      <button type="button" class="btn btn-ghost" id="cancelExtensionsBtn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="saveExtensionsBtn">Save</button>
+    </div>
+  </div>
+</aside>
+
+<!-- Danh sách proxy dùng chung cho hàng đợi Run -- GET/POST /api/proxy-pool
+     (lưu ở DATA_DIR/proxy-pool.json, server đọc lại mỗi lần mở 1 profile). -->
+<aside class="panel" id="proxyPoolPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Proxy list</h2>
+    <button class="icon-btn" id="closeProxyPoolBtn" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="panel-body">
+    <label class="field">
+      <span>M&#7895;i d&ograve;ng 1 proxy: <code>host:port:user:pass-&quot;link reset&quot;</code></span>
+      <textarea id="proxyPoolPanelInput" rows="10" wrap="off" spellcheck="false" placeholder="sp07v2-01.v98proxy.xyz:37100:user:pass-&quot;https://v98proxy.xyz/sp07v2/...&quot;"></textarea>
+    </label>
+    <p class="field-note" id="proxyPoolPanelStatus"></p>
+    <p class="field-note">
+      C&oacute; danh s&aacute;ch &rarr; m&#7895;i profile ch&#7841;y b&#7857;ng Run &#273;&#432;&#7907;c g&aacute;n t&#7841;m proxy &iacute;t profile d&ugrave;ng nh&#7845;t, t&#7889;i &#273;a &quot;Max per proxy&quot; profile/proxy (b&#7887; qua proxy ri&ecirc;ng, kh&ocirc;ng s&#7917;a profile).
+      <strong>&#272;&#7875; tr&#7889;ng r&#7891;i Save</strong> = m&#7895;i profile d&ugrave;ng proxy ri&ecirc;ng nh&#432; c&#361; (set tay).
+    </p>
+    <p class="field-note is-warning">
+      &#272;ang ch&#7841;y v&#7851;n Save &#273;&#432;&#7907;c: profile m&#7903; <strong>sau &#273;&oacute;</strong> d&ugrave;ng danh s&aacute;ch m&#7899;i, profile &#273;ang ch&#7841;y gi&#7919; proxy c&#361; t&#7899;i khi xong.
+    </p>
+
+    <div class="panel-actions">
+      <button type="button" class="btn btn-ghost" id="cancelProxyPoolBtn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="saveProxyPoolBtn">Save</button>
+    </div>
+  </div>
+</aside>
+
+<aside class="panel" id="settingsPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Settings</h2>
+    <button class="icon-btn" id="closeSettingsBtn" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="panel-body">
+    <label class="field">
+      <span>Profiles folder <em>(where <code>profiles.json</code> and every profile's browser data live)</em></span>
+      <input type="text" id="settingsDataDir" placeholder="C:\Users\Admin\Desktop\PROJECT\Profile" />
+    </label>
+    <p class="field-note">
+      Leave blank to use the default <code>data</code> folder next to <code>server.js</code>. Changing this does <strong>not</strong> move any profiles already there &mdash; copy the old <code>data</code> folder to the new location yourself first if you want to keep them.
+    </p>
+
+    <div class="divider"><span>Browser engine</span></div>
+    <label class="field">
+      <span>Chrome Portable path <em>(same as <code>CHROME_PATH</code> &mdash; applies to every profile)</em></span>
+      <input type="text" id="settingsChromePath" placeholder="C:\PortableApps\GoogleChromePortable\App\Chrome-bin\chrome.exe" />
+    </label>
+
+    <div class="divider"><span>Queue</span></div>
+    <label class="field field-checkbox">
+      <input type="checkbox" id="settingsAutoClearCache" />
+      <span>Tự xoá cache của mỗi profile ngay sau khi chạy xong <em>(chỉ xoá Cache/Code Cache/GPUCache... &mdash; không đụng cookie hay phiên đăng nhập)</em></span>
+    </label>
+
+    <p class="field-note is-warning">
+      Cả 3 mục trên đều lưu thẳng vào <code>.env</code>. Không mục nào áp dụng ngay cho server đang chạy &mdash; dừng lại (Ctrl+C) rồi <code>npm start</code> lại sau khi lưu.
+    </p>
+
+    <div class="panel-actions">
+      <button type="button" class="btn btn-ghost" id="cancelSettingsBtn">Cancel</button>
+      <button type="button" class="btn btn-primary" id="saveSettingsBtn">Save to .env</button>
+    </div>
+  </div>
+</aside>
+
+<!-- Card template -->
+<template id="cardTemplate">
+  <article class="card">
+    <input type="checkbox" class="card-select" aria-label="Select this profile" />
+    <div class="card-top">
+      <div class="identicon"></div>
+      <div class="card-title">
+        <h3 class="card-name"></h3>
+        <div class="status"><span class="status-dot"></span><span class="status-text"></span></div>
+      </div>
+    </div>
+    <dl class="meta">
+      <div><dt>Viewport</dt><dd class="meta-viewport"></dd></div>
+      <div><dt>Locale</dt><dd class="meta-locale"></dd></div>
+      <div><dt>Timezone</dt><dd class="meta-timezone"></dd></div>
+      <div><dt>Proxy</dt><dd class="meta-proxy"></dd></div>
+      <div><dt>Engine</dt><dd class="meta-engine"></dd></div>
+      <div><dt>Fingerprint</dt><dd class="meta-fingerprint"></dd></div>
+    </dl>
+    <div class="card-actions">
+      <button class="btn btn-launch">Launch</button>
+      <button class="btn btn-script" hidden title="Opens the full script editor in a new tab">Run script &#8599;</button>
+      <button class="btn btn-ghost btn-fingerprint" title="Reset this profile: new fingerprint + clears all cookies/browsing data (keeps name, proxy, and other settings)">&#8635;</button>
+      <button class="btn btn-icon-danger" title="Delete profile">Delete</button>
+    </div>
+  </article>
+</template>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="shared.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
