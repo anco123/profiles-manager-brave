@@ -185,7 +185,8 @@ const CONFIG = {
   // Sau mỗi chuyến đi/task (follow, post...) phải lướt Home thật ít nhất khoảng này rồi mới làm việc đặc biệt tiếp -- không làm dồn liền nhau.
   specialGapMsRange: [6000, 15000],
   // Script có "script timeout" (server truyền mốc hết giờ qua options.deadlineAt): còn ít giờ hơn (số task chưa chạy × số này + 30s)
-  // thì thôi lướt/nghỉ giữa các việc, làm task liền nhau rồi kết thúc phiên -- không để script bị cắt ngang lúc đang lướt.
+  // thì không chờ mốc ngẫu nhiên của task + không mở chuyến đi mới nữa -- task còn lại làm ngay khi tới lượt, VẪN giữ nguyên
+  // khoảng đọc/lướt specialGapMsRange giữa các việc (không rút ngắn thời gian đọc), task xong thì kết thúc phiên.
   taskTimeEstimateMs: 60000,
   minTimeLeftToStartTaskMs: 20000, // còn ít hơn số này thì không bắt đầu task mới nữa -- dừng phiên, task còn lại để lần chạy sau
 };
@@ -1137,7 +1138,7 @@ function rollLikesBudget(mood) {
 //   Mỗi hàm được CHÈN VÀO GIỮA phiên lướt ở 1 thời điểm ngẫu nhiên, thứ tự xáo ngẫu nhiên. Hàm nào chạy THÀNH CÔNG thì bị XOÁ khỏi
 //   chính mảng truyền vào -- sau khi gọi xong, mảng chỉ còn các hàm bị LỖI hoặc CHƯA chạy (VD phiên dừng sớm), nơi gọi tự chạy lại.
 //   Thời gian chạy hàm KHÔNG trừ vào thời lượng lướt -- deadline tự lùi lại đúng bằng thời gian hàm chiếm.
-// options.deadlineAt: mốc hết giờ của cả script (ms, 0 = không giới hạn) -- sắp hết giờ thì bỏ lướt, làm task liền nhau (xem CONFIG.taskTimeEstimateMs).
+// options.deadlineAt: mốc hết giờ của cả script (ms, 0 = không giới hạn) -- sắp hết giờ thì task làm ngay khi tới lượt, vẫn đọc đủ khoảng nghỉ giữa các việc (xem CONFIG.taskTimeEstimateMs).
 async function browseHomeVaried(page, log, deps = {}, options = {}) {
   const { moveMouseVisibly, clickVisibly, showVisibleCursor } = deps;
   const taskQueue = options.tasks || [];
@@ -1219,8 +1220,8 @@ async function browseHomeVaried(page, log, deps = {}, options = {}) {
     }
     const rush = timeLeft() < (tasks.length - taskIndex) * CONFIG.taskTimeEstimateMs + 30000;
     if (rush && taskIndex >= tasks.length) { log(`[browse] Còn ${Math.round(timeLeft() / 1000)}s trước khi hết giờ script -- kết thúc phiên lướt sớm.`); return true; }
-    if (rush && !rushLogged) { rushLogged = true; log(`[browse] Còn ${Math.round(timeLeft() / 1000)}s trước khi hết giờ script -- bỏ lướt, làm liền ${tasks.length - taskIndex} việc còn lại.`); }
-    const special = rush || Date.now() >= nextSpecialAt;
+    if (rush && !rushLogged) { rushLogged = true; log(`[browse] Còn ${Math.round(timeLeft() / 1000)}s trước khi hết giờ script -- ${tasks.length - taskIndex} việc còn lại làm ngay khi tới lượt (vẫn đọc ${CONFIG.specialGapMsRange.map((v) => v / 1000).join('-')}s giữa các việc), không mở chuyến đi mới.`); }
+    const special = Date.now() >= nextSpecialAt; // khoảng đọc giữa 2 việc luôn giữ nguyên, kể cả khi sắp hết giờ
     const recovered = await recoverIfOnLoginPage(page, log, lastAction, moveMouseVisibly, clickVisibly, recoveryState);
     
     await dismissRandomNotice(page, log, deps);

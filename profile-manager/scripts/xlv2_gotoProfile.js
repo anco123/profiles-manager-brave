@@ -99,9 +99,9 @@ async function gotoProfile(page, log, deps, username) {
       if (!clicked) {
         throw new Error('clickElementOnScreen không click được element.');
       }
-      // Chờ tối đa 4 giây để detectProfileState xác nhận trạng thái.
-      // Nếu xác nhận được sớm thì return ngay.
-      // Nếu hết 4 giây vẫn chưa xác nhận được thì throw -> catch -> search.
+      // Dừng xem trang 4-8s như nhánh search (bấm vào kết quả xong cũng humanPause 4000, 4000) -- không rút ngắn thời gian nhìn profile.
+      // Sau đó chờ thêm tối đa 4 giây để detectProfileState xác nhận trạng thái; hết 4 giây vẫn chưa xác nhận được thì throw -> catch -> search.
+      await humanPause(page, 4000, 4000);
       const state = await waitForProfileState(page,selectors,username,4000);
       logConfirmed(log, username, state);
       return {suspended: state.suspended,notFound: state.notFound};

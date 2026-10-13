@@ -59,10 +59,8 @@ async function findTweetInTimeline(page, log, deps, targetLocator,username, labe
   let firstOldest = null;
 
   for (let scrollAttempt = 1; scrollAttempt <= maxScrollAttempts; scrollAttempt++) {
-    // Lần đầu chờ lâu hơn cho profile kịp tải; các lần sau đã chờ 1-2s sau khi cuộn rồi, không chờ thêm 3s mỗi lần như trước.
-    if (await inDom(scrollAttempt === 1 ? 3000 : 600) && await scrollToElement(page, log, deps, targetLocator, label)) return true;
+    if (await inDom(3000) && await scrollToElement(page, log, deps, targetLocator, label)) return true;
 
-    let far = false;
     if (targetId !== null) {
       const oldest = await oldestOwnId();
       if (oldest !== null && oldest < targetId) return openDirectly('Đã cuộn qua mốc thời gian của bài mà không thấy (có thể là reply / bài bị ẩn)');
@@ -71,7 +69,6 @@ async function findTweetInTimeline(page, log, deps, targetLocator,username, labe
         const perScroll = Number(firstOldest - oldest) / (scrollAttempt - 1); // mỗi lần cuộn đi lùi được bao nhiêu "thời gian"
         const need = Number(oldest - targetId) / perScroll;
         if (need > maxScrollAttempts - scrollAttempt) return openDirectly(`Bài còn quá xa (ước tính ~${Math.ceil(need)} lần cuộn nữa)`);
-        far = need > 4;
       }
     }
 
@@ -80,9 +77,9 @@ async function findTweetInTimeline(page, log, deps, targetLocator,username, labe
     // KHÔNG phải lần cuộn nào cũng di chuột trước -- người thật lăn chuột/trackpad rất nhiều lần mà không di chuyển con trỏ
     // (tay đặt sẵn trên chuột, chỉ lăn) -- đúng "tư duy" đã dùng trong interactXHome.js.
     if (Math.random() < 0.6) await ambientMouseMove(page, moveMouseVisibly);
-    const delta = far ? 900 + Math.random() * 600 : 400 + Math.random() * 400; // còn xa thì lướt nhanh tay hơn, gần thì chậm lại dò
+    const delta = 400 + Math.random() * 400;
     if (typeof deps.momentumScroll === 'function') await deps.momentumScroll(page, delta); else await page.mouse.wheel(0, delta);
-    await page.waitForTimeout(far ? 700 + Math.random() * 600 : 1000 + Math.random() * 1000); // cho DOM ảo hoá kịp render thêm bài mới sau khi cuộn
+    await page.waitForTimeout(1000 + Math.random() * 1000); // cho DOM ảo hoá kịp render thêm bài mới sau khi cuộn
   }
 
   return targetId !== null ? openDirectly(`Cuộn ${maxScrollAttempts} lần vẫn chưa thấy`) : false;
