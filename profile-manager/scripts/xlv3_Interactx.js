@@ -250,7 +250,7 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
   // Đặt lại toàn bộ task -> bấm "Reset Done Task" trên trang editor. Giữ tên hàm mà đổi target bên trong thì phải Reset (hoặc đổi tên hàm).
   // Hàm được chọn mà lỗi giữa phiên lướt / chưa kịp chạy (phiên dừng sớm) -> chạy lại lần lượt sau phiên lướt, thứ tự ngẫu nhiên.
   // Vẫn còn hàm lỗi -> throw để script báo failed (server retry được) -- hàm chưa xong vẫn nằm trong vòng chọn ở các lần sau.
-  const TASKS_PER_RUN = [2, 4]; // mỗi lần chạy làm ngẫu nhiên từ 2 tới 4 task chưa xong (còn ít hơn thì làm hết số còn lại)
+  const TASKS_PER_RUN = [0, 4]; // mỗi lần chạy làm ngẫu nhiên từ 0 tới 4 task chưa xong (0 = lần đó chỉ lướt Home; còn ít hơn thì làm hết số còn lại)
   const { getTasksDone, markTaskDone } = require('./xlv1_homeBrowseCounter');
   const xUsername = (row.D || '').toString().trim().replace(/^@/, '');
 
@@ -260,7 +260,8 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
     const pending = functions.filter((fn) => !(fn.name && done.includes(fn.name)));
     const want = TASKS_PER_RUN[0] + Math.floor(Math.random() * (TASKS_PER_RUN[1] - TASKS_PER_RUN[0] + 1));
     const picked = shuffle(pending).slice(0, want);
-    log(`[interactX] Task đã xong ${functions.length - pending.length}/${functions.length}` + (pending.length ? ` -- lần này làm ${picked.length}: ${picked.map((fn) => fn.name).join(', ')}` : ' -- đã làm hết, chỉ lướt Home (bấm "Reset Done Task" ở editor để làm lại).'));
+    const note = !pending.length ? 'đã làm hết, chỉ lướt Home (bấm "Reset Done Task" ở editor để làm lại).' : picked.length ? `lần này làm ${picked.length}: ${picked.map((fn) => fn.name).join(', ')}` : 'lần này không làm task nào, chỉ lướt Home.';
+    log(`[interactX] Task đã xong ${functions.length - pending.length}/${functions.length} -- ${note}`);
     // Bọc từng hàm: chạy THÀNH CÔNG thì ghi nhận ngay (giữ nguyên tên hàm cho log). Hàm không tên thì không ghi nhận được -- lần nào cũng có thể được chọn.
     const left = picked.map((fn) => ({ [fn.name]: async (p) => { await fn(p); if (xUsername && fn.name) markTaskDone(xUsername, fn.name); } })[fn.name]);
 
