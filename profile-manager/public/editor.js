@@ -2046,3 +2046,19 @@ document.getElementById('openVsCodeBtn').addEventListener('click', async () => {
     showToast(err.message, true);
   }
 });
+
+// Nút "Reset Done Task": xoá đánh dấu task đã xong của interactX (tất cả tài khoản) -- bấm mỗi khi đặt lại toàn bộ task mới.
+document.getElementById('resetDoneTasksBtn').addEventListener('click', async () => {
+  try {
+    const sum = await fetch('/api/home-tasks').then((r) => r.json());
+    if (sum.error) throw new Error(sum.error);
+    if (!sum.done) { showToast('Chưa có task nào được đánh dấu xong -- không cần reset.'); return; }
+    if (!confirm(`Đang có ${sum.done} task đã xong trên ${sum.accounts} tài khoản.\nXoá hết đánh dấu để lần chạy sau làm lại toàn bộ task?`)) return;
+    const res = await fetch('/api/home-tasks/reset', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Reset không thành công');
+    showToast(`Đã reset ${data.done} task đã xong của ${data.accounts} tài khoản.`);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+});

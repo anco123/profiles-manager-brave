@@ -482,6 +482,19 @@ app.post('/api/open-in-vscode', (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// Nút "Reset Done Task" trên trang editor: xem / xoá bộ đánh dấu task đã xong của interactX (data/home-browse/*.json, xem
+// scripts/xlv1_homeBrowseCounter.js). Xoá xong thì lần chạy sau mọi task đều được coi là chưa làm.
+// -------------------------------------------------------------------
+app.get('/api/home-tasks', (req, res) => {
+  try { res.json(require('./scripts/xlv1_homeBrowseCounter').summarizeAllTasks()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/home-tasks/reset', (req, res) => {
+  try { res.json({ success: true, ...require('./scripts/xlv1_homeBrowseCounter').resetAllTasks() }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// -------------------------------------------------------------------
 // The standalone full-page script editor (separate from the dashboard's
 // cramped panel). Same origin/port as everything else -- see README
 // section 5 for why a second port wasn't worth it.
