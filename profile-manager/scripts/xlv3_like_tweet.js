@@ -66,8 +66,8 @@ async function xlv3_like_tweet(page, log, deps, postUrl, maxInlineAttempts, maxI
   // này, không còn gộp XPath nữa.
   const statusLink = page.locator(`xpath=//*[@href="/${username}/status/${statusId}" and @role="link"]`).first();
   //const postTweetContainer = statusLink.locator('xpath=ancestor::*[@data-testid="tweet"][1]');
-  const postTweetContainer = page.locator(`xpath=//*[contains(@href,"/${username}/status/${statusId}")]/ancestor::*[@data-testid="tweet"]`);
-  const postTweetContainerToFind = page.locator(`xpath=//*[contains(@href,"/${username}/status/${statusId}")]/ancestor::*[@data-testid="tweet"]`);
+  const postTweetContainer = require('./xlv1_findTweetInTimeline').targetTweetLocator(page, username, statusId);
+  const postTweetContainerToFind = require('./xlv1_findTweetInTimeline').targetTweetLocator(page, username, statusId);
   // Scoped bên trong ĐÚNG postTweetContainer ở trên -- không phải
   // XPath toàn trang nữa, nên chắc chắn không lấy nhầm nút của bài
   // khác.

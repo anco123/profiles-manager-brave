@@ -49,7 +49,12 @@ function totp(secretBase32, digits = 6, stepSeconds = 30) {
   return String(binCode % Math.pow(10, digits)).padStart(digits, '0');
 }
 
+// Chấm đỏ con trỏ + vòng gợn khi click CHỈ để nhìn chuột lúc debug -- chúng là phần tử LẠ chèn vào DOM của trang (VD id="__visible_cursor__"),
+// trang web đọc được -> dấu vết bot. Mặc định TẮT; muốn xem thì thêm dòng SHOW_CURSOR=1 vào file .env rồi khởi động lại server.
+const showCursorEnabled = () => process.env.SHOW_CURSOR === '1';
+
 async function showVisibleCursor(page) {
+  if (!showCursorEnabled()) return;
   const pos = page.__cursorPos || { x: 0, y: 0 };
   try {
     await page.evaluate((p) => {
@@ -75,6 +80,7 @@ async function showVisibleCursor(page) {
 }
 
 async function updateCursorDot(page, x, y) {
+  if (!showCursorEnabled()) return;
   try {
     await page.evaluate(({ px, py }) => {
       const c = document.getElementById('__visible_cursor__');
@@ -259,7 +265,7 @@ async function clickVisibly(page, locatorOrBox, timeout = 15000) {
   const y = box.y + box.height / 2 + offsetY;
 
   await moveMouseVisibly(page, x, y);
-  await page.evaluate(({ x, y }) => {
+  if (showCursorEnabled()) await page.evaluate(({ x, y }) => {
     const ripple = document.createElement('div');
     ripple.style.cssText = `
       position: fixed; left: ${x}px; top: ${y}px; width: 8px; height: 8px;

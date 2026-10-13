@@ -85,4 +85,15 @@ async function findTweetInTimeline(page, log, deps, targetLocator,username, labe
   return targetId !== null ? openDirectly(`Cuộn ${maxScrollAttempts} lần vẫn chưa thấy`) : false;
 }
 
-module.exports = { findTweetInTimeline };
+// Locator ĐÚNG bài viết @username/status/statusId -- dùng chung cho like/retweet/reply/seeTweet.
+// Trước đây dùng contains(@href,"/user/status/id")/ancestor::tweet -> bắt nhầm cả bài QUOTE bài đích (thẻ quote bên trong có link tới bài đích)
+// và link /photo/1, /analytics... -- tìm trên Home trước thì rất dễ like/RT nhầm bài của người quote. Giờ chỉ nhận bài có LINK THỜI GIAN
+// của chính nó (<a> chứa <time>) trỏ ĐÚNG /username/status/id, link đó KHÔNG nằm trong thẻ quote (div[role=link] bên trong bài),
+// so username không phân biệt hoa/thường (postUrl có thể gõ khác kiểu chữ với X).
+function targetTweetLocator(page, username, statusId) {
+  const href = `/${String(username).toLowerCase()}/status/${statusId}`;
+  const lower = 'translate(@href,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")';
+  return page.locator(`xpath=//a[${lower}="${href}"][.//time][not(ancestor::div[@role="link"][ancestor::article])]/ancestor::article[@data-testid="tweet"][1]`).first(); // cùng 1 bài hiện 2 lần (VD 2 người cùng repost) -> lấy cái đầu, findTweetInTimeline tự lướt tới
+}
+
+module.exports = { findTweetInTimeline, targetTweetLocator };
