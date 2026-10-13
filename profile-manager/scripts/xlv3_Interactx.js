@@ -242,27 +242,34 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
   // ================================
   // LƯỚT HOME + CHÈN CÁC HÀM VÀO GIỮA PHIÊN LƯỚT
   // ================================
-  // Lần chạy nào cũng lướt Home bình thường (không còn giới hạn số lần lướt mỗi ngày), các hàm trong `functions` được CHÈN vào giữa
-  // phiên lướt (vị trí + thứ tự ngẫu nhiên) -- KHÔNG phụ thuộc functions là hàm gì, thêm/bớt/đổi hàm thoải mái ở runRandom bên dưới.
-  // Đánh dấu THEO TỪNG HÀM (theo tên hàm, mỗi ngày, lưu ở data/home-browse/<username>.json -- xem xlv1_homeBrowseCounter.js):
-  // hàm chạy thành công được ghi nhận ngay -> lần chạy lại trong ngày vẫn lướt Home nhưng bỏ qua hàm đó.
-  // Hàm lỗi giữa phiên lướt / chưa kịp chạy (phiên dừng sớm) -> chạy lại lần lượt sau phiên lướt, thứ tự ngẫu nhiên.
-  // Vẫn còn hàm lỗi -> throw để script báo failed (server retry được) -- lần chạy lại chỉ chèn đúng các hàm còn thiếu.
-  const { getTasksDoneToday, markTaskDone } = require('./xlv1_homeBrowseCounter');
+  // Lần chạy nào cũng lướt Home bình thường, MỖI LẦN chỉ bốc ngẫu nhiên TASKS_PER_RUN task CHƯA XONG trong `functions` để CHÈN vào giữa
+  // phiên lướt (vị trí + thứ tự ngẫu nhiên) -- mỗi lần chạy 1 bộ khác nhau, không lần nào cũng làm đủ cả bộ. KHÔNG phụ thuộc functions là
+  // hàm gì, thêm/bớt/đổi hàm thoải mái ở runRandom bên dưới.
+  // Đánh dấu VĨNH VIỄN theo tên hàm (lưu ở data/home-browse/<username>.json -- xem xlv1_homeBrowseCounter.js): hàm chạy thành công được
+  // ghi nhận ngay, các lần sau không chọn lại nữa -> dần dần làm hết cả bộ. Thêm hàm mới (tên mới) thì tự vào vòng chọn ở các lần sau.
+  // Đặt lại toàn bộ task -> bấm "Reset Done Task" trên trang editor. Giữ tên hàm mà đổi target bên trong thì phải Reset (hoặc đổi tên hàm).
+  // Hàm được chọn mà lỗi giữa phiên lướt / chưa kịp chạy (phiên dừng sớm) -> chạy lại lần lượt sau phiên lướt, thứ tự ngẫu nhiên.
+  // Vẫn còn hàm lỗi -> throw để script báo failed (server retry được) -- hàm chưa xong vẫn nằm trong vòng chọn ở các lần sau.
+  const TASKS_PER_RUN = [0, 4]; // mỗi lần chạy làm ngẫu nhiên từ 0 tới 4 task chưa xong (0 = lần đó chỉ lướt Home; còn ít hơn thì làm hết số còn lại)
+  const { getTasksDone, markTaskDone } = require('./xlv1_homeBrowseCounter');
   const xUsername = (row.D || '').toString().trim().replace(/^@/, '');
 
   async function browseHomeAndRun(page, functions) {
-    if (!xUsername) log('[interactX] Thiếu username (cột D) -- không ghi nhận được hàm nào đã chạy xong trong ngày, lần nào cũng chạy đủ.');
-    const doneToday = xUsername ? getTasksDoneToday(xUsername) : [];
-    const skipped = functions.filter((fn) => fn.name && doneToday.includes(fn.name));
-    if (skipped.length) log(`[interactX] Hôm nay đã chạy xong, bỏ qua: ${skipped.map((fn) => fn.name).join(', ')}`);
-    // Bọc từng hàm: chạy THÀNH CÔNG thì ghi nhận ngay (giữ nguyên tên hàm cho log). Hàm không tên thì không ghi nhận được -- lần nào cũng chạy.
-    const left = functions.filter((fn) => !skipped.includes(fn))
-      .map((fn) => ({ [fn.name]: async (p) => { await fn(p); if (xUsername && fn.name) markTaskDone(xUsername, fn.name); } })[fn.name]);
+    if (!xUsername) log('[interactX] Thiếu username (cột D) -- không ghi nhận được hàm nào đã chạy xong, lần nào cũng chọn trong cả bộ.');
+    const done = xUsername ? getTasksDone(xUsername) : [];
+    const pending = functions.filter((fn) => !(fn.name && done.includes(fn.name)));
+    const want = TASKS_PER_RUN[0] + Math.floor(Math.random() * (TASKS_PER_RUN[1] - TASKS_PER_RUN[0] + 1));
+    const picked = shuffle(pending).slice(0, want);
+    const note = !pending.length ? 'đã làm hết, chỉ lướt Home (bấm "Reset Done Task" ở editor để làm lại).' : picked.length ? `lần này làm ${picked.length}: ${picked.map((fn) => fn.name).join(', ')}` : 'lần này không làm task nào, chỉ lướt Home.';
+    log(`[interactX] Task đã xong ${functions.length - pending.length}/${functions.length} -- ${note}`);
+    // Bọc từng hàm: chạy THÀNH CÔNG thì ghi nhận ngay (giữ nguyên tên hàm cho log). Hàm không tên thì không ghi nhận được -- lần nào cũng có thể được chọn.
+    const left = picked.map((fn) => ({ [fn.name]: async (p) => { await fn(p); if (xUsername && fn.name) markTaskDone(xUsername, fn.name); } })[fn.name]);
 
     // browseHomeVaried tự xoá khỏi `left` hàm nào chạy thành công -- còn lại = lỗi hoặc chưa chạy
     log('Bắt đầu lướt Home...');
-    const finished = await browseHomeVaried(page, log, deps, { tasks: left });
+    // deadlineAt: mốc hết giờ script do server gắn lên page (theo "script timeout" của queue) -- sắp hết giờ thì phiên lướt tự rút ngắn, làm task liền nhau
+    const deadlineAt = page.__scriptDeadlineAt || 0;
+    const finished = await browseHomeVaried(page, log, deps, { tasks: left, deadlineAt });
     log(finished ? 'Đã lướt Home xong' : '[interactX] Phiên lướt Home dừng sớm.');
 
     if (!left.length) return;
@@ -270,11 +277,12 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
     const randomOrder = shuffle(left);
     console.log("Random order (chạy bù):", randomOrder.map(fn => fn.name).join(" → "));
     const failed = [];
-    for (const fn of randomOrder) { // chạy lần lượt, không chạy song song; 1 hàm lỗi không chặn các hàm sau
+    for (const [i, fn] of randomOrder.entries()) { // chạy lần lượt, không chạy song song; 1 hàm lỗi không chặn các hàm sau
+      if (deadlineAt && deadlineAt - Date.now() < 45000) { failed.push(...randomOrder.slice(i).map((f) => f.name)); log('[interactX] Sắp hết giờ script -- không chạy bù nữa, để lần chạy sau.'); break; }
       try { await fn(page); }
       catch (e) { if (page.isClosed()) throw e; failed.push(fn.name); log(`[interactX] Hàm "${fn.name}" lỗi: ${e.message}`); }
     }
-    if (failed.length) throw new Error(`[interactX] ${failed.length} hàm lỗi: ${failed.join(', ')} -- lần chạy lại hôm nay chỉ chạy các hàm chưa xong.`);
+    if (failed.length) throw new Error(`[interactX] ${failed.length} hàm chưa xong (lỗi / hết giờ): ${failed.join(', ')} -- các lần chạy sau vẫn chọn lại được các hàm này.`);
     console.log("✓ All functions completed");
   }
 
@@ -312,7 +320,7 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
       //const functions = [b,c,e,d,f];
       const functions = [follow_a,follow_b,follow_c,rt_a,like_tweet_a];
 
-      // Không chạy dồn 1 cục sau khi lướt nữa -- ném hết vào GIỮA phiên lướt Home, vị trí + thứ tự ngẫu nhiên (xem browseHomeAndRun)
+      // Mỗi lần chạy bốc ngẫu nhiên vài task chưa xong, chèn vào GIỮA phiên lướt Home, vị trí + thứ tự ngẫu nhiên (xem browseHomeAndRun)
       await browseHomeAndRun(page, functions);
   }
 

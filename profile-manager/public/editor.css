@@ -581,3 +581,16 @@ html, body.editor-body { height: 100%; overflow: hidden; }
   flex-shrink: 0;
 }
 .snippet-modal-foot #deleteSnippetBtn { margin-right: auto; color: var(--danger-strong); }
+
+/* Cửa sổ "Update Task State" -- dùng lại khung .snippet-modal */
+.task-state-modal { width: min(760px, 94vw); }
+.task-state-summary { margin: 0; color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; }
+.task-state-summary b { color: var(--text); }
+.task-state-list { display: flex; flex-direction: column; border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; }
+.task-state-row { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border-soft); font-size: 0.82rem; }
+.task-state-row:first-child { border-top: 0; }
+.task-state-user { font-family: var(--font-mono); color: var(--text); overflow-wrap: anywhere; }
+.task-state-done { color: var(--success-strong); }
+.task-state-missing { color: var(--warning-strong); }
+.task-state-removed { color: var(--text-faint); display: block; margin-top: 2px; }
+.task-state-filter { margin-right: auto; display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-muted); }

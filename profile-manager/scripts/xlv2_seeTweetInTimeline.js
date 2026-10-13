@@ -38,7 +38,7 @@ async function xlv2_seeTweetInTimeline(page, log, deps, postUrl, maxInlineAttemp
   // này, không còn gộp XPath nữa.
   const statusLink = page.locator(`xpath=//*[@href="/${username}/status/${statusId}" and @role="link"]`).first();
   const postTweetContainer = statusLink.locator('xpath=ancestor::*[@data-testid="tweet"][1]');
-  const postTweetContainerToFind = page.locator('xpath=//*[contains(@href,"/${username}/status/${statusId}")]/ancestor::*[@data-testid="tweet"]');
+  const postTweetContainerToFind = require('./xlv1_findTweetInTimeline').targetTweetLocator(page, username, statusId);
   // Scoped bên trong ĐÚNG postTweetContainer ở trên -- không phải
   // XPath toàn trang nữa, nên chắc chắn không lấy nhầm nút của bài
   // khác.

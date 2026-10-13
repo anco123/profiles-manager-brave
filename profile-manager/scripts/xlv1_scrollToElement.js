@@ -24,6 +24,7 @@ async function wheelWithMomentum(page, deps, delta) {
 
 async function scrollToElement(page, log, deps, locator, label = 'phần tử', maxSteps = 40) {
   const target = locator.first();
+  let prevY = null, stuck = 0;
   for (let step = 0; step <= maxSteps; step++) {
     const box = await target.boundingBox().catch(() => null);
     if (!box) { log(`[scrollToElement] ${label} không còn trong DOM (timeline ảo hoá) -- dừng lướt.`); return false; }
@@ -31,8 +32,15 @@ async function scrollToElement(page, log, deps, locator, label = 'phần tử', 
     const vh = (page.viewportSize() || { height: 800 }).height;
     const visibleH = Math.min(box.height, vh * 0.5); // phần tử cao hơn màn hình: chỉ cần phần đầu vào vùng nhìn
     if (box.y >= vh * 0.08 && box.y + visibleH <= vh * 0.92) return true;
+    // Lăn mà phần tử không nhích (sát đầu/cuối trang, không cuộn thêm được) -- đang nằm trong màn hình thì coi như tới, không lăn mãi tới hết 40 lượt.
+    if (prevY !== null && Math.abs(box.y - prevY) < 2 && ++stuck >= 2) {
+      const inView = box.y >= 0 && box.y + Math.min(box.height, 40) <= vh;
+      if (!inView) log(`[scrollToElement] Trang không cuộn thêm được mà ${label} vẫn ngoài màn hình -- dừng lướt.`);
+      return inView;
+    }
+    prevY = box.y;
 
-    if (step === 0) log(`[scrollToElement] ${label} đang ${box.y < 0 ? 'ở phía trên' : 'ở phía dưới'} màn hình -- lướt tới.`);
+    if (step === 0) log(`[scrollToElement] ${label} đang ${box.y < vh * 0.08 ? 'ở phía trên' : 'ở phía dưới'} màn hình -- lướt tới.`);
     const remaining = box.y + visibleH / 2 - vh * rand(0.38, 0.55); // điểm dừng lệch ngẫu nhiên quanh giữa màn hình
     const delta = Math.abs(remaining) <= 750 ? remaining * rand(0.92, 1.05) : Math.sign(remaining) * rand(380, 750);
     if (Math.random() < 0.3) await deps.ambientMouseMove(page, deps.moveMouseVisibly); // thỉnh thoảng nhích chuột giữa các lượt lăn

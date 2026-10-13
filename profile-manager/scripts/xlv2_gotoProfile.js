@@ -99,9 +99,9 @@ async function gotoProfile(page, log, deps, username) {
       if (!clicked) {
         throw new Error('clickElementOnScreen không click được element.');
       }
-      // Chờ tối đa 4 giây để detectProfileState xác nhận trạng thái.
-      // Nếu xác nhận được sớm thì return ngay.
-      // Nếu hết 4 giây vẫn chưa xác nhận được thì throw -> catch -> search.
+      // Dừng xem trang 4-8s như nhánh search (bấm vào kết quả xong cũng humanPause 4000, 4000) -- không rút ngắn thời gian nhìn profile.
+      // Sau đó chờ thêm tối đa 4 giây để detectProfileState xác nhận trạng thái; hết 4 giây vẫn chưa xác nhận được thì throw -> catch -> search.
+      await humanPause(page, 4000, 4000);
       const state = await waitForProfileState(page,selectors,username,4000);
       logConfirmed(log, username, state);
       return {suspended: state.suspended,notFound: state.notFound};
@@ -264,6 +264,17 @@ async function detectProfileState(page, selectors, username) {
     return { confirmed: true, suspended: false, notFound: true };
   }
   return { confirmed: false, suspended: false, notFound: false };
+}
+
+/** Chờ tối đa timeoutMs tới khi detectProfileState xác nhận đã tới đúng trang @username (xác nhận sớm thì trả về ngay) -- quá hạn thì throw. */
+async function waitForProfileState(page, selectors, username, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  do {
+    const state = await detectProfileState(page, selectors, username);
+    if (state.confirmed) return state;
+    await page.waitForTimeout(300);
+  } while (Date.now() < end);
+  throw new Error(`chưa xác nhận được trang @${username} sau ${timeoutMs}ms`);
 }
 
 function isVisible(page, selector, timeout = STATE_CHECK_TIMEOUT) {

@@ -482,6 +482,48 @@ app.post('/api/open-in-vscode', (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// Nút "Reset Done Task" trên trang editor: xem / xoá bộ đánh dấu task đã xong của interactX (data/home-browse/*.json, xem
+// scripts/xlv1_homeBrowseCounter.js). Xoá xong thì lần chạy sau mọi task đều được coi là chưa làm.
+// -------------------------------------------------------------------
+app.get('/api/home-tasks', (req, res) => {
+  try { res.json(require('./scripts/xlv1_homeBrowseCounter').summarizeAllTasks()); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+// Nút "Update Task State": đọc danh sách task ĐANG có trong code (dòng `const functions = [...]` trong runRandom của
+// scripts/xlv3_Interactx.js, bỏ qua dòng đã comment) rồi gộp với đánh dấu đã lưu -> từng tài khoản (cột D Excel + các tài khoản đã có đánh dấu)
+// còn thiếu task nào / Done toàn bộ. Chỉ đọc, không ghi gì -- lúc chạy interactX cũng tự gộp đúng như vậy, nút này chỉ để xem.
+app.get('/api/home-tasks/state', (req, res) => {
+  try {
+    const file = path.join(__dirname, 'scripts', 'xlv3_Interactx.js');
+    const m = fs.readFileSync(file, 'utf-8').match(/^\s*const functions\s*=\s*\[([^\]]*)\]/m);
+    if (!m) return res.status(400).json({ error: 'Không tìm thấy dòng "const functions = [...]" trong scripts/xlv3_Interactx.js' });
+    const tasks = m[1].split(',').map((s) => s.trim()).filter((s) => /^[\w$]+$/.test(s));
+    let usernames = [];
+    try { usernames = JSON.parse(fs.readFileSync(EXCEL_SNAPSHOT_FILE, 'utf-8')).map((r) => r && r.D); } catch (e) {}
+    res.json({ tasks, accounts: require('./scripts/xlv1_homeBrowseCounter').taskStateAll(tasks, usernames) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/home-tasks/reset', (req, res) => {
+  try { res.json({ success: true, ...require('./scripts/xlv1_homeBrowseCounter').resetAllTasks() }); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// -------------------------------------------------------------------
+// Trang đo thao tác THẬT (public/input-test.html): con lăn chuột / touchpad / di chuột + click / bàn phím trên máy này -> số liệu dùng để
+// chỉnh bộ giả lập cho khớp thiết bị thật. Chỉ lưu file vào <DATA_DIR>/input-test/ trên máy, không gửi đi đâu.
+// -------------------------------------------------------------------
+app.get('/input-test', (req, res) => res.sendFile(path.join(__dirname, 'public', 'input-test.html')));
+app.post('/api/input-test', (req, res) => {
+  try {
+    const dir = path.join(DATA_DIR, 'input-test');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `input-test-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    fs.writeFileSync(file, JSON.stringify(req.body));
+    res.json({ success: true, file });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// -------------------------------------------------------------------
 // The standalone full-page script editor (separate from the dashboard's
 // cramped panel). Same origin/port as everything else -- see README
 // section 5 for why a second port wasn't worth it.
@@ -1900,7 +1942,7 @@ function firstUserFrameLocation(stack, scriptName) {
   return null;
 }
 
-async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName = 'main.js') {
+async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName = 'main.js', deadlineAt = 0) {
   const running = runningContexts[id];
   if (!running) throw httpError(400, 'This profile is not running.');
   if (!code || !code.trim()) throw httpError(400, 'Write some code first.');
@@ -2010,6 +2052,9 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     // khác làm entry point, server.js truyền đúng tên file đó vào qua
     // tham số scriptName (xem /api/queue/start).
     const run = new AsyncFunction('page', 'context', 'log', 'require', 'input', 'proxyInfo', 'yellow', `${code}\n//# sourceURL=${scriptName}`);
+    // Mốc hết giờ của script (theo "script timeout" của queue, 0 = không giới hạn) -- gắn lên page để script nào cần (VD interactX
+    // lướt Home + chèn task) tự co thời gian lại cho kịp, không bị cắt ngang giữa chừng. Không đổi tham số của main.js.
+    running.page.__scriptDeadlineAt = deadlineAt || 0;
     const result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow);
     return { logs, result: result === undefined ? null : result, resultStatus };
   } catch (err) {
@@ -2352,14 +2397,15 @@ async function runQueueScriptThenClose(id, name) {
       // đang chạy/lỗi liên tục hay không -- không cách nào phân biệt
       // "đang treo" với "chưa từng chạy tới" chỉ bằng cách nhìn log.
       const onLog = (line) => queueLog(line, id, name);
+      const deadlineAt = queue.scriptTimeoutMs > 0 ? Date.now() + queue.scriptTimeoutMs : 0;
       const scriptOutcome = await (queue.scriptTimeoutMs > 0
         ? Promise.race([
-            runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName),
+            runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName, deadlineAt),
             new Promise((_, reject) =>
               setTimeout(() => reject(httpError(408, `Script timed out after ${queue.scriptTimeoutMs}ms`)), queue.scriptTimeoutMs)
             ),
           ])
-        : runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName));
+        : runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName, deadlineAt));
       // Không cần forEach `logs` ở đây nữa -- onLog ở trên đã đẩy từng
       // dòng ra real-time trong lúc script chạy rồi, forEach lại sẽ hiện
       // trùng lặp mỗi dòng 2 lần.

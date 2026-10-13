@@ -2046,3 +2046,59 @@ document.getElementById('openVsCodeBtn').addEventListener('click', async () => {
     showToast(err.message, true);
   }
 });
+
+// Nút "Reset Done Task": xoá đánh dấu task đã xong của interactX (tất cả tài khoản) -- bấm mỗi khi đặt lại toàn bộ task mới.
+document.getElementById('resetDoneTasksBtn').addEventListener('click', async () => {
+  try {
+    const sum = await fetch('/api/home-tasks').then((r) => r.json());
+    if (sum.error) throw new Error(sum.error);
+    if (!sum.done) { showToast('Chưa có task nào được đánh dấu xong -- không cần reset.'); return; }
+    if (!confirm(`Đang có ${sum.done} task đã xong trên ${sum.accounts} tài khoản.\nXoá hết đánh dấu để lần chạy sau làm lại toàn bộ task?`)) return;
+    const res = await fetch('/api/home-tasks/reset', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Reset không thành công');
+    showToast(`Đã reset ${data.done} task đã xong của ${data.accounts} tài khoản.`);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+});
+
+// Nút "Update Task State": server gộp danh sách task HIỆN TẠI trong code (const functions = [...] ở xlv3_Interactx.js) với các task đã xong
+// -> từng tài khoản còn thiếu task nào (task mới thêm vào code tự hiện ở đây) hay đã Done toàn bộ. Chỉ để xem, lúc chạy interactX cũng tự gộp y như vậy.
+const taskStateOverlay = document.getElementById('taskStateOverlay');
+const taskStateBody = document.getElementById('taskStateBody');
+const taskStateOnlyMissing = document.getElementById('taskStateOnlyMissing');
+let taskStateData = null;
+
+function renderTaskState() {
+  const { tasks, accounts } = taskStateData;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const doneAll = accounts.filter((a) => !a.missing.length).length;
+  const shown = (taskStateOnlyMissing.checked ? accounts.filter((a) => a.missing.length) : accounts).sort((a, b) => b.missing.length - a.missing.length);
+  taskStateBody.innerHTML =
+    `<p class="task-state-summary">Task trong code (<b>${tasks.length}</b>): ${tasks.map(esc).join(', ') || '(trống)'}<br>` +
+    `<b>${doneAll}/${accounts.length}</b> tài khoản Done toàn bộ, <b>${accounts.length - doneAll}</b> tài khoản vẫn còn task chưa làm.</p>` +
+    (shown.length ? `<div class="task-state-list">${shown.map((a) => `<div class="task-state-row"><span class="task-state-user">@${esc(a.username)}</span><span>` +
+      (a.missing.length ? `<span class="task-state-missing">Còn ${a.missing.length}: ${a.missing.map(esc).join(', ')}</span>` : '<span class="task-state-done">Done toàn bộ</span>') +
+      (a.removed.length ? `<span class="task-state-removed">Đã xong nhưng không còn trong code: ${a.removed.map(esc).join(', ')}</span>` : '') +
+      '</span></div>').join('')}</div>` : `<p class="task-state-summary">${accounts.length ? 'Tất cả tài khoản đã Done toàn bộ.' : 'Chưa có tài khoản nào (chưa import Excel và chưa chạy lần nào).'}</p>`);
+}
+
+async function loadTaskState() {
+  try {
+    const res = await fetch('/api/home-tasks/state');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Không đọc được trạng thái task');
+    taskStateData = data;
+    renderTaskState();
+    taskStateOverlay.hidden = false;
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+document.getElementById('taskStateBtn').addEventListener('click', loadTaskState);
+document.getElementById('refreshTaskStateBtn').addEventListener('click', loadTaskState);
+taskStateOnlyMissing.addEventListener('change', () => taskStateData && renderTaskState());
+document.getElementById('closeTaskStateBtn').addEventListener('click', () => { taskStateOverlay.hidden = true; });
+taskStateOverlay.addEventListener('click', (e) => { if (e.target === taskStateOverlay) taskStateOverlay.hidden = true; });
