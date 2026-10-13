@@ -489,6 +489,20 @@ app.get('/api/home-tasks', (req, res) => {
   try { res.json(require('./scripts/xlv1_homeBrowseCounter').summarizeAllTasks()); }
   catch (err) { res.status(500).json({ error: err.message }); }
 });
+// Nút "Update Task State": đọc danh sách task ĐANG có trong code (dòng `const functions = [...]` trong runRandom của
+// scripts/xlv3_Interactx.js, bỏ qua dòng đã comment) rồi gộp với đánh dấu đã lưu -> từng tài khoản (cột D Excel + các tài khoản đã có đánh dấu)
+// còn thiếu task nào / Done toàn bộ. Chỉ đọc, không ghi gì -- lúc chạy interactX cũng tự gộp đúng như vậy, nút này chỉ để xem.
+app.get('/api/home-tasks/state', (req, res) => {
+  try {
+    const file = path.join(__dirname, 'scripts', 'xlv3_Interactx.js');
+    const m = fs.readFileSync(file, 'utf-8').match(/^\s*const functions\s*=\s*\[([^\]]*)\]/m);
+    if (!m) return res.status(400).json({ error: 'Không tìm thấy dòng "const functions = [...]" trong scripts/xlv3_Interactx.js' });
+    const tasks = m[1].split(',').map((s) => s.trim()).filter((s) => /^[\w$]+$/.test(s));
+    let usernames = [];
+    try { usernames = JSON.parse(fs.readFileSync(EXCEL_SNAPSHOT_FILE, 'utf-8')).map((r) => r && r.D); } catch (e) {}
+    res.json({ tasks, accounts: require('./scripts/xlv1_homeBrowseCounter').taskStateAll(tasks, usernames) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 app.post('/api/home-tasks/reset', (req, res) => {
   try { res.json({ success: true, ...require('./scripts/xlv1_homeBrowseCounter').resetAllTasks() }); }
   catch (err) { res.status(500).json({ error: err.message }); }

@@ -68,4 +68,17 @@ function resetAllTasks() {
   return before;
 }
 
-module.exports = { getTasksDone, markTaskDone, summarizeAllTasks, resetAllTasks, HOME_BROWSE_DIR };
+// Nút "Update Task State": gộp danh sách task HIỆN TẠI trong code (taskNames) với đánh dấu đã lưu của từng tài khoản -> mỗi tài khoản
+// đã xong gì / còn thiếu gì. Task mới thêm vào code tự hiện ở "còn thiếu"; task đã xong nhưng không còn trong code thì nằm ở "removed".
+// usernames: danh sách tài khoản (VD cột D của Excel) -- tài khoản chưa chạy lần nào (chưa có file) thì thiếu cả bộ.
+function taskStateAll(taskNames, usernames = []) {
+  const accounts = new Map(); // key = tên file (đã chuẩn hoá) -> tên hiển thị
+  for (const u of usernames) { const name = String(u || '').trim().replace(/^@/, ''); if (name) accounts.set(path.basename(fileOf(name)), name); }
+  for (const f of fs.existsSync(HOME_BROWSE_DIR) ? fs.readdirSync(HOME_BROWSE_DIR) : []) if (f.endsWith('.json') && !accounts.has(f)) accounts.set(f, f.slice(0, -5));
+  return [...accounts].map(([f, username]) => {
+    const done = Object.keys(readState(path.join(HOME_BROWSE_DIR, f)).done);
+    return { username, done: taskNames.filter((t) => done.includes(t)), missing: taskNames.filter((t) => !done.includes(t)), removed: done.filter((t) => !taskNames.includes(t)) };
+  });
+}
+
+module.exports = { getTasksDone, markTaskDone, summarizeAllTasks, resetAllTasks, taskStateAll, HOME_BROWSE_DIR };
