@@ -262,7 +262,9 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
 
     // browseHomeVaried tự xoá khỏi `left` hàm nào chạy thành công -- còn lại = lỗi hoặc chưa chạy
     log('Bắt đầu lướt Home...');
-    const finished = await browseHomeVaried(page, log, deps, { tasks: left });
+    // deadlineAt: mốc hết giờ script do server gắn lên page (theo "script timeout" của queue) -- sắp hết giờ thì phiên lướt tự rút ngắn, làm task liền nhau
+    const deadlineAt = page.__scriptDeadlineAt || 0;
+    const finished = await browseHomeVaried(page, log, deps, { tasks: left, deadlineAt });
     log(finished ? 'Đã lướt Home xong' : '[interactX] Phiên lướt Home dừng sớm.');
 
     if (!left.length) return;
@@ -270,11 +272,12 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
     const randomOrder = shuffle(left);
     console.log("Random order (chạy bù):", randomOrder.map(fn => fn.name).join(" → "));
     const failed = [];
-    for (const fn of randomOrder) { // chạy lần lượt, không chạy song song; 1 hàm lỗi không chặn các hàm sau
+    for (const [i, fn] of randomOrder.entries()) { // chạy lần lượt, không chạy song song; 1 hàm lỗi không chặn các hàm sau
+      if (deadlineAt && deadlineAt - Date.now() < 45000) { failed.push(...randomOrder.slice(i).map((f) => f.name)); log('[interactX] Sắp hết giờ script -- không chạy bù nữa, để lần chạy sau.'); break; }
       try { await fn(page); }
       catch (e) { if (page.isClosed()) throw e; failed.push(fn.name); log(`[interactX] Hàm "${fn.name}" lỗi: ${e.message}`); }
     }
-    if (failed.length) throw new Error(`[interactX] ${failed.length} hàm lỗi: ${failed.join(', ')} -- lần chạy lại hôm nay chỉ chạy các hàm chưa xong.`);
+    if (failed.length) throw new Error(`[interactX] ${failed.length} hàm chưa xong (lỗi / hết giờ): ${failed.join(', ')} -- lần chạy lại hôm nay chỉ chạy các hàm chưa xong.`);
     console.log("✓ All functions completed");
   }
 

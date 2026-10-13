@@ -184,6 +184,10 @@ const CONFIG = {
   maxLoginRecoveryAttempts: 3,
   // Sau mỗi chuyến đi/task (follow, post...) phải lướt Home thật ít nhất khoảng này rồi mới làm việc đặc biệt tiếp -- không làm dồn liền nhau.
   specialGapMsRange: [6000, 15000],
+  // Script có "script timeout" (server truyền mốc hết giờ qua options.deadlineAt): còn ít giờ hơn (số task chưa chạy × số này + 30s)
+  // thì thôi lướt/nghỉ giữa các việc, làm task liền nhau rồi kết thúc phiên -- không để script bị cắt ngang lúc đang lướt.
+  taskTimeEstimateMs: 60000,
+  minTimeLeftToStartTaskMs: 20000, // còn ít hơn số này thì không bắt đầu task mới nữa -- dừng phiên, task còn lại để lần chạy sau
 };
 
 // Tâm trạng phiên -- roll 1 LẦN DUY NHẤT mỗi khi gọi browseHomeVaried,
@@ -1133,11 +1137,14 @@ function rollLikesBudget(mood) {
 //   Mỗi hàm được CHÈN VÀO GIỮA phiên lướt ở 1 thời điểm ngẫu nhiên, thứ tự xáo ngẫu nhiên. Hàm nào chạy THÀNH CÔNG thì bị XOÁ khỏi
 //   chính mảng truyền vào -- sau khi gọi xong, mảng chỉ còn các hàm bị LỖI hoặc CHƯA chạy (VD phiên dừng sớm), nơi gọi tự chạy lại.
 //   Thời gian chạy hàm KHÔNG trừ vào thời lượng lướt -- deadline tự lùi lại đúng bằng thời gian hàm chiếm.
+// options.deadlineAt: mốc hết giờ của cả script (ms, 0 = không giới hạn) -- sắp hết giờ thì bỏ lướt, làm task liền nhau (xem CONFIG.taskTimeEstimateMs).
 async function browseHomeVaried(page, log, deps = {}, options = {}) {
   const { moveMouseVisibly, clickVisibly, showVisibleCursor } = deps;
   const taskQueue = options.tasks || [];
   const tasks = shuffle(taskQueue);
   const taskName = (fn) => fn.name || 'task';
+  const hardDeadline = options.deadlineAt || 0;
+  const timeLeft = () => (hardDeadline ? hardDeadline - Date.now() : Infinity);
   if (!moveMouseVisibly || !clickVisibly) {
     throw new Error(
       'browseHomeVaried needs moveMouseVisibly and clickVisibly -- call it as ' +
@@ -1192,6 +1199,7 @@ async function browseHomeVaried(page, log, deps = {}, options = {}) {
   let likesLeft = rollLikesBudget(mood);
   let excursionIndex = 0;
   let taskIndex = 0;
+  let rushLogged = false;
   let nextSpecialAt = 0; // mốc sớm nhất được làm chuyến đi/task tiếp theo (xem CONFIG.specialGapMsRange)
   let lastAction = 'start';
   let consecutiveErrors = 0;
@@ -1205,7 +1213,14 @@ async function browseHomeVaried(page, log, deps = {}, options = {}) {
   };
 
   while (Date.now() < deadline || taskIndex < tasks.length) { // hết giờ mà còn task chưa chạy thì vẫn lướt tiếp tới khi chạy hết
-    const special = Date.now() >= nextSpecialAt;
+    if (timeLeft() < CONFIG.minTimeLeftToStartTaskMs) {
+      log(`[browse] Sắp hết giờ script (còn ${Math.round(timeLeft() / 1000)}s) -- dừng phiên${taskIndex < tasks.length ? `, ${tasks.length - taskIndex} việc chưa chạy để lần sau` : ''}.`);
+      return false;
+    }
+    const rush = timeLeft() < (tasks.length - taskIndex) * CONFIG.taskTimeEstimateMs + 30000;
+    if (rush && taskIndex >= tasks.length) { log(`[browse] Còn ${Math.round(timeLeft() / 1000)}s trước khi hết giờ script -- kết thúc phiên lướt sớm.`); return true; }
+    if (rush && !rushLogged) { rushLogged = true; log(`[browse] Còn ${Math.round(timeLeft() / 1000)}s trước khi hết giờ script -- bỏ lướt, làm liền ${tasks.length - taskIndex} việc còn lại.`); }
+    const special = rush || Date.now() >= nextSpecialAt;
     const recovered = await recoverIfOnLoginPage(page, log, lastAction, moveMouseVisibly, clickVisibly, recoveryState);
     
     await dismissRandomNotice(page, log, deps);
@@ -1232,7 +1247,7 @@ async function browseHomeVaried(page, log, deps = {}, options = {}) {
     }
 
     // Tới lúc cho chuyến đi tiếp theo chưa?
-    if (special && excursionIndex < excursions.length && Date.now() >= excursionTimes[excursionIndex]) {
+    if (special && !rush && timeLeft() > 60000 && excursionIndex < excursions.length && Date.now() >= excursionTimes[excursionIndex]) {
       const name = excursions[excursionIndex];
       excursionIndex++;
       lastAction = name;
@@ -1258,7 +1273,7 @@ async function browseHomeVaried(page, log, deps = {}, options = {}) {
     }
 
     // Tới lúc chèn task (follow/post/reply/retweet...) chưa? Lỗi của task KHÔNG tính vào watchdog -- log rồi lướt tiếp.
-    if (special && taskIndex < tasks.length && Date.now() >= taskTimes[taskIndex]) {
+    if (special && taskIndex < tasks.length && (rush || Date.now() >= taskTimes[taskIndex])) {
       const task = tasks[taskIndex];
       taskIndex++;
       lastAction = `task:${taskName(task)}`;

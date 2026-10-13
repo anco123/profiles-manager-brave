@@ -1900,7 +1900,7 @@ function firstUserFrameLocation(stack, scriptName) {
   return null;
 }
 
-async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName = 'main.js') {
+async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName = 'main.js', deadlineAt = 0) {
   const running = runningContexts[id];
   if (!running) throw httpError(400, 'This profile is not running.');
   if (!code || !code.trim()) throw httpError(400, 'Write some code first.');
@@ -2010,6 +2010,9 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     // khác làm entry point, server.js truyền đúng tên file đó vào qua
     // tham số scriptName (xem /api/queue/start).
     const run = new AsyncFunction('page', 'context', 'log', 'require', 'input', 'proxyInfo', 'yellow', `${code}\n//# sourceURL=${scriptName}`);
+    // Mốc hết giờ của script (theo "script timeout" của queue, 0 = không giới hạn) -- gắn lên page để script nào cần (VD interactX
+    // lướt Home + chèn task) tự co thời gian lại cho kịp, không bị cắt ngang giữa chừng. Không đổi tham số của main.js.
+    running.page.__scriptDeadlineAt = deadlineAt || 0;
     const result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow);
     return { logs, result: result === undefined ? null : result, resultStatus };
   } catch (err) {
@@ -2352,14 +2355,15 @@ async function runQueueScriptThenClose(id, name) {
       // đang chạy/lỗi liên tục hay không -- không cách nào phân biệt
       // "đang treo" với "chưa từng chạy tới" chỉ bằng cách nhìn log.
       const onLog = (line) => queueLog(line, id, name);
+      const deadlineAt = queue.scriptTimeoutMs > 0 ? Date.now() + queue.scriptTimeoutMs : 0;
       const scriptOutcome = await (queue.scriptTimeoutMs > 0
         ? Promise.race([
-            runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName),
+            runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName, deadlineAt),
             new Promise((_, reject) =>
               setTimeout(() => reject(httpError(408, `Script timed out after ${queue.scriptTimeoutMs}ms`)), queue.scriptTimeoutMs)
             ),
           ])
-        : runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName));
+        : runScriptOnProfile(id, queue.script, input, onLog, queue.scriptName, deadlineAt));
       // Không cần forEach `logs` ở đây nữa -- onLog ở trên đã đẩy từng
       // dòng ra real-time trong lúc script chạy rồi, forEach lại sẽ hiện
       // trùng lặp mỗi dòng 2 lần.

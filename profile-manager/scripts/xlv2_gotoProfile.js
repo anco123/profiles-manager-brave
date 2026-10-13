@@ -266,6 +266,17 @@ async function detectProfileState(page, selectors, username) {
   return { confirmed: false, suspended: false, notFound: false };
 }
 
+/** Chờ tối đa timeoutMs tới khi detectProfileState xác nhận đã tới đúng trang @username (xác nhận sớm thì trả về ngay) -- quá hạn thì throw. */
+async function waitForProfileState(page, selectors, username, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  do {
+    const state = await detectProfileState(page, selectors, username);
+    if (state.confirmed) return state;
+    await page.waitForTimeout(300);
+  } while (Date.now() < end);
+  throw new Error(`chưa xác nhận được trang @${username} sau ${timeoutMs}ms`);
+}
+
 function isVisible(page, selector, timeout = STATE_CHECK_TIMEOUT) {
   return page.locator(selector).first().isVisible({ timeout }).catch(() => false);
 }
