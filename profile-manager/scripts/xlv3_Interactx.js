@@ -23,8 +23,8 @@
 
 async function interactX(page, context, log, require, input,soFollower) {
   const helpers = require('./helpers');
-  const { browseHomeVaried, ambientMouseMove } = require('./xlv3_interactXHome_Update');
-  //const { browseHomeVaried, ambientMouseMove } = require('./xlv3_interactXHome');
+  const { browseHomeVaried, ambientMouseMove, momentumScroll } = require('./xlv3_interactXHome_Update');
+  //const { browseHomeVaried, ambientMouseMove, momentumScroll } = require('./xlv3_interactXHome');
   const { xlv3_follow_friends } = require('./xlv3_follow_friends');
   //const { xlv3_follow_someone } = require('./xlv3_follow_someone');
   const { xlv3_like_tweet } = require('./xlv3_like_tweet');
@@ -40,7 +40,7 @@ async function interactX(page, context, log, require, input,soFollower) {
   // nông nhất biết cần cả 2 thứ này, nên nó gánh việc require, còn
   // browseHomeVaried/runNewFile01 chỉ nhận deps đã gộp sẵn, không tự
   // require gì thêm.
-  const deps = { ...helpers, ambientMouseMove };
+  const deps = { ...helpers, ambientMouseMove, momentumScroll }; // momentumScroll: các task lướt tới bài/link bằng con lăn có quán tính giống lúc lướt Home
 
   
 const { readGoogleSheetCell } = require('./readGoogleSheetCell');
@@ -240,38 +240,42 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
   // ================================
 
   // ================================
-  // LƯỚT HOME -- GIỚI HẠN SỐ LẦN MỖI NGÀY
+  // LƯỚT HOME + CHÈN CÁC HÀM VÀO GIỮA PHIÊN LƯỚT
   // ================================
-  // HOME_BROWSE_PER_DAY = số lần lướt Home MỖI NGÀY cho mỗi tài khoản X -- TỰ SET Ở ĐÂY (1, 2, ...).
-  //   1 -> mỗi ngày lướt 1 lần; lần chạy sau trong CÙNG ngày thấy đã lướt rồi thì bỏ qua.
-  //   2 -> mỗi ngày lướt 2 lần; lần chạy nào thấy chưa đủ thì lướt bù ngay trong lần đó cho đủ 2.
-  // Số lần đã lướt lưu theo username (cột D) ở data/home-browse/<username>.json (xem xlv1_homeBrowseCounter.js); sang ngày mới tự tính lại từ 0.
-  // Phiên lướt bị dừng sớm (trang đóng, không hồi phục được về Home...) thì KHÔNG tính -- lần chạy sau sẽ lướt bù.
-  const HOME_BROWSE_PER_DAY = 1;
-
-  const { getHomeBrowseCountToday, markHomeBrowsed } = require('./xlv1_homeBrowseCounter');
+  // Lần chạy nào cũng lướt Home bình thường (không còn giới hạn số lần lướt mỗi ngày), các hàm trong `functions` được CHÈN vào giữa
+  // phiên lướt (vị trí + thứ tự ngẫu nhiên) -- KHÔNG phụ thuộc functions là hàm gì, thêm/bớt/đổi hàm thoải mái ở runRandom bên dưới.
+  // Đánh dấu THEO TỪNG HÀM (theo tên hàm, mỗi ngày, lưu ở data/home-browse/<username>.json -- xem xlv1_homeBrowseCounter.js):
+  // hàm chạy thành công được ghi nhận ngay -> lần chạy lại trong ngày vẫn lướt Home nhưng bỏ qua hàm đó.
+  // Hàm lỗi giữa phiên lướt / chưa kịp chạy (phiên dừng sớm) -> chạy lại lần lượt sau phiên lướt, thứ tự ngẫu nhiên.
+  // Vẫn còn hàm lỗi -> throw để script báo failed (server retry được) -- lần chạy lại chỉ chèn đúng các hàm còn thiếu.
+  const { getTasksDoneToday, markTaskDone } = require('./xlv1_homeBrowseCounter');
   const xUsername = (row.D || '').toString().trim().replace(/^@/, '');
 
-  if (!xUsername) {
-    // Không có username thì không biết đếm cho tài khoản nào -- lướt 1 lần như cũ, không ghi nhận.
-    log('[interactX] Thiếu username (cột D) -- không kiểm tra được số lần lướt trong ngày, lướt Home 1 lần như bình thường.');
-    await browseHomeVaried(page, log, deps);
-    log('Đã lướt Home xong');
-  } else {
-    const doneToday = getHomeBrowseCountToday(xUsername);
-    if (doneToday >= HOME_BROWSE_PER_DAY) {
-      log(`[interactX] @${xUsername} hôm nay đã lướt Home ${doneToday}/${HOME_BROWSE_PER_DAY} lần -- đủ rồi, bỏ qua.`);
-    } else {
-      log(`[interactX] @${xUsername} hôm nay đã lướt Home ${doneToday}/${HOME_BROWSE_PER_DAY} lần -- lướt thêm ${HOME_BROWSE_PER_DAY - doneToday} lần cho đủ.`);
-      for (let i = doneToday; i < HOME_BROWSE_PER_DAY; i++) {
-        if (i > doneToday) await helpers.humanPause(page, 3000, 8000); // nghỉ vài giây giữa 2 phiên lướt liền nhau
-        log(`Bắt đầu lướt Home (lần ${i + 1}/${HOME_BROWSE_PER_DAY} hôm nay)...`);
-        const finished = await browseHomeVaried(page, log, deps);
-        if (!finished) { log('[interactX] Phiên lướt Home dừng sớm -- không tính lần này, lần chạy sau sẽ lướt bù.'); break; }
-        const count = markHomeBrowsed(xUsername);
-        log(`Đã lướt Home xong (${count}/${HOME_BROWSE_PER_DAY} lần hôm nay)`);
-      }
+  async function browseHomeAndRun(page, functions) {
+    if (!xUsername) log('[interactX] Thiếu username (cột D) -- không ghi nhận được hàm nào đã chạy xong trong ngày, lần nào cũng chạy đủ.');
+    const doneToday = xUsername ? getTasksDoneToday(xUsername) : [];
+    const skipped = functions.filter((fn) => fn.name && doneToday.includes(fn.name));
+    if (skipped.length) log(`[interactX] Hôm nay đã chạy xong, bỏ qua: ${skipped.map((fn) => fn.name).join(', ')}`);
+    // Bọc từng hàm: chạy THÀNH CÔNG thì ghi nhận ngay (giữ nguyên tên hàm cho log). Hàm không tên thì không ghi nhận được -- lần nào cũng chạy.
+    const left = functions.filter((fn) => !skipped.includes(fn))
+      .map((fn) => ({ [fn.name]: async (p) => { await fn(p); if (xUsername && fn.name) markTaskDone(xUsername, fn.name); } })[fn.name]);
+
+    // browseHomeVaried tự xoá khỏi `left` hàm nào chạy thành công -- còn lại = lỗi hoặc chưa chạy
+    log('Bắt đầu lướt Home...');
+    const finished = await browseHomeVaried(page, log, deps, { tasks: left });
+    log(finished ? 'Đã lướt Home xong' : '[interactX] Phiên lướt Home dừng sớm.');
+
+    if (!left.length) return;
+    if (page.isClosed()) throw new Error(`[interactX] Trang đã đóng -- còn ${left.length} hàm chưa chạy: ${left.map((fn) => fn.name).join(', ')}`);
+    const randomOrder = shuffle(left);
+    console.log("Random order (chạy bù):", randomOrder.map(fn => fn.name).join(" → "));
+    const failed = [];
+    for (const fn of randomOrder) { // chạy lần lượt, không chạy song song; 1 hàm lỗi không chặn các hàm sau
+      try { await fn(page); }
+      catch (e) { if (page.isClosed()) throw e; failed.push(fn.name); log(`[interactX] Hàm "${fn.name}" lỗi: ${e.message}`); }
     }
+    if (failed.length) throw new Error(`[interactX] ${failed.length} hàm lỗi: ${failed.join(', ')} -- lần chạy lại hôm nay chỉ chạy các hàm chưa xong.`);
+    console.log("✓ All functions completed");
   }
 
   const tweetContent = readGoogleSheetCell(row, 'G', 'POST');;
@@ -308,20 +312,8 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
       //const functions = [b,c,e,d,f];
       const functions = [follow_a,follow_b,follow_c,rt_a,like_tweet_a];
 
-      // Random thứ tự
-      const randomOrder = shuffle(functions);
-
-      console.log(
-          "Random order:",
-          randomOrder.map(fn => fn.name).join(" → ")
-      );
-
-      // Chạy lần lượt, không chạy song song
-      for (const fn of randomOrder) {
-          await fn(page);
-      }
-
-      console.log("✓ All functions completed");
+      // Không chạy dồn 1 cục sau khi lướt nữa -- ném hết vào GIỮA phiên lướt Home, vị trí + thứ tự ngẫu nhiên (xem browseHomeAndRun)
+      await browseHomeAndRun(page, functions);
   }
 
   // Đây chính là dòng bị thiếu trước đây -- không có dòng này thì
