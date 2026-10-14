@@ -17,9 +17,7 @@
 const rand = (a, b) => a + Math.random() * (b - a);
 
 async function wheelWithMomentum(page, deps, delta) {
-  if (typeof deps.momentumScroll === 'function') return deps.momentumScroll(page, delta);
-  const ticks = 3 + Math.floor(Math.random() * 3), weights = Array.from({ length: ticks }, (_, i) => ticks - i), sum = weights.reduce((s, w) => s + w, 0);
-  for (let i = 0; i < ticks; i++) { await page.mouse.wheel(0, (delta * weights[i]) / sum); if (i < ticks - 1) await page.waitForTimeout(rand(35, 110)); }
+  await require('./xlv1_humanInput').humanWheel(page, delta); // nấc lăn thật 100px (số đo /input-test), không gửi số lẻ
 }
 
 async function scrollToElement(page, log, deps, locator, label = 'phần tử', maxSteps = 40) {

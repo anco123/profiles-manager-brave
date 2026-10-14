@@ -78,7 +78,7 @@ async function findTweetInTimeline(page, log, deps, targetLocator,username, labe
     // (tay đặt sẵn trên chuột, chỉ lăn) -- đúng "tư duy" đã dùng trong interactXHome.js.
     if (Math.random() < 0.6) await ambientMouseMove(page, moveMouseVisibly);
     const delta = 400 + Math.random() * 400;
-    if (typeof deps.momentumScroll === 'function') await deps.momentumScroll(page, delta); else await page.mouse.wheel(0, delta);
+    if (typeof deps.momentumScroll === 'function') await deps.momentumScroll(page, delta); else await require('./xlv1_humanInput').humanWheel(page, delta);
     await page.waitForTimeout(1000 + Math.random() * 1000); // cho DOM ảo hoá kịp render thêm bài mới sau khi cuộn
   }
 

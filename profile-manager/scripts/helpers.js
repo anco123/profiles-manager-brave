@@ -93,7 +93,7 @@ async function updateCursorDot(page, x, y) {
   }
 }
 
-async function moveMouseVisibly(page, x, y, steps) {
+async function moveMouseVisibly(page, x, y, steps, targetSize = 40) {
   // FIX (round 2): seed __cursorPos BEFORE showVisibleCursor runs.
   // Previously the overlay was created first using whatever
   // page.__cursorPos happened to be (often undefined -> {x:0,y:0}),
@@ -126,48 +126,9 @@ async function moveMouseVisibly(page, x, y, steps) {
     return;
   }
 
-  if (steps === undefined) {
-    steps = Math.round(Math.min(50, Math.max(10, dist / 18)) * randomBetween(0.8, 1.25));
-  }
-
-  const bow = (Math.random() - 0.5) * Math.min(dist * 0.4, 100);
-  const nx = dist === 0 ? 0 : -dy / dist;
-  const ny = dist === 0 ? 0 : dx / dist;
-  const controlX = (start.x + x) / 2 + nx * bow;
-  const controlY = (start.y + y) / 2 + ny * bow;
-
-  const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
-
-  for (let i = 1; i <= steps; i++) {
-    const t = easeInOutCubic(i / steps);
-    const mt = 1 - t;
-
-    const px = mt * mt * start.x + 2 * mt * t * controlX + t * t * x + (Math.random() - 0.5) * 1.5;
-    const py = mt * mt * start.y + 2 * mt * t * controlY + t * t * y + (Math.random() - 0.5) * 1.5;
-
-    try {
-      await page.mouse.move(px, py);
-    } catch {
-      // FIX: page closed/navigated mid-move -- stop the loop instead
-      // of continuing to throw on every remaining iteration.
-      return;
-    }
-    await updateCursorDot(page, px, py);
-
-    await page.waitForTimeout(4 + Math.random() * 7);
-  }
-
-  if (dist > 40 && Math.random() < 0.18) {
-    const overshootX = x + (Math.random() - 0.5) * 16;
-    const overshootY = y + (Math.random() - 0.5) * 16;
-    await page.mouse.move(overshootX, overshootY).catch(() => {});
-    await updateCursorDot(page, overshootX, overshootY);
-    await page.waitForTimeout(20 + Math.random() * 50);
-
-    await page.mouse.move(x, y).catch(() => {});
-    await updateCursorDot(page, x, y);
-  }
-
+  // Đường đi + tốc độ theo số đo thật (xem xlv1_humanInput.js): 150-530px mất ~0.6-1s, mousemove ~16ms/lần, đôi khi vượt đích chút.
+  // `steps` (tham số cũ) không dùng nữa; tham số thứ 5 targetSize = cỡ đích (px) -- đích nhỏ / xa thì đi lâu hơn.
+  await require('./xlv1_humanInput').humanMove(page, start, x, y, targetSize, (px, py) => updateCursorDot(page, px, py));
   page.__cursorPos = { x, y };
 }
 
@@ -259,12 +220,11 @@ async function clickVisibly(page, locatorOrBox, timeout = 15000) {
   }
   if (!box) throw new Error('clickVisibly: target has no bounding box (not visible?)');
 
-  const offsetX = (Math.random() - 0.5) * Math.min(box.width * 0.5, 14);
-  const offsetY = (Math.random() - 0.5) * Math.min(box.height * 0.5, 14);
-  const x = box.x + box.width / 2 + offsetX;
-  const y = box.y + box.height / 2 + offsetY;
+  // Điểm nhấn lệch tâm theo cỡ nút (đo được ~9px), không ra ngoài nút
+  const { clickPoint, humanPressMouse } = require('./xlv1_humanInput');
+  const { x, y, size } = clickPoint(box);
 
-  await moveMouseVisibly(page, x, y);
+  await moveMouseVisibly(page, x, y, undefined, size);
   if (showCursorEnabled()) await page.evaluate(({ x, y }) => {
     const ripple = document.createElement('div');
     ripple.style.cssText = `
@@ -283,9 +243,7 @@ async function clickVisibly(page, locatorOrBox, timeout = 15000) {
     setTimeout(() => ripple.remove(), 320);
   }, { x, y }).catch(() => {});
 
-  await page.mouse.down();
-  await page.waitForTimeout(40 + Math.random() * 90);
-  await page.mouse.up();
+  await humanPressMouse(page); // dừng ngắm ~250ms rồi nhấn, giữ 80-125ms (số đo thật)
   return true; // click xong -- lỗi thì đã throw ở trên. Nơi gọi kiểu `clicked = await clickVisibly(...); if (!clicked)` (mở post khi lướt Home, follow_friends) trước đây luôn nhận undefined -> tưởng click hỏng
 }
 
@@ -298,11 +256,8 @@ async function typeVisibly(page, locator, text, delay = 70, timeout = 15000) {
   // keeping the same function signature so existing call sites don't
   // need to change.
   await clickVisibly(page, locator, timeout);
-  const spread = delay * 0.4;
-  for (const char of text) {
-    await locator.pressSequentially(char, { delay: 0 });
-    await page.waitForTimeout(Math.max(0, delay - spread + Math.random() * spread * 2));
-  }
+  // Nhịp gõ theo số đo thật + kiểu tay của profile (xem xlv1_humanInput.js) -- tham số `delay` cũ không dùng nữa, giữ để không phải sửa nơi gọi.
+  await require('./xlv1_humanInput').humanType(page, text);
 }
 
 async function randomTabDelay(page) {
@@ -373,10 +328,9 @@ async function confirmStepVaried(page, buttonLocator, timeout = 15000) {
 
 async function typeWithJitter(page, locator, text, minDelay = 40, maxDelay = 160, timeout = 15000) {
   await locator.waitFor({ state: 'visible', timeout });
-  for (const char of text) {
-    await locator.pressSequentially(char, { delay: 0 });
-    await page.waitForTimeout(minDelay + Math.random() * (maxDelay - minDelay));
-  }
+  await locator.focus(); // trước đây pressSequentially tự focus -- giữ nguyên hành vi đó
+  // Nhịp gõ theo số đo thật (xem xlv1_humanInput.js) -- minDelay/maxDelay cũ không dùng nữa, giữ để không phải sửa nơi gọi.
+  await require('./xlv1_humanInput').humanType(page, text);
 }
 
 async function humanPause(page, minMs = 500, maxMs = 1600) {
