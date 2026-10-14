@@ -132,7 +132,7 @@ async function browseProfileBriefly(page, { moveMouseVisibly, ambientMouseMove, 
     if (typeof momentumScroll === 'function') {
       await momentumScroll(page, delta);
     } else {
-      await page.mouse.wheel(0, delta);
+      await require('./xlv1_humanInput').humanWheel(page, delta);
     }
     await page.waitForTimeout(500 + Math.random() * 900);
   }

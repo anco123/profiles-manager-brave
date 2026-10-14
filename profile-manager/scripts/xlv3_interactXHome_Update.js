@@ -556,16 +556,8 @@ function pickWeightedExcursions(count, profile = PROFILE) {
 // nhất, giống cảm giác cuộn chuột/trackpad thật có đà, chậm dần chứ
 // không dừng đột ngột.
 async function momentumScroll(page, totalDelta) {
-  const direction = totalDelta >= 0 ? 1 : -1;
-  const magnitude = Math.abs(totalDelta);
-  const tickCount = randomInt(3, 5);
-  const rawWeights = Array.from({ length: tickCount }, (_, i) => tickCount - i);
-  const weightSum = rawWeights.reduce((s, w) => s + w, 0);
-  for (let i = 0; i < tickCount; i++) {
-    const share = (rawWeights[i] / weightSum) * magnitude * randomBetween(0.85, 1.15);
-    await page.mouse.wheel(0, direction * share);
-    if (i < tickCount - 1) await page.waitForTimeout(randomBetween(35, 110));
-  }
+  // Nấc lăn thật (deltaY 100/nấc, nhịp theo số đo /input-test) -- xem xlv1_humanInput.js. Bản cũ chia delta thành vài tick SỐ LẺ.
+  await require('./xlv1_humanInput').humanWheel(page, totalDelta);
 }
 
 // Vài cú cuộn liên tiếp gần nhau, không dừng đọc -- mô phỏng lúc đang
@@ -574,7 +566,7 @@ async function momentumScroll(page, totalDelta) {
 // riêng biệt liên tiếp, không phải 1 lượt chia nhỏ.)
 async function scrollBurst(page, ticks, minDelta, maxDelta, minPause, maxPause) {
   for (let i = 0; i < ticks; i++) {
-    await page.mouse.wheel(0, randomBetween(minDelta, maxDelta));
+    await require('./xlv1_humanInput').humanWheel(page, randomBetween(minDelta, maxDelta)); // nấc 100 thật, không gửi số lẻ
     if (i < ticks - 1) await page.waitForTimeout(randomBetween(minPause, maxPause));
   }
 }

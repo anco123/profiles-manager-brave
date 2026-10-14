@@ -2113,6 +2113,7 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     // Mốc hết giờ của script (theo "script timeout" của queue, 0 = không giới hạn) -- gắn lên page để script nào cần (VD interactX
     // lướt Home + chèn task) tự co thời gian lại cho kịp, không bị cắt ngang giữa chừng. Không đổi tham số của main.js.
     running.page.__scriptDeadlineAt = deadlineAt || 0;
+    running.page.__profileId = id; // xlv1_humanInput.js: mỗi profile 1 "kiểu tay" cố định (tốc độ chuột, nhịp gõ...) theo id
     const result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow);
     return { logs, result: result === undefined ? null : result, resultStatus };
   } catch (err) {

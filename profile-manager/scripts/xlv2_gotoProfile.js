@@ -316,7 +316,7 @@ async function scrollDropdownIntoView(page, moveMouseVisibly, momentumScroll, dr
   if (typeof momentumScroll === 'function') {
     await momentumScroll(page, delta);
   } else {
-    await page.mouse.wheel(0, delta);
+    await require('./xlv1_humanInput').humanWheel(page, delta);
   }
 }
 
