@@ -10,8 +10,8 @@
  *   Gõ phím : giữ phím ~96ms; giữa 2 phím trung vị ~176ms (đuôi dài, 10% > 730ms), sau dấu cách ~400ms, trước dấu câu chậm hẳn (dừng
  *             nghĩ); Backspace ~9% số phím (gõ sai rồi khựng ~300-600ms mới xoá 1-3 phím); ~12% phím đè nhau (phím sau nhấn trước khi nhả phím trước). (Đã loại các sự kiện do
  *             Unikey/EVKey tự chèn khi đo -- backspace cách 1-3ms, giữ phím 0.5ms -- tay người không làm được.)
- * Mỗi profile một "kiểu tay" riêng, CỐ ĐỊNH theo id profile (server.js gắn page.__profileId), dao động quanh số đo trên -- không phải
- * profile nào cũng y hệt 1 người. Không có id (chạy test) thì random theo phiên.
+ * Mỗi profile một "kiểu tay" gốc riêng theo id profile (server.js gắn page.__profileId), dao động quanh số đo trên; MỖI LẦN CHẠY lệch
+ * thêm ±15% quanh gốc đó (xem persona()), và từng thao tác đều rút thăm ngẫu nhiên -- không lần chạy nào giống lần nào.
  * -----------------------------------------------------------------------
  */
 
@@ -33,7 +33,7 @@ const skewed = (median, sigmaLow, sigmaHigh) => { const z = gauss(); return medi
 function persona(page) {
   if (page.__inputPersona) return page.__inputPersona;
   const r = page.__profileId ? seeded(page.__profileId) : Math.random;
-  page.__inputPersona = {
+  const base = {
     wheelBurst: between(r, 2, 4),          // số nấc trung bình mỗi lượt lăn
     wheelGap: between(r, 18, 32),          // ms giữa 2 nấc trong 1 lượt (đã trừ hao độ trễ của lệnh wheel)
     moveSpeed: between(r, 0.8, 1.25),      // nhân thời gian di chuột (Fitts)
@@ -46,6 +46,11 @@ function persona(page) {
     typoRate: between(r, 0.03, 0.06),
     thinkPause: between(r, 0.012, 0.03),   // tỉ lệ dừng nghĩ 1-2.5s giữa chừng
   };
+  // Mỗi LẦN CHẠY lệch thêm ±15% quanh kiểu tay gốc của profile (hôm nhanh hôm chậm, lúc tỉnh lúc mệt) -- cùng 1 profile mà các lần chạy
+  // vẫn khác nhau; kiểu tay gốc (theo id) chỉ giữ cho mỗi tài khoản có nét riêng, không phải 500 profile cùng 1 nhịp.
+  const day = Math.random() < 0.5 ? between(Math.random, 0.85, 1) : between(Math.random, 1, 1.15); // nhịp chung cả phiên: nhanh/chậm hơn mọi khi
+  const wobble = () => between(Math.random, 0.9, 1.1);                                              // từng thông số lệch thêm chút riêng
+  page.__inputPersona = Object.fromEntries(Object.entries(base).map(([k, v]) => [k, v * wobble() * (/Gap|Speed|prePress|Hold|Flight/.test(k) ? day : 1)]));
   return page.__inputPersona;
 }
 
