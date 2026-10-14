@@ -35,8 +35,7 @@
 
 async function writeExcelCell(excelRowNumber, columnLetter, value) {
   const fs = require('fs');
-  const XLSX = require('@e965/xlsx');
-  const { EXCEL_SNAPSHOT_FILE, EXCEL_RESULTS_FILE } = require('./datapaths');
+  const { EXCEL_SNAPSHOT_FILE } = require('./datapaths');
 
   const lockFile = EXCEL_SNAPSHOT_FILE + '.lock';
   const maxLockAttempts = 30;
@@ -76,15 +75,9 @@ async function writeExcelCell(excelRowNumber, columnLetter, value) {
     rows[arrayIndex][columnLetter] = value;
     fs.writeFileSync(EXCEL_SNAPSHOT_FILE, JSON.stringify(rows));
 
-    // Viết luôn ra .xlsx thật -- VẪN đang trong lúc giữ khoá, nên an
-    // toàn với việc ghi đồng thời y hệt bước ghi JSON ở trên. Header
-    // dùng thẳng CHỮ CÁI CỘT (A, B, C...) -- không có tên cột gốc thật
-    // (VD "Username") vì snapshot hiện tại không lưu header đó, chỉ có
-    // dữ liệu theo chữ cái cột.
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Sheet1');
-    XLSX.writeFile(workbook, EXCEL_RESULTS_FILE);
+    // Viết luôn ra .xlsx thật -- VẪN đang trong lúc giữ khoá, nên an toàn với việc ghi đồng thời y hệt bước ghi JSON ở trên.
+    // Đúng cột theo chữ cái + giữ tiêu đề gốc (xem writeResultsXlsx).
+    require('./xlv1_exportSnapshotToExcel').writeResultsXlsx(rows);
   } finally {
     fs.unlinkSync(lockFile); // LUÔN mở khoá, kể cả lỗi giữa chừng -- không thì mọi lần ghi SAU đều bị kẹt vĩnh viễn
   }

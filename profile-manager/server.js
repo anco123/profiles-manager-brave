@@ -552,9 +552,11 @@ app.get('/editor', (req, res) => {
 const EXCEL_SNAPSHOT_FILE = path.join(DATA_DIR, 'excel-snapshot.json');
 
 app.post('/api/excel-snapshot', (req, res) => {
-  const { rows } = req.body;
+  const { rows, headerLabels } = req.body;
   if (!Array.isArray(rows)) return res.status(400).json({ error: 'rows must be an array' });
   fs.writeFileSync(EXCEL_SNAPSHOT_FILE, JSON.stringify(rows));
+  // Dòng tiêu đề gốc -- để excel-results.xlsx giữ đúng tên cột (xem EXCEL_HEADER_FILE trong scripts/datapaths.js)
+  if (headerLabels && typeof headerLabels === 'object') fs.writeFileSync(path.join(DATA_DIR, 'excel-snapshot-header.json'), JSON.stringify(headerLabels));
   res.json({ success: true, rowCount: rows.length });
 });
 
