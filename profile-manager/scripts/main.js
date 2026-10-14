@@ -10,8 +10,13 @@
 //   I = x_email_type (chứa "Cookie" -> đăng nhập bằng cookie thay vì mật khẩu)
 //   J = chuỗi cookie thật (chỉ dùng khi cột I là kiểu Cookie)
 //   N = alias mail.tm    O = mật khẩu mail.tm   P = domain mail.tm
-//   M = trạng thái (ghi ngược lại bằng writeExcelCell.js): "Suspended", "NotFound"
-//       hoặc "Done_X"
+//   M = trạng thái (ghi ngược lại bằng writeExcelCell.js) -- ghi NGAY sau bước check (chưa cần đăng nhập):
+//       "Done_X" (hồ sơ hiện bình thường), "Suspended", "NotFound", "Unknown" (không xác định được).
+//       Bật RUN_LOGIN thì đăng nhập tiếp: lỗi đăng nhập ghi đè M bằng mã lỗi (VD "Cookie_Login_Failed").
+
+// BẬT (true) = check trạng thái xong thì đăng nhập + làm tiếp các bước sau (interactX...).
+// TẮT (false) = chỉ check trạng thái X, ghi kết quả vào cột M rồi dừng -- nhanh, không mở phiên đăng nhập.
+const RUN_LOGIN = false;
 
 const { getDeviceInfo } = require('./xlv1_getDeviceInfo');
 const { getXStatus } = require('./xlv1_getXStatus');
@@ -157,25 +162,13 @@ try {
 
 log(`Kiểm tra X trước tiên -- trạng thái: ${xStatus}`);
 
-
-if (xStatus === 'Suspended') {
-  log('Tài khoản X đang bị suspend...');
-  await writeStatusColumnM('Suspended'); // trước đây chỉ đánh dấu vàng mà KHÔNG ghi cột M
-  await yellow(xStatus, "Suspended");
-  return;
-}
-if (xStatus === 'NotFound') {
-  log('Username X không tồn tại (sai username hoặc tài khoản đã bị xoá) -- dừng.');
-  await writeStatusColumnM('NotFound');
-  await yellow(xStatus, "NotFound");
-  return;
-}
-// Unknown = trang hồ sơ không hiện dấu hiệu chắc chắn (lỗi / bị chặn / bắt đăng nhập) -- vẫn thử đăng nhập như trước, nhưng ghi log rõ.
+// Ghi kết quả check vào cột M NGAY -- không cần đợi đăng nhập. Hồ sơ hiện bình thường = "Done_X".
+await writeStatusColumnM(xStatus);
+if (xStatus === 'Suspended' || xStatus === 'NotFound' || xStatus === 'Unknown') await yellow(xStatus, xStatus); // đánh dấu vàng trên bảng kết quả Queue
+if (xStatus === 'Suspended' || xStatus === 'NotFound') { log(`Tài khoản ${xStatus} -- dừng.`); return; }
+if (!RUN_LOGIN) { log('RUN_LOGIN đang tắt -- chỉ check trạng thái, dừng ở đây.'); return; }
+// Unknown (trang hồ sơ không hiện dấu hiệu chắc chắn: lỗi / bị chặn / bắt đăng nhập) -- RUN_LOGIN bật thì vẫn thử đăng nhập.
 if (xStatus === 'Unknown') log('[cảnh báo] Không xác định được trạng thái X qua cửa sổ ẩn danh -- vẫn thử đăng nhập.');
-
-
-
-
 
 // ---------- Không suspend -- đi tiếp toàn bộ luồng ----------
 // Cột I = x_email_type -- nếu chứa "Cookie" (không phân biệt hoa/thường)
@@ -194,6 +187,7 @@ log(`Trạng thái đăng nhập X: ${result.status}`);
 
 if (result.status !== 'Done_X') {
   log(`Không phải Done_X (${result.status}) -- dừng lại.`);
+  await writeStatusColumnM(result.status); // VD Cookie_Login_Failed / No_Cookie_Found -- ghi đè kết quả check ở trên
   return;
 }
 
@@ -210,8 +204,8 @@ const soFollower = (String(rawG ?? '').trim() !== '' && Number.isFinite(gNum)) ?
 
 
 
-const { interactX } = require('./xlv3_Interactx');
-await interactX(page, context, log, require, input, soFollower);
+// const { interactX } = require('./xlv3_Interactx');
+// await interactX(page, context, log, require, input, soFollower);
 
 
 
