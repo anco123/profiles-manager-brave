@@ -64,20 +64,25 @@ async function diagnoseProxyHealth(browser) {
 }
 
 // Chờ trang hồ sơ hiện ra 1 dấu hiệu CHẮC CHẮN rồi mới kết luận (X là app React -- nội dung render SAU sự kiện 'load').
-// Hồ sơ bình thường = có ngày tham gia (UserJoinDate) -- trang suspend / không tồn tại không có dòng này. Thấy hồ sơ rồi vẫn
-// chờ thêm 1 nhịp và soi lại chữ suspend, phòng phần đầu hồ sơ hiện trước chữ "Account suspended".
-async function detectXStatusOnPage(page, timeoutMs = 20000) {
-  const suspended = page.getByText('Account suspended');
-  const notFound = page.getByText(/This account doesn['’]?t exist/i);
-  const profile = page.locator('[data-testid="UserJoinDate"], [data-testid="UserProfileHeader_Items"]');
-  const seen = (loc) => loc.first().isVisible().catch(() => false);
+// Dò theo CHỮ hiển thị: khi chưa đăng nhập, X trả trang KHÔNG có data-testid nào (đã kiểm tra trên X thật 10/2026):
+//   suspend    -> "Account suspended"
+//   bình thường -> dòng "Joined <Tháng> <Năm>" (VD "Joined April 2009"), hoặc phần tử data-testid="UserProfileHeader_Items" khi X trả
+//                  trang có data-testid (tuỳ trình duyệt / proxy) -- trang suspend / không tồn tại không có 2 thứ này
+//   không tồn tại -> HTTP 404, chữ "Hmm...this page doesn’t exist." (bản cũ: "This account doesn’t exist")
+// Thấy hồ sơ rồi vẫn chờ thêm 1 nhịp và soi lại chữ suspend, phòng phần đầu hồ sơ hiện trước chữ "Account suspended".
+async function detectXStatusOnPage(page, timeoutMs = 20000, httpStatus = null) {
+  const text = () => page.locator('body').innerText({ timeout: 2000 }).catch(() => '');
+  const isSuspended = (t) => /Account suspended/i.test(t);
+  const isNotFound = (t) => /this (page|account) doesn['’]?t exist/i.test(t);
+  const isProfile = async (t) => /\bJoined [A-Z][a-z]+ \d{4}\b/.test(t) || (await page.locator('xpath=//*[@data-testid="UserProfileHeader_Items" or @data-testid="UserJoinDate"]').first().isVisible().catch(() => false));
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
-    if (await seen(suspended)) return 'Suspended';
-    if (await seen(notFound)) return 'NotFound';
-    if (await seen(profile)) {
+    const t = await text();
+    if (isSuspended(t)) return 'Suspended';
+    if (isNotFound(t) || (httpStatus === 404 && t.length > 50)) return 'NotFound';
+    if (await isProfile(t)) {
       await page.waitForTimeout(1500);
-      return (await seen(suspended)) ? 'Suspended' : 'Done_X';
+      return isSuspended(await text()) ? 'Suspended' : 'Done_X';
     }
     await page.waitForTimeout(500);
   }
@@ -134,7 +139,14 @@ async function getXStatus(username, proxyInfo, log) {
         const incognitoPage = await incognitoContext.newPage();
         const response = await incognitoPage.goto(url, { timeout: 15000, waitUntil: 'load' });
         status = response ? response.status() : null;
-        xStatus = await detectXStatusOnPage(incognitoPage); // chờ React render xong 1 dấu hiệu chắc chắn, không đọc DOM ngay lúc 'load'
+        xStatus = await detectXStatusOnPage(incognitoPage, 20000, status); // chờ React render xong 1 dấu hiệu chắc chắn, không đọc DOM ngay lúc 'load'
+        if (xStatus === 'Unknown') {
+          // Lưu lại trang để tra nguyên nhân (bị chặn / bắt đăng nhập / X đổi giao diện...) -- ảnh nằm trong thư mục data/
+          const shot = require('path').join(require('./datapaths').DATA_DIR, `xstatus-unknown-${username}-${Date.now()}.png`);
+          await incognitoPage.screenshot({ path: shot }).catch(() => {});
+          const snippet = (await incognitoPage.locator('body').innerText({ timeout: 2000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+          if (log) log(`[getXStatus] Không nhận ra trang (HTTP ${status}). Nội dung đầu trang: "${snippet}" -- ảnh: ${shot}`);
+        }
         lastErr = null;
         break;
       } catch (err) {
