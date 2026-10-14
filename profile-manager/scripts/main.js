@@ -10,7 +10,7 @@
 //   I = x_email_type (chứa "Cookie" -> đăng nhập bằng cookie thay vì mật khẩu)
 //   J = chuỗi cookie thật (chỉ dùng khi cột I là kiểu Cookie)
 //   N = alias mail.tm    O = mật khẩu mail.tm   P = domain mail.tm
-//   M = trạng thái (ghi ngược lại bằng writeExcelCell.js): "Suspended"
+//   M = trạng thái (ghi ngược lại bằng writeExcelCell.js): "Suspended", "NotFound"
 //       hoặc "Done_X"
 
 const { getDeviceInfo } = require('./xlv1_getDeviceInfo');
@@ -160,9 +160,18 @@ log(`Kiểm tra X trước tiên -- trạng thái: ${xStatus}`);
 
 if (xStatus === 'Suspended') {
   log('Tài khoản X đang bị suspend...');
+  await writeStatusColumnM('Suspended'); // trước đây chỉ đánh dấu vàng mà KHÔNG ghi cột M
   await yellow(xStatus, "Suspended");
   return;
 }
+if (xStatus === 'NotFound') {
+  log('Username X không tồn tại (sai username hoặc tài khoản đã bị xoá) -- dừng.');
+  await writeStatusColumnM('NotFound');
+  await yellow(xStatus, "NotFound");
+  return;
+}
+// Unknown = trang hồ sơ không hiện dấu hiệu chắc chắn (lỗi / bị chặn / bắt đăng nhập) -- vẫn thử đăng nhập như trước, nhưng ghi log rõ.
+if (xStatus === 'Unknown') log('[cảnh báo] Không xác định được trạng thái X qua cửa sổ ẩn danh -- vẫn thử đăng nhập.');
 
 
 
