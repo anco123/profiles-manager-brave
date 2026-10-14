@@ -43,11 +43,13 @@
       <span class="selection-count" id="bulkCountLabel" hidden>0 selected</span>
       <button class="btn btn-ghost" id="bulkDeselectBtn" disabled>Deselect</button>
       <button class="btn btn-ghost" id="bulkProxyBtn" disabled>Change proxy&hellip;</button>
+      <button class="btn btn-ghost" id="bulkRenameBtn" disabled title="Đổi tên các profile đang chọn -- xếp A-Z, mỗi dòng 1 tên">Đổi tên&hellip;</button>
       <button class="btn btn-ghost" id="bulkClearCacheBtn" disabled title="Chỉ xoá Cache/Code Cache/GPUCache... — không đụng đến cookie hay phiên đăng nhập">Clear cache</button>
       <button class="btn btn-icon-danger" id="bulkDeleteBtn" disabled>Delete selected</button>
 
       <span class="topbar-divider" aria-hidden="true"></span>
 
+      <button class="btn btn-icon-danger" id="openSuspendedBtn" title="Xoá các profile có cột M = Suspended trong file Excel đã import">Xoá acc Suspended</button>
       <button class="btn btn-ghost" id="openImportBtn">Import</button>
       <button class="btn btn-ghost" id="openBulkCreateBtn">Bulk create</button>
       <button class="btn btn-ghost" id="openExtensionsBtn" title="Extensions (applies to every profile)">&#129513;</button>
@@ -295,6 +297,46 @@
 
     <div class="panel-actions">
       <button type="button" class="btn btn-primary" id="applyBulkProxyBtn">Apply</button>
+    </div>
+  </div>
+</aside>
+
+<!-- Đổi tên hàng loạt: các profile đang chọn xếp A-Z, dòng thứ i trong ô nhập = tên mới của profile thứ i -->
+<aside class="panel" id="bulkRenamePanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Đổi tên</h2>
+    <button class="icon-btn" id="closeBulkRenameBtn" aria-label="Close">&times;</button>
+  </div>
+  <div class="panel-body">
+    <p class="muted" style="margin:0;">Các profile đang chọn đã xếp theo A-Z. Mỗi dòng 1 tên mới, theo đúng thứ tự bên dưới. Dòng trống = giữ tên cũ. Chỉ đổi tên hiển thị -- cookie, phiên đăng nhập, proxy giữ nguyên.</p>
+    <div class="proxy-target-list rename-target-list" id="renameTargetList"></div>
+    <p class="muted rename-summary" id="renameSummary" style="margin:0;"></p>
+    <label class="field">
+      <span>Tên mới</span>
+      <textarea id="bulkRenameTextarea" rows="10" spellcheck="false" placeholder="P-001&#10;P-002&#10;P-003"></textarea>
+    </label>
+    <div class="panel-actions">
+      <button type="button" class="btn btn-primary" id="applyBulkRenameBtn">Đổi tên</button>
+    </div>
+  </div>
+</aside>
+
+<!-- Xoá các profile có cột M = Suspended trong snapshot Excel -->
+<aside class="panel" id="suspendedPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2>Xoá acc Suspended</h2>
+    <button class="icon-btn" id="closeSuspendedBtn" aria-label="Close">&times;</button>
+  </div>
+  <div class="panel-body">
+    <p class="muted" style="margin:0;">Đọc file Excel đã import ở trang editor: dòng nào có cột M = <code>Suspended</code> thì tìm profile cùng tên (theo cột khớp bên dưới) để xoá. Xoá luôn thư mục dữ liệu (cookie, phiên đăng nhập) của profile đó, không hoàn tác được.</p>
+    <label class="field field-compact">
+      <span>Cột chứa tên profile</span>
+      <select id="suspendedMatchColumn"></select>
+    </label>
+    <p class="muted" id="suspendedSummary" style="margin:0;"></p>
+    <div class="proxy-target-list suspended-list" id="suspendedList"></div>
+    <div class="panel-actions">
+      <button type="button" class="btn btn-icon-danger" id="deleteSuspendedBtn" disabled>Xoá</button>
     </div>
   </div>
 </aside>

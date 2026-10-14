@@ -109,6 +109,7 @@ const ENGINE_LABELS = {
 const selectedIds = new Set();
 const bulkDeselectBtn = document.getElementById('bulkDeselectBtn');
 const bulkProxyBtn = document.getElementById('bulkProxyBtn');
+const bulkRenameBtn = document.getElementById('bulkRenameBtn');
 const bulkClearCacheBtn = document.getElementById('bulkClearCacheBtn');
 const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
 const bulkCountLabel = document.getElementById('bulkCountLabel');
@@ -132,6 +133,7 @@ function updateBulkToolbar() {
   const hasSelection = count > 0;
   bulkDeselectBtn.disabled = !hasSelection;
   bulkProxyBtn.disabled = !hasSelection;
+  bulkRenameBtn.disabled = !hasSelection;
   bulkClearCacheBtn.disabled = !hasSelection;
   bulkDeleteBtn.disabled = !hasSelection;
   bulkCountLabel.hidden = !hasSelection;
@@ -515,7 +517,7 @@ document.addEventListener('keydown', (e) => {
 // Create-profile panel
 // -------------------------------------------------------------------
 function closeAllPanelsInstantly(except) {
-  for (const p of [createPanel, bulkCreatePanel, bulkProxyPanel, importPanel, settingsPanel, extensionsPanel]) {
+  for (const p of [createPanel, bulkCreatePanel, bulkProxyPanel, bulkRenamePanel, suspendedPanel, importPanel, settingsPanel, extensionsPanel]) {
     if (p !== except) {
       p.classList.remove('is-open', 'is-fullscreen');
       p.hidden = true;
@@ -550,6 +552,8 @@ overlay.addEventListener('click', () => {
   closeCreatePanel();
   closeBulkCreatePanel();
   closeBulkProxyPanel();
+  closeBulkRenamePanel();
+  closeSuspendedPanel();
   closeImportPanel();
   closeSettingsPanel();
 });
@@ -909,6 +913,153 @@ document.getElementById('applyBulkProxyBtn').addEventListener('click', async () 
   } finally {
     applyBtn.disabled = false;
     applyBtn.textContent = originalLabel;
+  }
+});
+
+// -------------------------------------------------------------------
+// Đổi tên hàng loạt -- các profile đang chọn (kéo chuột / tick) xếp A-Z theo tên hiện tại (so số tự nhiên: P-2 trước P-10), dòng thứ i
+// trong ô nhập là tên mới của profile thứ i. Dòng trống = giữ tên cũ. Xem trước tên mới ngay khi gõ. Xem POST /api/profiles/bulk-rename.
+// -------------------------------------------------------------------
+const bulkRenamePanel = document.getElementById('bulkRenamePanel');
+const renameTargetList = document.getElementById('renameTargetList');
+const renameSummary = document.getElementById('renameSummary');
+const bulkRenameTextarea = document.getElementById('bulkRenameTextarea');
+const escHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let renameTargets = [];
+
+function renderRenamePreview() {
+  const lines = bulkRenameTextarea.value.split('\n').map((l) => l.trim());
+  while (lines.length && lines[lines.length - 1] === '' && lines.length > renameTargets.length) lines.pop();
+  renameTargetList.innerHTML = renameTargets.map((p, i) => {
+    const next = lines[i] || '';
+    const label = next && next !== p.name ? `→ ${escHtml(next)}` : '(giữ tên)';
+    return `<div class="proxy-target-row"><span class="proxy-target-index">${i + 1}.</span><span class="proxy-target-name">${escHtml(p.name)}</span><span class="rename-new${next && next !== p.name ? '' : ' is-same'}">${label}</span></div>`;
+  }).join('');
+  const filled = lines.filter(Boolean).length, extra = Math.max(0, lines.length - renameTargets.length);
+  const names = renameTargets.map((p, i) => (lines[i] || p.name).toLowerCase()), dup = names.find((n, i) => names.indexOf(n) !== i);
+  renameSummary.textContent = `${renameTargets.length} profile, đã nhập ${filled} tên` + (extra ? ` -- thừa ${extra} dòng (bỏ qua)` : '') + (dup ? ` -- trùng tên "${dup}"` : '');
+  renameSummary.classList.toggle('is-warning', Boolean(extra || dup));
+}
+
+function openBulkRenamePanel() {
+  if (selectedIds.size === 0) return;
+  closeAllPanelsInstantly(bulkRenamePanel);
+  renameTargets = lastProfiles.filter((p) => selectedIds.has(p.id)).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
+  bulkRenameTextarea.value = '';
+  renderRenamePreview();
+  overlay.hidden = false;
+  bulkRenamePanel.hidden = false;
+  requestAnimationFrame(() => bulkRenamePanel.classList.add('is-open'));
+  setTimeout(() => bulkRenameTextarea.focus(), 230);
+}
+
+function closeBulkRenamePanel() {
+  if (bulkRenamePanel.hidden) return;
+  bulkRenamePanel.classList.remove('is-open');
+  setTimeout(() => { overlay.hidden = true; bulkRenamePanel.hidden = true; }, 220);
+}
+
+bulkRenameBtn.addEventListener('click', openBulkRenamePanel);
+document.getElementById('closeBulkRenameBtn').addEventListener('click', closeBulkRenamePanel);
+bulkRenameTextarea.addEventListener('input', renderRenamePreview);
+
+document.getElementById('applyBulkRenameBtn').addEventListener('click', async () => {
+  const lines = bulkRenameTextarea.value.split('\n').map((l) => l.trim());
+  try {
+    const res = await fetch('/api/profiles/bulk-rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: renameTargets.map((p) => p.id), names: renameTargets.map((p, i) => lines[i] || '') }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Đổi tên không thành công');
+    showToast(`Đã đổi tên ${data.renamed} profile`);
+    closeBulkRenamePanel();
+    loadProfiles();
+  } catch (err) {
+    showToast(err.message, true);
+  }
+});
+
+// -------------------------------------------------------------------
+// Xoá acc Suspended -- đọc snapshot Excel (import ở trang editor), dòng có cột M = "Suspended" -> profile cùng tên theo cột khớp đã chọn.
+// Hiện danh sách để bạn xem trước, bấm Xoá còn hỏi xác nhận lần nữa rồi mới gọi /api/profiles/bulk-delete (giống "Delete selected").
+// Cột khớp mặc định = cột bạn chọn gần nhất ở editor (lưu localStorage 'excelMatchColumn'), không có thì đoán theo tiêu đề "name".
+// -------------------------------------------------------------------
+const suspendedPanel = document.getElementById('suspendedPanel');
+const suspendedMatchColumn = document.getElementById('suspendedMatchColumn');
+const suspendedSummary = document.getElementById('suspendedSummary');
+const suspendedList = document.getElementById('suspendedList');
+const deleteSuspendedBtn = document.getElementById('deleteSuspendedBtn');
+let suspendedMatches = [];
+
+async function loadSuspended() {
+  suspendedMatches = [];
+  deleteSuspendedBtn.disabled = true;
+  try { localStorage.setItem('excelMatchColumn', suspendedMatchColumn.value); } catch (e) {}
+  const res = await fetch(`/api/profiles/suspended?column=${encodeURIComponent(suspendedMatchColumn.value)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Không đọc được danh sách Suspended');
+  suspendedMatches = data.matches;
+  const running = data.matches.filter((m) => m.running).length;
+  suspendedSummary.textContent = `${data.matches.length + data.unmatched.length} dòng Suspended trong Excel -- khớp ${data.matches.length} profile` +
+    (data.unmatched.length ? `, ${data.unmatched.length} dòng không có profile nào cùng tên` : '') + (running ? ` (${running} profile đang mở, sẽ bị đóng)` : '');
+  suspendedSummary.classList.toggle('is-warning', data.unmatched.length > 0);
+  suspendedList.innerHTML = data.matches.map((m, i) => `<div class="proxy-target-row is-unmatched"><span class="proxy-target-index">${i + 1}.</span><span class="proxy-target-name">${escHtml(m.name)}</span><span class="proxy-target-current">dòng ${m.excelRow}${m.running ? ' · đang mở' : ''}</span></div>`).join('') +
+    data.unmatched.map((u) => `<div class="proxy-target-row"><span class="proxy-target-index">–</span><span class="proxy-target-name">${escHtml(u.value || '(trống)')}</span><span class="proxy-target-current">dòng ${u.excelRow} · không có profile</span></div>`).join('');
+  deleteSuspendedBtn.disabled = data.matches.length === 0;
+  deleteSuspendedBtn.textContent = data.matches.length ? `Xoá ${data.matches.length} profile` : 'Xoá';
+}
+
+async function openSuspendedPanel() {
+  closeAllPanelsInstantly(suspendedPanel);
+  overlay.hidden = false;
+  suspendedPanel.hidden = false;
+  requestAnimationFrame(() => suspendedPanel.classList.add('is-open'));
+  suspendedSummary.textContent = 'Đang đọc file Excel...';
+  suspendedList.innerHTML = '';
+  try {
+    const info = await fetch('/api/excel-snapshot/info').then((r) => r.json());
+    if (!info.rowCount) { suspendedSummary.textContent = 'Chưa có file Excel nào được import -- import ở trang editor (nút Queue) trước.'; suspendedMatchColumn.innerHTML = ''; deleteSuspendedBtn.disabled = true; return; }
+    const labels = info.headerLabels || {};
+    suspendedMatchColumn.innerHTML = info.columns.map((l) => `<option value="${l}">${l}${labels[l] ? ` — ${escHtml(labels[l])}` : ''}</option>`).join('');
+    let saved = null;
+    try { saved = localStorage.getItem('excelMatchColumn'); } catch (e) {}
+    const guess = info.columns.find((l) => /^profile ?name$|^name$|^profile$/i.test(labels[l] || ''));
+    suspendedMatchColumn.value = (saved && info.columns.includes(saved)) ? saved : (guess || info.columns[0]);
+    await loadSuspended();
+  } catch (err) {
+    suspendedSummary.textContent = err.message;
+  }
+}
+
+function closeSuspendedPanel() {
+  if (suspendedPanel.hidden) return;
+  suspendedPanel.classList.remove('is-open');
+  setTimeout(() => { overlay.hidden = true; suspendedPanel.hidden = true; }, 220);
+}
+
+document.getElementById('openSuspendedBtn').addEventListener('click', openSuspendedPanel);
+document.getElementById('closeSuspendedBtn').addEventListener('click', closeSuspendedPanel);
+suspendedMatchColumn.addEventListener('change', () => loadSuspended().catch((err) => { suspendedSummary.textContent = err.message; }));
+
+deleteSuspendedBtn.addEventListener('click', async () => {
+  const ids = suspendedMatches.map((m) => m.id);
+  if (!ids.length) return;
+  if (!confirm(`Xoá ${ids.length} profile có cột M = Suspended?\n\n${suspendedMatches.map((m) => m.name).join(', ')}\n\nXoá luôn thư mục dữ liệu (cookie, phiên đăng nhập) trên ổ đĩa, không hoàn tác được.`)) return;
+  deleteSuspendedBtn.disabled = true;
+  try {
+    const res = await fetch('/api/profiles/bulk-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Xoá không thành công');
+    showToast(`Đã xoá ${data.deleted} profile Suspended`);
+    ids.forEach((id) => selectedIds.delete(id));
+    updateBulkToolbar();
+    closeSuspendedPanel();
+    loadProfiles();
+  } catch (err) {
+    showToast(err.message, true);
+    deleteSuspendedBtn.disabled = false;
   }
 });
 

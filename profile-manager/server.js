@@ -932,6 +932,62 @@ app.post('/api/profiles/bulk-delete', async (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// API: bulk-rename -- ids[i] đổi tên thành names[i] (trang Home: chọn nhiều profile, xếp A-Z, dán mỗi dòng 1 tên). Dòng trống = giữ
+// tên cũ. Chỉ đổi trường name trong profiles.json -- thư mục dữ liệu đặt theo id nên cookie/phiên đăng nhập không bị ảnh hưởng.
+// Từ chối nếu sau khi đổi có 2 profile trùng tên (không phân biệt hoa/thường) -- tên profile dùng để khớp dòng Excel, trùng là khớp nhầm.
+// -------------------------------------------------------------------
+app.post('/api/profiles/bulk-rename', (req, res) => {
+  const ids = Array.isArray(req.body.ids) ? req.body.ids : [];
+  const names = Array.isArray(req.body.names) ? req.body.names : [];
+  if (ids.length === 0) return res.status(400).json({ error: 'No profile ids given' });
+  const profiles = readProfiles();
+  const byId = new Map(profiles.map((p) => [p.id, p]));
+  const renames = ids.map((id, i) => [id, String(names[i] ?? '').trim()]).filter(([id, name]) => name && byId.has(id) && byId.get(id).name !== name);
+  const finalName = new Map(profiles.map((p) => [p.id, p.name]));
+  renames.forEach(([id, name]) => finalName.set(id, name));
+  const seen = new Map(), dups = new Set();
+  for (const name of finalName.values()) { const k = String(name).trim().toLowerCase(); if (seen.has(k)) dups.add(name); seen.set(k, true); }
+  if (dups.size) return res.status(400).json({ error: `Trùng tên sau khi đổi: ${[...dups].join(', ')} -- tên profile dùng để khớp dòng Excel nên không được trùng.` });
+  renames.forEach(([id, name]) => { byId.get(id).name = name; });
+  writeProfiles(profiles);
+  res.json({ renamed: renames.length });
+});
+
+// -------------------------------------------------------------------
+// API: profile nào có cột M = "Suspended" trong snapshot Excel (nút "Xoá acc Suspended" ở trang Home). Khớp profile <-> dòng Excel
+// giống hệt editor: giá trị ở cột `column` (mặc định cột editor đang chọn, do trang Home gửi lên) == tên profile, không phân biệt
+// hoa/thường. Chỉ đọc -- việc xoá đi qua /api/profiles/bulk-delete sau khi bạn xác nhận danh sách.
+// -------------------------------------------------------------------
+app.get('/api/excel-snapshot/info', (req, res) => {
+  let rows = [], headerLabels = {};
+  try { rows = JSON.parse(fs.readFileSync(EXCEL_SNAPSHOT_FILE, 'utf-8')); } catch (e) { return res.json({ rowCount: 0, columns: [], headerLabels }); }
+  try { headerLabels = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'excel-snapshot-header.json'), 'utf-8')) || {}; } catch (e) {}
+  const letters = new Set(Object.keys(headerLabels));
+  rows.forEach((r) => Object.keys(r || {}).forEach((k) => letters.add(k)));
+  const colIndex = (l) => l.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+  const columns = [...letters].filter((l) => /^[A-Z]+$/.test(l)).sort((a, b) => colIndex(a) - colIndex(b));
+  res.json({ rowCount: rows.length, columns, headerLabels });
+});
+
+app.get('/api/profiles/suspended', (req, res) => {
+  const column = String(req.query.column || '').toUpperCase();
+  const statusColumn = String(req.query.statusColumn || 'M').toUpperCase();
+  if (!/^[A-Z]+$/.test(column) || !/^[A-Z]+$/.test(statusColumn)) return res.status(400).json({ error: 'column không hợp lệ' });
+  let rows;
+  try { rows = JSON.parse(fs.readFileSync(EXCEL_SNAPSHOT_FILE, 'utf-8')); } catch (e) { return res.status(400).json({ error: 'Chưa có snapshot Excel -- import file Excel ở trang editor trước.' }); }
+  const byName = new Map(readProfiles().map((p) => [String(p.name).trim().toLowerCase(), p]));
+  const matches = [], unmatched = [];
+  rows.forEach((r, i) => {
+    if (String((r || {})[statusColumn] ?? '').trim().toLowerCase() !== 'suspended') return;
+    const key = String(r[column] ?? '').trim();
+    const p = byName.get(key.toLowerCase());
+    if (p) matches.push({ id: p.id, name: p.name, excelRow: i + 2, running: Boolean(runningContexts[p.id]) });
+    else unmatched.push({ value: key, excelRow: i + 2 });
+  });
+  res.json({ matches, unmatched });
+});
+
+// -------------------------------------------------------------------
 // API: bulk-assign proxies -- ids[i] gets proxies[i], in order. Each
 // proxy line accepts "host:port" or "host:port:username:password"
 // (the two most common formats proxy lists ship in). Parsing happens
