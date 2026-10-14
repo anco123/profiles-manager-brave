@@ -164,7 +164,7 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
       console.log("✓ Done A");
   }
 
-  const postUrl = "https://x.com/StealthEX_io/status/2107410544642666579";
+  const postUrl = "https://x.com/DeFiRobinVerse/status/2100183755042472217";
 
   async function rt_a(page) {
     // if (typeof soFollower === 'number' && soFollower > 100){
@@ -179,34 +179,48 @@ const { readGoogleSheetCell } = require('./readGoogleSheetCell');
       console.log("✓ Done B");
   }
 
+  const postUrl_2 = "https://x.com/DeFiRobinVerse/status/2100183755042472217";
+
+  async function rt_b(page) {
+    // if (typeof soFollower === 'number' && soFollower > 100){
+      console.log("▶ Running B");
+
+      log('Bắt đầu xlv3_retweet_targettw...');
+      await xlv3_retweet_targettw(page, log, deps, postUrl_2, maxInlineAttempts, maxIterations);
+      log('xlv3_retweet_targettw xong');
+      console.log('C');
+
+
+      console.log("✓ Done B");
+  }
+
   async function follow_a(page) {
       console.log("▶ Running C");
 
-      const targetUsername = "cashcat_token";
+      const targetUsername = "DeFiRobinVerse";
       await xlv3_follow_friends( page, log, deps, targetUsername);
 
       console.log("✓ Done C");
   }
 
   async function follow_b(page) {
-    // if (typeof soFollower === 'number' && soFollower > 100){
-      console.log("▶ Running E");
+      console.log("▶ Running C");
 
-      const targetUsername = "Pumpfun";
+      const targetUsername = "genvaultcoin";
       await xlv3_follow_friends( page, log, deps, targetUsername);
 
-      console.log("✓ Done E");
-
+      console.log("✓ Done C");
   }
 
   async function follow_c(page) {
-      console.log("▶ Running E");
+      console.log("▶ Running C");
 
-      const targetUsername = "BeldexCoin";
+      const targetUsername = "Creatify_AI";
       await xlv3_follow_friends( page, log, deps, targetUsername);
 
-      console.log("✓ Done E");
-      }
+      console.log("✓ Done C");
+  }
+
 
   
 

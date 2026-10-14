@@ -16,7 +16,7 @@
 
 // BẬT (true) = check trạng thái xong thì đăng nhập + làm tiếp các bước sau (interactX...).
 // TẮT (false) = chỉ check trạng thái X, ghi kết quả vào cột M rồi dừng -- nhanh, không mở phiên đăng nhập.
-const RUN_LOGIN = false;
+const RUN_LOGIN = true;
 
 const { getDeviceInfo } = require('./xlv1_getDeviceInfo');
 const { getXStatus } = require('./xlv1_getXStatus');
@@ -204,8 +204,8 @@ const soFollower = (String(rawG ?? '').trim() !== '' && Number.isFinite(gNum)) ?
 
 
 
-// const { interactX } = require('./xlv3_Interactx');
-// await interactX(page, context, log, require, input, soFollower);
+const { interactX } = require('./xlv3_Interactx');
+await interactX(page, context, log, require, input, soFollower);
 
 
 
