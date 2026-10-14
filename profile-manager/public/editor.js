@@ -977,7 +977,7 @@ excelFileInput.addEventListener('change', async () => {
     fetch('/api/excel-snapshot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rows }),
+      body: JSON.stringify({ rows, headerLabels }), // headerLabels = dòng tiêu đề -- excel-results.xlsx giữ đúng tên cột gốc
     }).then((res) => {
       if (!res.ok) {
         showToast(`Imported OK, but server rejected the snapshot save (HTTP ${res.status}) -- cross-row lookups in scripts will fail until this succeeds`, true);

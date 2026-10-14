@@ -28,7 +28,10 @@
  *   3. request.newContext + proxy (có proxy, không cookie)         -> chưa xác nhận, đổi hướng
  *   4. Cửa sổ ẩn danh thật: browser mới + đúng proxy + đúng Chrome  -> (bản này)
  *
- * Trả về: 'Suspended' hoặc 'Done_X'.
+ * Trả về: 'Suspended' | 'NotFound' (username không tồn tại) | 'Done_X' (thấy hồ sơ bình thường)
+ *         | 'Unknown' (không thấy dấu hiệu nào chắc chắn -- trang lỗi, bị chặn, bắt đăng nhập...).
+ * Trước đây chỉ trả 'Suspended' / 'Done_X': lấy nội dung NGAY lúc 'load' (X chưa kịp render chữ "Account suspended") và cứ không thấy
+ * chữ đó là trả 'Done_X' -- tài khoản bị suspend / trang lỗi đều bị báo nhầm là bình thường, rồi đăng nhập xong main.js ghi luôn Done_X.
  *
  * Usage (trong main.js):
  *   const { getXStatus } = require('./xlv1_getXStatus');
@@ -58,6 +61,27 @@ async function diagnoseProxyHealth(browser) {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+}
+
+// Chờ trang hồ sơ hiện ra 1 dấu hiệu CHẮC CHẮN rồi mới kết luận (X là app React -- nội dung render SAU sự kiện 'load').
+// Hồ sơ bình thường = có ngày tham gia (UserJoinDate) -- trang suspend / không tồn tại không có dòng này. Thấy hồ sơ rồi vẫn
+// chờ thêm 1 nhịp và soi lại chữ suspend, phòng phần đầu hồ sơ hiện trước chữ "Account suspended".
+async function detectXStatusOnPage(page, timeoutMs = 20000) {
+  const suspended = page.getByText('Account suspended');
+  const notFound = page.getByText(/This account doesn['’]?t exist/i);
+  const profile = page.locator('[data-testid="UserJoinDate"], [data-testid="UserProfileHeader_Items"]');
+  const seen = (loc) => loc.first().isVisible().catch(() => false);
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (await seen(suspended)) return 'Suspended';
+    if (await seen(notFound)) return 'NotFound';
+    if (await seen(profile)) {
+      await page.waitForTimeout(1500);
+      return (await seen(suspended)) ? 'Suspended' : 'Done_X';
+    }
+    await page.waitForTimeout(500);
+  }
+  return 'Unknown';
 }
 
 async function getXStatus(username, proxyInfo, log) {
@@ -95,7 +119,7 @@ async function getXStatus(username, proxyInfo, log) {
   const browser = await chromium.launch(launchOptions);
 
   let status;
-  let body;
+  let xStatus;
   try {
     // Retry riêng cho lỗi KẾT NỐI PROXY (net::ERR_*) -- khác hẳn lỗi do
     // nội dung trang. Ngay sau khi đổi IP (xlv1_changeProxy.js), proxy
@@ -105,16 +129,12 @@ async function getXStatus(username, proxyInfo, log) {
     const maxAttempts = 4;
     let lastErr;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const incognitoContext = await browser.newContext();
+      const incognitoContext = await browser.newContext({ locale: 'en-US' }); // giao diện tiếng Anh -- các chữ dò bên dưới là chữ tiếng Anh
       try {
         const incognitoPage = await incognitoContext.newPage();
         const response = await incognitoPage.goto(url, { timeout: 15000, waitUntil: 'load' });
         status = response ? response.status() : null;
-        // page.content() (DOM SAU KHI JS đã chạy) thay vì response.text()
-        // (HTML THÔ trước khi JS chạy) -- gần với những gì 1 người dùng
-        // thật mở tab ẩn danh thấy nhất, phòng trường hợp nội dung được
-        // React render thêm sau khi tải xong.
-        body = await incognitoPage.content();
+        xStatus = await detectXStatusOnPage(incognitoPage); // chờ React render xong 1 dấu hiệu chắc chắn, không đọc DOM ngay lúc 'load'
         lastErr = null;
         break;
       } catch (err) {
@@ -154,13 +174,11 @@ async function getXStatus(username, proxyInfo, log) {
 
   if (log) log('STATUS:', status);
 
-  const suspended = body.includes('Account suspended');
-  if (log) log(suspended ? '=> SUSPENDED' : '=> KHÔNG THẤY SUSPENDED');
-
-  return suspended ? 'Suspended' : 'Done_X';
+  if (log) log(`=> ${xStatus}${xStatus === 'Unknown' ? ' (không thấy hồ sơ, chữ suspend hay "không tồn tại" -- trang lỗi / bị chặn / bắt đăng nhập)' : ''}`);
+  return xStatus;
 }
 
-module.exports = { getXStatus };
+module.exports = { getXStatus, detectXStatusOnPage };
 
 // Chạy độc lập để test 1 username, không cần main.js/profile nào:
 //   node xlv1_getXStatus.js <username> [proxyServer] [proxyUsername] [proxyPassword]

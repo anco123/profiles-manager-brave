@@ -43,6 +43,9 @@ function autoDetectDataDir() {
 const DATA_DIR = process.env.DATA_DIR || autoDetectDataDir();
 const EXCEL_SNAPSHOT_FILE = path.join(DATA_DIR, 'excel-snapshot.json');
 const EXCEL_RESULTS_FILE = path.join(DATA_DIR, 'excel-results.xlsx');
+// Dòng tiêu đề (dòng 1) của file Excel import gần nhất: { A: 'STT', B: 'Name', ... } -- snapshot ở trên chỉ chứa dữ liệu từ dòng 2,
+// file này để excel-results.xlsx giữ đúng tên cột gốc thay vì A, B, C... (xem writeResultsXlsx trong xlv1_exportSnapshotToExcel.js).
+const EXCEL_HEADER_FILE = path.join(DATA_DIR, 'excel-snapshot-header.json');
 
 // Nguồn dữ liệu THỨ HAI, song song với Excel ở trên -- KHÔNG liên quan,
 // không đọc/ghi đè lẫn nhau. GOOGLE_SHEET_SNAPSHOT_FILE là bản snapshot
@@ -64,6 +67,7 @@ module.exports = {
   SCREENSHOT_SETTINGS_FILE,
   EXCEL_SNAPSHOT_FILE,
   EXCEL_RESULTS_FILE,
+  EXCEL_HEADER_FILE,
   GOOGLE_SHEET_SNAPSHOT_FILE,
   GOOGLE_SERVICE_ACCOUNT_FILE,
 };
