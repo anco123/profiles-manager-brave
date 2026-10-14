@@ -66,14 +66,15 @@ async function diagnoseProxyHealth(browser) {
 // Chờ trang hồ sơ hiện ra 1 dấu hiệu CHẮC CHẮN rồi mới kết luận (X là app React -- nội dung render SAU sự kiện 'load').
 // Dò theo CHỮ hiển thị: khi chưa đăng nhập, X trả trang KHÔNG có data-testid nào (đã kiểm tra trên X thật 10/2026):
 //   suspend    -> "Account suspended"
-//   bình thường -> dòng "Joined <Tháng> <Năm>" (VD "Joined April 2009") -- trang suspend / không tồn tại không có dòng này
+//   bình thường -> dòng "Joined <Tháng> <Năm>" (VD "Joined April 2009"), hoặc phần tử data-testid="UserProfileHeader_Items" khi X trả
+//                  trang có data-testid (tuỳ trình duyệt / proxy) -- trang suspend / không tồn tại không có 2 thứ này
 //   không tồn tại -> HTTP 404, chữ "Hmm...this page doesn’t exist." (bản cũ: "This account doesn’t exist")
 // Thấy hồ sơ rồi vẫn chờ thêm 1 nhịp và soi lại chữ suspend, phòng phần đầu hồ sơ hiện trước chữ "Account suspended".
 async function detectXStatusOnPage(page, timeoutMs = 20000, httpStatus = null) {
   const text = () => page.locator('body').innerText({ timeout: 2000 }).catch(() => '');
   const isSuspended = (t) => /Account suspended/i.test(t);
   const isNotFound = (t) => /this (page|account) doesn['’]?t exist/i.test(t);
-  const isProfile = async (t) => /\bJoined [A-Z][a-z]+ \d{4}\b/.test(t) || (await page.locator('[data-testid="UserJoinDate"]').first().isVisible().catch(() => false));
+  const isProfile = async (t) => /\bJoined [A-Z][a-z]+ \d{4}\b/.test(t) || (await page.locator('xpath=//*[@data-testid="UserProfileHeader_Items" or @data-testid="UserJoinDate"]').first().isVisible().catch(() => false));
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
     const t = await text();
