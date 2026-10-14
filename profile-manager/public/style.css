@@ -611,3 +611,10 @@ button:focus-visible, input:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Đổi tên hàng loạt + Xoá acc Suspended (trang Home) */
+.rename-target-list, .suspended-list { max-height: 260px; }
+.proxy-target-row .rename-new { color: var(--running); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.proxy-target-row .rename-new.is-same { color: var(--text-faint); }
+.rename-summary.is-warning, #suspendedSummary.is-warning { color: var(--warning-strong); }
+.field.field-compact { flex: 0 0 auto; } /* .field mặc định flex:1 -- ô chọn cột không được phình ra đẩy danh sách xuống đáy */

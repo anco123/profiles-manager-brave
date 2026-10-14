@@ -997,7 +997,9 @@ excelFileInput.addEventListener('change', async () => {
     // Best-effort default: a column whose header text looks like it means
     // "profile name" -- falls back to column A if nothing matches.
     const guess = columnLetters.find((l) => /^profile ?name$|^name$|^profile$/i.test(headerLabels[l] || ''));
-    excelMatchColumnSelect.value = guess || columnLetters[0];
+    let savedMatchColumn = null;
+    try { savedMatchColumn = localStorage.getItem('excelMatchColumn'); } catch (e) {}
+    excelMatchColumnSelect.value = (savedMatchColumn && columnLetters.includes(savedMatchColumn)) ? savedMatchColumn : (guess || columnLetters[0]);
 
     excelMatchSection.hidden = false;
     renderExcelSidebarPreview();
@@ -1013,6 +1015,7 @@ excelFileInput.addEventListener('change', async () => {
 });
 
 excelMatchColumnSelect.addEventListener('change', () => {
+  try { localStorage.setItem('excelMatchColumn', excelMatchColumnSelect.value); } catch (e) {} // trang Home (Xoá acc Suspended) dùng lại cột khớp này
   renderExcelSidebarPreview();
   if (!runModalOverlay.hidden) applyExcelMatchToRunInput();
 });
