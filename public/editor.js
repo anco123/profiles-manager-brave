@@ -2073,18 +2073,26 @@ const taskStateBody = document.getElementById('taskStateBody');
 const taskStateOnlyMissing = document.getElementById('taskStateOnlyMissing');
 let taskStateData = null;
 
+const taskStateSummary = document.getElementById('taskStateSummary');
+const taskStateSearch = document.getElementById('taskStateSearch');
+const taskStateList = document.getElementById('taskStateList');
+
 function renderTaskState() {
   const { tasks, accounts } = taskStateData;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const doneAll = accounts.filter((a) => !a.missing.length).length;
-  const shown = (taskStateOnlyMissing.checked ? accounts.filter((a) => a.missing.length) : accounts).sort((a, b) => b.missing.length - a.missing.length);
-  taskStateBody.innerHTML =
-    `<p class="task-state-summary">Task trong code (<b>${tasks.length}</b>): ${tasks.map(esc).join(', ') || '(trống)'}<br>` +
-    `<b>${doneAll}/${accounts.length}</b> tài khoản Done toàn bộ, <b>${accounts.length - doneAll}</b> tài khoản vẫn còn task chưa làm.</p>` +
-    (shown.length ? `<div class="task-state-list">${shown.map((a) => `<div class="task-state-row"><span class="task-state-user">@${esc(a.username)}</span><span>` +
+  const q = taskStateSearch.value.trim().toLowerCase().replace(/^@/, '');
+  const shown = (taskStateOnlyMissing.checked ? accounts.filter((a) => a.missing.length) : accounts)
+    .filter((a) => !q || String(a.username).toLowerCase().includes(q))
+    .sort((a, b) => b.missing.length - a.missing.length);
+  taskStateSummary.innerHTML = `Task trong code (<b>${tasks.length}</b>): ${tasks.map(esc).join(', ') || '(trống)'}<br>` +
+    `<b>${doneAll}/${accounts.length}</b> tài khoản Done toàn bộ, <b>${accounts.length - doneAll}</b> tài khoản vẫn còn task chưa làm` +
+    ` -- đang hiện <b>${shown.length}</b> dòng${shown.length > 12 ? ' (cuộn trong danh sách để xem hết)' : ''}.`;
+  taskStateList.innerHTML = shown.length ? shown.map((a) => `<div class="task-state-row"><span class="task-state-user">@${esc(a.username)}</span><span>` +
       (a.missing.length ? `<span class="task-state-missing">Còn ${a.missing.length}: ${a.missing.map(esc).join(', ')}</span>` : '<span class="task-state-done">Done toàn bộ</span>') +
       (a.removed.length ? `<span class="task-state-removed">Đã xong nhưng không còn trong code: ${a.removed.map(esc).join(', ')}</span>` : '') +
-      '</span></div>').join('')}</div>` : `<p class="task-state-summary">${accounts.length ? 'Tất cả tài khoản đã Done toàn bộ.' : 'Chưa có tài khoản nào (chưa import Excel và chưa chạy lần nào).'}</p>`);
+      '</span></div>').join('')
+    : `<div class="task-state-empty">${!accounts.length ? 'Chưa có tài khoản nào (chưa import Excel và chưa chạy lần nào).' : q ? 'Không có username nào khớp.' : 'Tất cả tài khoản đã Done toàn bộ.'}</div>`;
 }
 
 async function loadTaskState() {
@@ -2103,5 +2111,6 @@ async function loadTaskState() {
 document.getElementById('taskStateBtn').addEventListener('click', loadTaskState);
 document.getElementById('refreshTaskStateBtn').addEventListener('click', loadTaskState);
 taskStateOnlyMissing.addEventListener('change', () => taskStateData && renderTaskState());
+taskStateSearch.addEventListener('input', () => taskStateData && renderTaskState());
 document.getElementById('closeTaskStateBtn').addEventListener('click', () => { taskStateOverlay.hidden = true; });
 taskStateOverlay.addEventListener('click', (e) => { if (e.target === taskStateOverlay) taskStateOverlay.hidden = true; });
