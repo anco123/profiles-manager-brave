@@ -586,7 +586,12 @@ html, body.editor-body { height: 100%; overflow: hidden; }
 .task-state-modal { width: min(760px, 94vw); }
 .task-state-summary { margin: 0; color: var(--text-muted); font-size: 0.85rem; line-height: 1.5; }
 .task-state-summary b { color: var(--text); }
-.task-state-list { display: flex; flex-direction: column; border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; }
+.task-state-body { overflow: hidden; min-height: 0; flex: 1 1 auto; } /* danh sách tự cuộn, phần tóm tắt + ô tìm đứng yên */
+/* overflow:auto + min-height:0: trước đây overflow:hidden trong flex dọc làm danh sách CO LẠI cho vừa popup và CẮT mất các dòng dưới, không có thanh cuộn */
+.task-state-list { display: flex; flex-direction: column; border: 1px solid var(--border-soft); border-radius: var(--radius); overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+.task-state-row { flex-shrink: 0; }
+.task-state-search { width: 100%; box-sizing: border-box; padding: 7px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 0.85rem; flex-shrink: 0; }
+.task-state-empty { padding: 10px 12px; color: var(--text-muted); font-size: 0.82rem; }
 .task-state-row { display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--border-soft); font-size: 0.82rem; }
 .task-state-row:first-child { border-top: 0; }
 .task-state-user { font-family: var(--font-mono); color: var(--text); overflow-wrap: anywhere; }
