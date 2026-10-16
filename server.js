@@ -45,6 +45,7 @@ const { exec } = require('child_process');
 const { chromium } = require('playwright');
 const { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion } = require('./chrome-version-check');
+const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode } = require('./recorder');
 
 const app = express();
 
@@ -1796,6 +1797,27 @@ app.post('/api/profiles/:id/launch', async (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// Record thao tác tay trên cửa sổ profile đang mở -> code clickEl/typeEl... (xem recorder.js).
+// Editor bấm "Record" -> start; nút ⏺ REC hiện trong trình duyệt của profile; "Chèn code" -> GET lấy code về.
+// -------------------------------------------------------------------
+app.post('/api/profiles/:id/recorder/start', async (req, res) => {
+  const running = runningContexts[req.params.id];
+  if (!running) return res.status(400).json({ error: 'Profile này chưa mở -- Launch trước rồi mới Record.' });
+  try {
+    const st = await startRecorder(req.params.id, running.context);
+    (running.context.pages()[0] || running.page).bringToFront().catch(() => {});
+    res.json(st);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/profiles/:id/recorder/stop', async (req, res) => {
+  const running = runningContexts[req.params.id];
+  res.json(await stopRecorder(req.params.id, running && running.context));
+});
+app.get('/api/profiles/:id/recorder', (req, res) => {
+  res.json({ ...recorderState(req.params.id), code: recorderCode(req.params.id, req.query.require !== '0') });
+});
+
+// -------------------------------------------------------------------
 // API: close a running profile's window without deleting it
 // -------------------------------------------------------------------
 app.post('/api/profiles/:id/close', async (req, res) => {
@@ -2147,7 +2169,9 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     // lướt Home + chèn task) tự co thời gian lại cho kịp, không bị cắt ngang giữa chừng. Không đổi tham số của main.js.
     running.page.__scriptDeadlineAt = deadlineAt || 0;
     running.page.__profileId = id; // xlv1_humanInput.js: mỗi profile 1 "kiểu tay" cố định (tốc độ chuột, nhịp gõ...) theo id
-    const result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow);
+    const resumeRec = pauseRecorder(id); // đang Record thì tạm dừng ghi -- chuột/phím do script gửi cũng là sự kiện "thật", không thì bị ghi lẫn vào
+    let result;
+    try { result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow); } finally { resumeRec(); }
     return { logs, result: result === undefined ? null : result, resultStatus };
   } catch (err) {
     // Chụp màn hình cho MỌI script khi lỗi -- tập trung ở đây thay vì

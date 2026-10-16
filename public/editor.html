@@ -44,6 +44,10 @@
       <button class="btn btn-ghost" id="taskStateBtn" title="Gộp danh sách task hiện tại trong code (const functions = [...] ở xlv3_Interactx.js) với các task đã làm xong -- xem từng tài khoản còn thiếu task nào hay đã Done toàn bộ">Update Task State</button>
       <button class="btn btn-ghost" id="resetDoneTasksBtn" title="Xoá đánh dấu các task (follow/retweet/like...) đã làm xong của interactX cho TẤT CẢ tài khoản -- lần chạy sau làm lại từ đầu">Reset Done Task</button>
       <button class="btn btn-ghost" id="openVsCodeBtn" title="Opens this project's folder in VS Code (requires VS Code's 'code' command to be on your PATH)">Edit in VS Code</button>
+      <div class="rec-bar" id="recBar" hidden><span class="rec-dot"></span><span id="recBarText">Đang ghi</span>
+        <button class="btn btn-ghost btn-sm" id="recInsertBtn" title="Chèn code các bước đã ghi vào chỗ con trỏ">Chèn code</button>
+        <button class="btn btn-ghost btn-sm" id="recStopBtn" title="Tắt record, ẩn nút REC trong trình duyệt">Dừng</button></div>
+      <button class="btn btn-ghost" id="openRecordBtn" title="Thao tác tay trên trình duyệt của 1 profile, ghi lại thành code clickEl/typeEl...">&#9210; Record</button>
       <button class="btn btn-primary" id="openRunModalBtn">Run&hellip;</button>
     </div>
   </header>
@@ -316,6 +320,20 @@
     <div class="snippet-modal-foot">
       <label class="task-state-filter"><input type="checkbox" id="taskStateOnlyMissing" checked /> Chỉ hiện tài khoản còn thiếu task</label>
       <button class="btn btn-ghost" id="refreshTaskStateBtn">Làm mới</button>
+    </div>
+  </div>
+</div>
+
+<div class="snippet-modal-overlay" id="recModalOverlay" hidden>
+  <div class="snippet-modal rec-modal">
+    <div class="snippet-modal-head">
+      <h2>Record thao tác</h2>
+      <button class="icon-btn" id="closeRecModalBtn" aria-label="Close">&times;</button>
+    </div>
+    <div class="snippet-modal-body">
+      <p class="rec-hint">Chọn profile để ghi. Trong cửa sổ trình duyệt của profile sẽ hiện nút <b>&#9210; REC</b> ở góc dưới phải -- cứ thao tác bình thường, bấm nút đó để xem / sửa các bước (đổi phần tử cha-con, đổi selector, đổi hành động). Xong bấm <b>Chèn code</b> ở thanh trên cùng.</p>
+      <input type="search" class="task-state-search" id="recSearch" placeholder="Tìm profile..." spellcheck="false" />
+      <div class="rec-profile-list" id="recProfileList"></div>
     </div>
   </div>
 </div>

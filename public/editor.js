@@ -2114,3 +2114,90 @@ taskStateOnlyMissing.addEventListener('change', () => taskStateData && renderTas
 taskStateSearch.addEventListener('input', () => taskStateData && renderTaskState());
 document.getElementById('closeTaskStateBtn').addEventListener('click', () => { taskStateOverlay.hidden = true; });
 taskStateOverlay.addEventListener('click', (e) => { if (e.target === taskStateOverlay) taskStateOverlay.hidden = true; });
+
+// -------------------------------------------------------------------
+// Record thao tác (recorder.js ở server): chọn profile -> nút ⏺ REC hiện trong trình duyệt của profile đó -> thao tác tay ->
+// "Chèn code" lấy code clickEl/typeEl... về chèn vào chỗ con trỏ. Chưa mở profile thì tự Launch trước.
+// -------------------------------------------------------------------
+const recModalOverlay = document.getElementById('recModalOverlay');
+const recProfileList = document.getElementById('recProfileList');
+const recSearch = document.getElementById('recSearch');
+const recBar = document.getElementById('recBar');
+const recBarText = document.getElementById('recBarText');
+let recProfileId = null, recPollTimer = null;
+
+function renderRecProfiles() {
+  const term = recSearch.value.trim().toLowerCase();
+  const list = lastProfiles.filter((p) => !term || p.name.toLowerCase().includes(term)).sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0));
+  recProfileList.innerHTML = '';
+  for (const p of list) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'rec-profile' + (p.running ? ' is-running' : '');
+    btn.innerHTML = `<span class="rec-run-dot"></span><span></span><span class="rec-state">${p.running ? 'đang mở' : 'chưa mở -- sẽ Launch'}</span>`;
+    btn.children[1].textContent = p.name;
+    btn.addEventListener('click', () => startRecording(p));
+    recProfileList.appendChild(btn);
+  }
+  if (!list.length) recProfileList.innerHTML = '<p class="rec-hint">Không có profile nào.</p>';
+}
+
+async function startRecording(p) {
+  try {
+    if (!p.running) {
+      showToast(`Đang mở ${p.name}...`);
+      const r = await fetch(`/api/profiles/${p.id}/launch`, { method: 'POST' });
+      if (!r.ok) throw new Error((await r.json()).error || 'Launch lỗi');
+    }
+    const res = await fetch(`/api/profiles/${p.id}/recorder/start`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    recProfileId = p.id;
+    recBar.dataset.name = p.name;
+    recModalOverlay.hidden = true;
+    updateRecBar(data);
+    clearInterval(recPollTimer);
+    recPollTimer = setInterval(pollRecorder, 2000);
+    showToast(`Đang ghi ${p.name} -- thao tác trên trình duyệt, bấm nút REC góc dưới phải để xem các bước`);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+function updateRecBar(st) {
+  if (!st || !st.enabled) { recBar.hidden = true; clearInterval(recPollTimer); recProfileId = null; return; }
+  recBar.hidden = false;
+  recBar.classList.toggle('is-paused', !st.recording);
+  recBarText.textContent = `${st.recording ? 'Đang ghi' : 'Tạm dừng'}: ${recBar.dataset.name} · ${st.steps.length} bước`;
+}
+
+async function pollRecorder() {
+  if (!recProfileId) return;
+  try { updateRecBar(await (await fetch(`/api/profiles/${recProfileId}/recorder`)).json()); } catch {}
+}
+
+document.getElementById('openRecordBtn').addEventListener('click', async () => {
+  await refreshProfiles().catch(() => {});
+  recSearch.value = '';
+  renderRecProfiles();
+  recModalOverlay.hidden = false;
+  recSearch.focus();
+});
+recSearch.addEventListener('input', renderRecProfiles);
+document.getElementById('closeRecModalBtn').addEventListener('click', () => { recModalOverlay.hidden = true; });
+recModalOverlay.addEventListener('click', (e) => { if (e.target === recModalOverlay) recModalOverlay.hidden = true; });
+
+document.getElementById('recInsertBtn').addEventListener('click', async () => {
+  if (!recProfileId) return;
+  const hasRequire = editor.getValue().includes("require('./xlv1_actions')"); // đã require rồi thì không chèn lại (khai báo const trùng = lỗi cú pháp)
+  const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?require=${hasRequire ? 0 : 1}`)).json();
+  if (!st.steps || !st.steps.length) return showToast('Chưa ghi bước nào', true);
+  insertSnippetAtCursor(st.code);
+  showToast(`Đã chèn ${st.steps.length} bước`);
+});
+document.getElementById('recStopBtn').addEventListener('click', async () => {
+  if (!recProfileId) return;
+  await fetch(`/api/profiles/${recProfileId}/recorder/stop`, { method: 'POST' }).catch(() => {});
+  updateRecBar(null);
+  showToast('Đã dừng record');
+});
