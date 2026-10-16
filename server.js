@@ -274,6 +274,36 @@ function writeSnippets(snippets) {
   fs.writeFileSync(SNIPPETS_FILE, JSON.stringify(snippets, null, 2));
 }
 
+// Snippet thao tác mặc định (dùng scripts/xlv1_actions.js) -- nạp vào snippets.json 1 LẦN mỗi cái; id đã nạp ghi vào
+// snippets_seeded.json nên bạn xoá nút nào thì nó không tự hiện lại. Thêm snippet mới vào list này = lần chạy server sau tự có nút.
+const DEFAULT_SNIPPETS = [
+  ['act_require', 'Actions: require', "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle } = require('./xlv1_actions');\nuseLog(log);\n"],
+  ['act_click', 'Click', "await clickEl(page.locator('SELECTOR'));\n"],
+  ['act_type', 'Input', "await typeEl(page.locator('SELECTOR'), 'TEXT');\n"],
+  ['act_type_enter', 'Input + Enter', "await typeEl(page.locator('SELECTOR'), 'TEXT', { enter: true });\n"],
+  ['act_wait', 'Wait', "await waitEl(page.locator('SELECTOR'), 15000);\n"],
+  ['act_wait_click', 'Wait → Click', "if (await waitEl(page.locator('SELECTOR'), 15000)) await clickEl(page.locator('SELECTOR'));\n"],
+  ['act_wait_gone', 'Wait gone', "await waitGone(page.locator('SELECTOR'), 15000);\n"],
+  ['act_if_shown', 'If shown', "if (await isShown(page.locator('SELECTOR'))) {\n  await clickEl(page.locator('SELECTOR'));\n}\n"],
+  ['act_wait_any', 'Wait any', "const which = await waitAny([page.locator('SELECTOR_A'), page.locator('SELECTOR_B')], 30000);\nif (which === 0) {\n  // SELECTOR_A hiện ra trước\n} else if (which === 1) {\n  // SELECTOR_B hiện ra trước\n} else {\n  throw new Error('Không thấy phần tử nào');\n}\n"],
+  ['act_hover', 'Hover', "await hoverEl(page.locator('SELECTOR'));\n"],
+  ['act_scroll', 'Scroll to', "await scrollEl(page.locator('SELECTOR'));\n"],
+  ['act_text', 'Get text', "const text = await getText(page.locator('SELECTOR'));\nlog('text: ' + text);\n"],
+  ['act_pause', 'Pause', "await pause(page, 800, 2000);\n"],
+  ['act_while', 'While handle', "const res = await whileHandle([\n  { el: page.locator('POPUP_BUTTON'), click: true },\n  { el: page.locator('INPUT'), type: 'TEXT', enter: true },\n  { el: page.locator('ERROR_TEXT'), fail: 'Gặp lỗi' },\n  { el: page.locator('DONE_ELEMENT'), done: true },\n], { timeout: 60000 });\nif (!res.ok) throw new Error('whileHandle: ' + res.reason);\n"],
+];
+(function seedDefaultSnippets() {
+  const seededFile = path.join(DATA_DIR, 'snippets_seeded.json');
+  let seeded = [];
+  try { seeded = JSON.parse(fs.readFileSync(seededFile, 'utf-8')); } catch {}
+  const fresh = DEFAULT_SNIPPETS.filter(([id]) => !seeded.includes(id));
+  if (!fresh.length) return;
+  const snippets = readSnippets();
+  for (const [id, name, code] of fresh) if (!snippets.some((s) => s.id === 'snippet_' + id)) snippets.push({ id: 'snippet_' + id, name, code });
+  writeSnippets(snippets);
+  fs.writeFileSync(seededFile, JSON.stringify([...seeded, ...fresh.map(([id]) => id)], null, 2));
+})();
+
 // Keep track of which profiles currently have a live browser window open.
 // Key = profile id, value = { context, page } for that live session.
 // This lives in memory only (resets if you restart the server).
