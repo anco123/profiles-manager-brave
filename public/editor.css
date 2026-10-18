@@ -599,3 +599,18 @@ html, body.editor-body { height: 100%; overflow: hidden; }
 .task-state-missing { color: var(--warning-strong); }
 .task-state-removed { color: var(--text-faint); display: block; margin-top: 2px; }
 .task-state-filter { margin-right: auto; display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-muted); }
+
+/* Record thao tác (recorder.js) */
+.rec-bar { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px; border: 1px solid var(--border); border-radius: 999px; font-size: 0.8rem; }
+.rec-bar[hidden] { display: none; }
+.rec-dot { width: 9px; height: 9px; border-radius: 50%; background: #ef4444; animation: recPulse 1.2s infinite; }
+.rec-bar.is-paused .rec-dot { background: var(--border); animation: none; }
+@keyframes recPulse { 50% { opacity: 0.35; } }
+.rec-modal { width: min(520px, 92vw); }
+.rec-hint { font-size: 0.82rem; opacity: 0.8; line-height: 1.5; margin: 0 0 10px; }
+.rec-profile-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow: auto; margin-top: 8px; }
+.rec-profile { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--surface); cursor: pointer; text-align: left; color: var(--text); font: inherit; }
+.rec-profile:hover { border-color: var(--accent); }
+.rec-profile .rec-state { margin-left: auto; font-size: 0.75rem; opacity: 0.7; }
+.rec-profile .rec-run-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.rec-profile.is-running .rec-run-dot { background: #22c55e; }

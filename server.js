@@ -45,6 +45,7 @@ const { exec } = require('child_process');
 const { chromium } = require('playwright');
 const { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion } = require('./chrome-version-check');
+const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode } = require('./recorder');
 
 const app = express();
 
@@ -273,6 +274,39 @@ function readSnippets() {
 function writeSnippets(snippets) {
   fs.writeFileSync(SNIPPETS_FILE, JSON.stringify(snippets, null, 2));
 }
+
+// Snippet thao tác mặc định (dùng scripts/xlv1_actions.js) -- nạp vào snippets.json 1 LẦN mỗi cái; id đã nạp ghi vào
+// snippets_seeded.json nên bạn xoá nút nào thì nó không tự hiện lại. Thêm snippet mới vào list này = lần chạy server sau tự có nút.
+const DEFAULT_SNIPPETS = [
+  ['act_require', 'Actions: require', "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle } = require('./xlv1_actions');\nuseLog(log);\n"],
+  ['act_click', 'Click', "await clickEl(page.locator('SELECTOR'));\n"],
+  ['act_type', 'Input', "await typeEl(page.locator('SELECTOR'), 'TEXT');\n"],
+  ['act_type_enter', 'Input + Enter', "await typeEl(page.locator('SELECTOR'), 'TEXT', { enter: true });\n"],
+  ['act_wait', 'Wait', "await waitEl(page.locator('SELECTOR'), 15000);\n"],
+  ['act_wait_click', 'Wait → Click', "if (await waitEl(page.locator('SELECTOR'), 15000)) await clickEl(page.locator('SELECTOR'));\n"],
+  ['act_wait_gone', 'Wait gone', "await waitGone(page.locator('SELECTOR'), 15000);\n"],
+  ['act_if_shown', 'If shown', "if (await isShown(page.locator('SELECTOR'))) {\n  await clickEl(page.locator('SELECTOR'));\n}\n"],
+  ['act_if_show_type', 'If shown → Input', "if (await isShown(page.locator('SELECTOR'))) {\n  await typeEl(page.locator('SELECTOR'), 'TEXT');\n}\n"],
+  ['act_if_show_wait', 'If show (wait)', "if (await waitEl(page.locator('SELECTOR'), 5000)) {\n  await clickEl(page.locator('SELECTOR'));\n} else {\n  log('Không thấy SELECTOR');\n}\n"],
+  ['act_if_else_show', 'If / else if show', "if (await isShown(page.locator('SELECTOR_A'))) {\n  await clickEl(page.locator('SELECTOR_A'));\n} else if (await isShown(page.locator('SELECTOR_B'))) {\n  await typeEl(page.locator('SELECTOR_B'), 'TEXT');\n} else {\n  log('Không thấy phần tử nào');\n}\n"],
+  ['act_wait_any', 'Wait any', "const which = await waitAny([page.locator('SELECTOR_A'), page.locator('SELECTOR_B')], 30000);\nif (which === 0) {\n  // SELECTOR_A hiện ra trước\n} else if (which === 1) {\n  // SELECTOR_B hiện ra trước\n} else {\n  throw new Error('Không thấy phần tử nào');\n}\n"],
+  ['act_hover', 'Hover', "await hoverEl(page.locator('SELECTOR'));\n"],
+  ['act_scroll', 'Scroll to', "await scrollEl(page.locator('SELECTOR'));\n"],
+  ['act_text', 'Get text', "const text = await getText(page.locator('SELECTOR'));\nlog('text: ' + text);\n"],
+  ['act_pause', 'Pause', "await pause(page, 800, 2000);\n"],
+  ['act_while', 'While handle', "const res = await whileHandle([\n  { el: page.locator('POPUP_BUTTON'), click: true },\n  { el: page.locator('INPUT'), type: 'TEXT', enter: true },\n  { el: page.locator('ERROR_TEXT'), fail: 'Gặp lỗi' },\n  { el: page.locator('DONE_ELEMENT'), done: true },\n], { timeout: 60000 });\nif (!res.ok) throw new Error('whileHandle: ' + res.reason);\n"],
+];
+(function seedDefaultSnippets() {
+  const seededFile = path.join(DATA_DIR, 'snippets_seeded.json');
+  let seeded = [];
+  try { seeded = JSON.parse(fs.readFileSync(seededFile, 'utf-8')); } catch {}
+  const fresh = DEFAULT_SNIPPETS.filter(([id]) => !seeded.includes(id));
+  if (!fresh.length) return;
+  const snippets = readSnippets();
+  for (const [id, name, code] of fresh) if (!snippets.some((s) => s.id === 'snippet_' + id)) snippets.push({ id: 'snippet_' + id, name, code });
+  writeSnippets(snippets);
+  fs.writeFileSync(seededFile, JSON.stringify([...seeded, ...fresh.map(([id]) => id)], null, 2));
+})();
 
 // Keep track of which profiles currently have a live browser window open.
 // Key = profile id, value = { context, page } for that live session.
@@ -1763,6 +1797,27 @@ app.post('/api/profiles/:id/launch', async (req, res) => {
 });
 
 // -------------------------------------------------------------------
+// Record thao tác tay trên cửa sổ profile đang mở -> code clickEl/typeEl... (xem recorder.js).
+// Editor bấm "Record" -> start; nút ⏺ REC hiện trong trình duyệt của profile; "Chèn code" -> GET lấy code về.
+// -------------------------------------------------------------------
+app.post('/api/profiles/:id/recorder/start', async (req, res) => {
+  const running = runningContexts[req.params.id];
+  if (!running) return res.status(400).json({ error: 'Profile này chưa mở -- Launch trước rồi mới Record.' });
+  try {
+    const st = await startRecorder(req.params.id, running.context);
+    (running.context.pages()[0] || running.page).bringToFront().catch(() => {});
+    res.json(st);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post('/api/profiles/:id/recorder/stop', async (req, res) => {
+  const running = runningContexts[req.params.id];
+  res.json(await stopRecorder(req.params.id, running && running.context));
+});
+app.get('/api/profiles/:id/recorder', (req, res) => {
+  res.json({ ...recorderState(req.params.id), code: recorderCode(req.params.id, req.query.require !== '0') });
+});
+
+// -------------------------------------------------------------------
 // API: close a running profile's window without deleting it
 // -------------------------------------------------------------------
 app.post('/api/profiles/:id/close', async (req, res) => {
@@ -2114,7 +2169,9 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     // lướt Home + chèn task) tự co thời gian lại cho kịp, không bị cắt ngang giữa chừng. Không đổi tham số của main.js.
     running.page.__scriptDeadlineAt = deadlineAt || 0;
     running.page.__profileId = id; // xlv1_humanInput.js: mỗi profile 1 "kiểu tay" cố định (tốc độ chuột, nhịp gõ...) theo id
-    const result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow);
+    const resumeRec = pauseRecorder(id); // đang Record thì tạm dừng ghi -- chuột/phím do script gửi cũng là sự kiện "thật", không thì bị ghi lẫn vào
+    let result;
+    try { result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow); } finally { resumeRec(); }
     return { logs, result: result === undefined ? null : result, resultStatus };
   } catch (err) {
     // Chụp màn hình cho MỌI script khi lỗi -- tập trung ở đây thay vì
@@ -2891,6 +2948,10 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-app.listen(PORT, () => {
-  console.log(`Profile manager running at http://localhost:${PORT}`);
+// Chỉ nhận kết nối từ CHÍNH máy này -- trước đây listen trên mọi địa chỉ mạng, không mật khẩu, trong khi /api/profiles/:id/run chạy
+// code JS tuỳ ý: ai dùng chung wifi/LAN cũng chạy được lệnh trên máy + đọc cookie, mật khẩu, dữ liệu Excel. Cần mở từ máy khác thì đặt
+// HOST=0.0.0.0 trong .env (chỉ làm vậy trong mạng tin cậy).
+const HOST = process.env.HOST || '127.0.0.1';
+app.listen(PORT, HOST, () => {
+  console.log(`Profile manager running at http://localhost:${PORT}` + (HOST === '127.0.0.1' ? '' : ` (listening on ${HOST})`));
 });
