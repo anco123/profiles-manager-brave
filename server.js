@@ -2948,6 +2948,10 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
-app.listen(PORT, () => {
-  console.log(`Profile manager running at http://localhost:${PORT}`);
+// Chỉ nhận kết nối từ CHÍNH máy này -- trước đây listen trên mọi địa chỉ mạng, không mật khẩu, trong khi /api/profiles/:id/run chạy
+// code JS tuỳ ý: ai dùng chung wifi/LAN cũng chạy được lệnh trên máy + đọc cookie, mật khẩu, dữ liệu Excel. Cần mở từ máy khác thì đặt
+// HOST=0.0.0.0 trong .env (chỉ làm vậy trong mạng tin cậy).
+const HOST = process.env.HOST || '127.0.0.1';
+app.listen(PORT, HOST, () => {
+  console.log(`Profile manager running at http://localhost:${PORT}` + (HOST === '127.0.0.1' ? '' : ` (listening on ${HOST})`));
 });
