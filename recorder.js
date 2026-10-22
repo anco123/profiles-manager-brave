@@ -2,7 +2,8 @@
  * recorder.js -- ghi lại thao tác tay trên cửa sổ profile đang mở rồi sinh code dùng scripts/xlv1_actions.js (clickEl, typeEl, ...).
  * -----------------------------------------------------------------------
  * - startRecorder(id, context): gắn binding window.__pmRec + init script vẽ nút "⏺ REC" (góc dưới phải, kéo được) vào mọi trang.
- *   Bấm nút REC = bắt đầu ghi 1 ĐOẠN; bấm lần nữa = dừng + xuất code của đúng đoạn đó (editor đang mở tự chèn vào chỗ con trỏ, kèm copy clipboard).
+ *   Bấm nút REC = bắt đầu ghi 1 ĐOẠN; đang ghi bấm lại = TẠM DỪNG (bấm nữa = ghi TIẾP vào cùng đoạn, nối nhiều lần ghi thành 1 đoạn);
+ *   nút ⏹ Xuất = kết thúc đoạn + xuất code cả đoạn (editor đang mở tự chèn vào chỗ con trỏ, kèm copy clipboard).
  *   Nút ☰ cạnh đó -> bảng các bước đã ghi: đổi hành động, đổi selector, ⬆ cha / ⬇ con, sửa chữ gõ, xoá bước, xem code.
  * - Giữ Alt + rê chuột: bảng các lớp phần tử chồng nhau dưới con trỏ (elementsFromPoint -- cả lớp phủ trong suốt lẫn nút bị đè bên dưới),
  *   lăn chuột để đổi lớp, nhả Alt thì bảng đứng yên để chọn selector (đếm số khớp bằng chính Playwright) + hành động.
@@ -19,7 +20,8 @@
 
 const fs = require('fs');
 
-const recorders = {}; // id profile -> { enabled, recording, steps, seq, segFrom, exports, exportSeq, tabSeq, sources, undo }
+const recorders = {}; // id profile -> { enabled, recording, segOpen, steps, seq, segFrom, exports, exportSeq, tabSeq, sources, undo }
+// segOpen: đang có 1 đoạn chưa xuất (đang ghi HOẶC tạm dừng); recording: đang ghi thật -- tạm dừng = segOpen && !recording
 
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
 const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', getText: 'Lấy text', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
@@ -103,13 +105,13 @@ function stateOf(id) {
   const r = recorders[id];
   if (!r) return { enabled: false, recording: false, steps: [], code: '' };
   for (const s of r.steps) if (s.text != null && s.sugFor !== s.text) { s.suggest = suggestFor(r, s.text); s.sugFor = s.text; } // chỉ tính lại khi chữ đổi
-  return { enabled: r.enabled, recording: r.recording, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, code: stepCode(s) })), actions: ACTIONS, code: buildCode(r.steps) };
+  return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, code: stepCode(s) })), actions: ACTIONS, code: buildCode(r.steps) };
 }
 
 // Dừng 1 đoạn -> code của các bước ghi trong đoạn đó (id >= segFrom) vào hàng đợi; editor hỏi /recorder?since=... rồi tự chèn
 function exportSeg(r) {
   const seg = r.steps.filter((s) => s.id >= r.segFrom);
-  r.segFrom = r.seq + 1;
+  r.segFrom = r.seq + 1; r.segOpen = false; r.recording = false;
   if (!seg.some((s) => stepCode(s))) return null;
   const e = { id: ++r.exportSeq, count: seg.length, body: buildCode(seg, false) };
   r.exports.push(e);
@@ -205,7 +207,8 @@ async function handle(id, page, msg) {
   if (msg.op === 'count') return { counts: await countLocs(page, msg.codes) };
   let exported = null;
   if (msg.op === 'event' && r.recording) { const s = onEvent(r, msg.ev, page); if (s && msg.ev.perform) await perform(r, page, s); }
-  else if (msg.op === 'toggle') { if (r.recording) { r.recording = false; exported = exportSeg(r); } else { r.recording = true; r.segFrom = r.seq + 1; } }
+  else if (msg.op === 'rec') { if (!r.segOpen) { r.segOpen = true; r.segFrom = r.seq + 1; } r.recording = !r.recording; } // chưa có đoạn -> mở đoạn mới; có rồi -> tạm dừng / ghi tiếp cùng đoạn
+  else if (msg.op === 'export') exported = r.segOpen ? exportSeg(r) : null;
   else if (msg.op === 'clear') { if (r.steps.length) r.undo = r.steps; r.steps = []; } // giữ lại để Khôi phục
   else if (msg.op === 'undoClear') { if (r.undo) r.steps = [...r.undo, ...r.steps]; r.undo = null; }
   else if (msg.op === 'delete') r.steps = r.steps.filter((s) => s.id !== msg.stepId);
@@ -263,8 +266,8 @@ async function startRecorder(id, context, data) {
   const ex = r.sources.find((x) => x.kind === 'excel');
   r.rowNum = ex && ex.row ? ex.rows.indexOf(ex.row) + 2 : null;
   for (const s of r.steps) s.sugFor = undefined;
-  if (!r.recording) r.segFrom = r.seq + 1;
-  r.enabled = true; r.recording = true;
+  if (!r.segOpen) r.segFrom = r.seq + 1; // đang tạm dừng dở 1 đoạn thì ghi tiếp vào đoạn đó
+  r.enabled = true; r.recording = true; r.segOpen = true;
   if (!context.__pmRecorder) {
     context.__pmRecorder = true;
     await context.exposeBinding('__pmRec', (src, msg) => handle(id, src.page, msg));
@@ -283,7 +286,7 @@ async function startRecorder(id, context, data) {
 async function stopRecorder(id, context) {
   const r = recorders[id];
   let exported = null;
-  if (r) { if (r.recording) exported = exportSeg(r); r.enabled = false; r.recording = false; }
+  if (r) { if (r.segOpen) exported = exportSeg(r); r.enabled = false; r.recording = false; }
   if (context) for (const page of context.pages()) await page.evaluate(() => window.__pmRecUI && window.__pmRecUI.remove()).catch(() => {});
   return { ...stateOf(id), exported };
 }
@@ -625,7 +628,7 @@ function pageRecorder() {
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const CSS_UI = `*{box-sizing:border-box;font-family:Segoe UI,system-ui,sans-serif;font-size:12px}
     .pill{display:flex;align-items:center;gap:6px;background:#1a1d27;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:999px;padding:4px 4px 4px 12px;cursor:pointer;box-shadow:0 4px 16px #0006;user-select:none}
-    .pill button{border-radius:999px;padding:2px 8px}
+    .pill button{border-radius:999px;padding:2px 8px}.pill button[hidden]{display:none}.paused .dot{background:#e8a33d}
     .dot{width:10px;height:10px;border-radius:50%;background:#666}.rec .dot{background:#ef4444;animation:p 1.2s infinite}@keyframes p{50%{opacity:.35}}
     .panel{position:absolute;right:0;bottom:44px;width:470px;max-height:72vh;display:flex;flex-direction:column;background:#12141c;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:12px;box-shadow:0 10px 40px #000a;overflow:hidden}
     .panel[hidden],.pick[hidden],.toast[hidden]{display:none}.hd{display:flex;gap:6px;align-items:center;padding:8px;border-bottom:1px solid #2a2e3a;cursor:move}.hd b{flex:1}
@@ -655,7 +658,7 @@ function pageRecorder() {
     window.__pmRecUI = host;
     root = host.attachShadow({ mode: 'closed' });
     setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
-      <div class="pill" title="Bấm: bắt đầu ghi / dừng + xuất code đoạn vừa ghi. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
+      <div class="pill" title="Bấm: ghi / tạm dừng / ghi tiếp (cùng 1 đoạn). ⏹: xuất code cả đoạn. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="export" title="Kết thúc đoạn + xuất code (editor + clipboard)" hidden>⏹ Xuất</button><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
     ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast') };
     document.documentElement.appendChild(host);
     for (const t of ['input', 'change']) root.addEventListener(t, (e) => uiEvent(e, e.composedPath()[0]));
@@ -702,12 +705,22 @@ function pageRecorder() {
     const fallback = () => { const ta = document.createElement('textarea'); ta.value = text; document.documentElement.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove(); };
     if (navigator.clipboard) navigator.clipboard.writeText(text).catch(fallback); else fallback();
   }
-  function toggleRec() {
-    call({ op: 'toggle' }).then((s) => {
+  // Ghi / tạm dừng / ghi tiếp (cùng 1 đoạn)
+  function recToggle() {
+    const fresh = !(st && st.segOpen);
+    call({ op: 'rec' }).then((s) => {
+      if (!s) return;
+      render(s);
+      toast(s.recording ? (fresh ? 'Đang ghi đoạn mới · giữ Alt + rê chuột để chọn đúng phần tử' : 'Ghi tiếp vào đoạn đang ghi') : 'Tạm dừng -- bấm lại để ghi tiếp, ⏹ để xuất cả đoạn');
+    });
+  }
+  // Kết thúc đoạn + xuất code cả đoạn (mọi lần ghi / tạm dừng nối lại)
+  function recExport() {
+    call({ op: 'export' }).then((s) => {
       if (!s) return;
       render(s);
       if (s.exported) { copyText(s.exported.body); toast(`Đã xuất ${s.exported.count} bước → editor + clipboard`); }
-      else toast(s.recording ? 'Đang ghi đoạn mới · giữ Alt + rê chuột để chọn đúng phần tử' : 'Đã dừng -- đoạn này chưa có bước nào');
+      else toast('Đoạn này chưa có bước nào -- không có gì để xuất');
     });
   }
   function unmount() { closePick(); if (host) host.remove(); if (hl) hl.remove(); window.__pmRecUI = null; ui = null; root = null; }
@@ -739,14 +752,16 @@ function pageRecorder() {
   function draw(s) {
     const segN = s.steps.filter((x) => x.id >= s.segFrom).length;
     ui.pill.classList.toggle('rec', !!s.recording);
-    ui.pill.querySelector('.lbl').textContent = s.recording ? `REC · ${segN} bước` : 'Ghi';
+    ui.pill.classList.toggle('paused', !!s.segOpen && !s.recording);
+    ui.pill.querySelector('.lbl').textContent = s.recording ? `REC · ${segN} bước` : s.segOpen ? `⏸ Tạm dừng · ${segN} bước` : 'Ghi';
+    ui.pill.querySelector('[data-op=export]').hidden = !s.segOpen;
     if (!open) return;
     const a = ui.root.activeElement;
     if (a && (a.tagName === 'INPUT' && a.type !== 'checkbox' || a.tagName === 'SELECT')) return; // đang sửa 1 ô -- không vẽ lại kẻo mất con trỏ
     const list = ui.panel.querySelector('.list'), scroll = list ? list.scrollTop : 0;
-    const cards = s.steps.map((x, i) => (s.recording && x.id >= s.segFrom && (i === 0 || s.steps[i - 1].id < s.segFrom) ? '<div class="seg">— đoạn đang ghi (bấm REC để dừng + xuất) —</div>' : '') + stepHTML(x, i, s.actions || {}));
+    const cards = s.steps.map((x, i) => (s.segOpen && x.id >= s.segFrom && (i === 0 || s.steps[i - 1].id < s.segFrom) ? `<div class="seg">— đoạn ${s.recording ? 'đang ghi' : 'tạm dừng'} (⏹ Xuất = xuất cả đoạn) —</div>` : '') + stepHTML(x, i, s.actions || {}));
     setHTML(ui.panel, `<div class="hd"><b>Các bước đã ghi</b>
-        <button data-op="toggle">${s.recording ? '⏹ Dừng + xuất' : '⏺ Ghi đoạn mới'}</button><button data-op="code">${showCode ? 'Ẩn code' : 'Code'}</button>
+        <button data-op="rec">${s.recording ? '⏸ Tạm dừng' : s.segOpen ? '▶ Ghi tiếp' : '⏺ Ghi đoạn mới'}</button>${s.segOpen ? '<button data-op="export">⏹ Xuất</button>' : ''}<button data-op="code">${showCode ? 'Ẩn code' : 'Code'}</button>
         <button data-op="copy" class="pri">Copy hết</button>${!s.steps.length && s.canUndo ? '<button data-op="undo">↶ Khôi phục</button>' : '<button data-op="clear">Xoá hết</button>'}<button data-op="close" title="Thu nhỏ">—</button></div>
       <div class="list">${s.steps.length ? cards.join('') : '<div class="empty">Chưa có bước nào -- cứ thao tác trên trang, các bước sẽ hiện ở đây. Giữ Alt + rê chuột để chọn đúng phần tử.</div>'}</div>
       ${showCode ? `<pre>${esc(s.code)}</pre>` : ''}`);
@@ -757,7 +772,8 @@ function pageRecorder() {
     if (el.closest('.pill')) {
       if (e.type !== 'click' || (drag && drag.moved)) return;
       if (el.closest('[data-op=menu]')) { open = !open; ui.panel.hidden = !open; ui.toast.hidden = true; if (!open) highlight(null); refresh(); }
-      else toggleRec();
+      else if (el.closest('[data-op=export]')) recExport();
+      else recToggle();
       return;
     }
     const card = el.closest('.st'), stepId = card ? +card.dataset.id : null, step = st && st.steps.find((x) => x.id === stepId);
@@ -777,7 +793,8 @@ function pageRecorder() {
     if (op === 'close') { open = false; ui.panel.hidden = true; highlight(null); return; }
     if (op === 'code') { showCode = !showCode; draw(st); return; }
     if (op === 'copy') { copyText(st.code); btn.textContent = 'Đã copy ✓'; setTimeout(() => draw(st), 1200); return; }
-    if (op === 'toggle') { toggleRec(); return; }
+    if (op === 'rec') { recToggle(); return; }
+    if (op === 'export') { recExport(); return; }
     if (op === 'clear') { call({ op: 'clear' }).then(render); return; } // không hỏi lại (confirm() bị Playwright tự đóng) -- xoá nhầm thì bấm Khôi phục
     if (op === 'undo') { call({ op: 'undoClear' }).then(render); return; }
     if (!step) return;
