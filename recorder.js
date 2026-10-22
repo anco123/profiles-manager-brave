@@ -12,8 +12,9 @@
  * - Sau cú click: mở tab mới -> click + chờ tab mới (không chắc có mở nên bọc if), các bước ghi ở tab mới LỒNG vào trong if (chạy trên
  *   tab đó), sau if đóng hết tab chỉ giữ tab đầu tiên (closeOtherTabs); muốn thì đổi sang page.goto (đọc href lúc chạy / URL cố định).
  *   Tải file -> chờ download.
- * - While: mở While (đầu bảng Alt / bảng ☰) -> các bước chọn / ghi sau đó thành các `if (đang hiện) {...; continue;}` trong 1 vòng
- *   while (tối đa N giây, quét lại từ đầu sau mỗi lần làm); "If hiện → Thoát While" = break; Đóng While -> ghi tiếp như thường.
+ * - While: mở While (đầu bảng Alt / bảng ☰) -> các bước chọn / ghi sau đó thành các `if (có element) {...; continue;}` trong
+ *   `while (true)` (quét lại từ đầu sau mỗi lần làm; giới hạn số giây là tuỳ chọn); thoát bằng "If có → Break" hoặc tick "rồi Break"
+ *   ở 1 If; "có trong DOM" = điều kiện count() > 0 (kể cả đang ẩn) thay vì đang hiện. Đóng While -> ghi tiếp như thường.
  *   Hộp thoại alert/confirm không cần ghi: Playwright tự đóng (dismiss) cả lúc ghi lẫn lúc chạy script.
  * - Gõ chữ: so với dòng Excel / Google Sheet của profile đang ghi (snapshot đã import ở editor) -> gợi ý thay chữ cố định bằng
  *   row.U / readGoogleSheetCell(row, 'D', 'TAB'); không khớp thì vẫn chọn tay được từ danh sách cột.
@@ -30,7 +31,7 @@ const recorders = {}; // id profile -> { enabled, recording, segOpen, steps, seq
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
 const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', ifHover: 'If hiện → Hover', loop: 'While', getText: 'Lấy text', clickTab: 'Click → tab mới (if + đóng tab phụ)', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
 // Nhãn hành động cho bước nằm TRONG While -- trong vòng lặp mọi bước đều là "if đang hiện thì ..." (click / ifClick như nhau)
-const LOOP_ACTIONS = { click: 'If hiện → Click', type: 'If hiện → Gõ', hover: 'If hiện → Hover', loopBreak: 'If hiện → Thoát While', loopFail: 'If hiện → Báo lỗi', skip: 'Bỏ qua' };
+const LOOP_ACTIONS = { click: 'If có → Click', type: 'If có → Gõ', hover: 'If có → Hover', loopBreak: 'If có → Break (thoát While)', loopFail: 'If có → Báo lỗi', skip: 'Bỏ qua' };
 const HEADER = "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs } = require('./xlv1_actions');\nuseLog(log);\n\n";
 
 function selOf(step) {
@@ -54,7 +55,8 @@ function stepCode(s, P = 'page') {
     case 'ifClick': return `if (await waitEl(${sel}, 5000)) await clickEl(${sel});`;
     case 'ifType': return `if (await waitEl(${sel}, 5000)) await typeEl(${sel}, ${txt}${opt});`;
     case 'ifHover': return `if (await waitEl(${sel}, 5000)) await hoverEl(${sel});`;
-    case 'loop': return `const end${s.id} = Date.now() + ${(+s.timeout || 60) * 1000}; // While: lặp tối đa ${+s.timeout || 60} giây -- mỗi vòng xét lần lượt các if, gặp cái nào đang hiện thì làm rồi quét lại từ đầu`;
+    case 'loop': return +s.timeout > 0 ? `const end${s.id} = Date.now() + ${+s.timeout * 1000}; // While: lặp tới khi gặp break, tối đa ${+s.timeout} giây -- mỗi vòng xét lần lượt các if, gặp cái nào thì làm rồi quét lại từ đầu`
+      : `while (true) { // While: lặp tới khi gặp break -- mỗi vòng xét lần lượt các if, gặp cái nào thì làm rồi quét lại từ đầu`;
     case 'getText': return `const text${s.id} = await getText(${sel}); log('text: ' + text${s.id});`;
     case 'gotoLink': return `await ${P}.goto(new URL(await ${sel}.getAttribute('href'), ${P}.url()).href); // click mở tab mới -> mở thẳng link trong tab này`;
     case 'gotoUrl': return `await ${P}.goto(${q(s.tabUrl || s.href || '')}); // click mở tab mới -> mở thẳng URL trong tab này`;
@@ -67,14 +69,17 @@ function stepCode(s, P = 'page') {
 
 // Tab mới do bước clickTab mở -> tên biến tab đó (tab<id bước>). Bước ghi ở tab đó (s.tab) được lồng vào if (tabX) {...} của bước clickTab.
 function tabVars(steps) { const m = {}; for (const s of steps) if (s.action === 'clickTab' && s.opens) m[s.opens] = `tab${s.id}`; return m; }
-// Bước TRONG While: if (đang hiện -- kiểm tra ngay, không chờ) { làm; continue; } -- continue = quét lại từ đầu như whileHandle
+// Bước TRONG While: if (có element -- kiểm tra ngay, không chờ) { làm; continue; } -- continue = quét lại từ đầu như whileHandle.
+// s.cond === 'dom': có trong DOM (count > 0, kể cả đang ẩn), không thì phải đang hiện (isShown). s.thenBreak: làm xong thì break thay vì continue.
 function loopCode(s, P = 'page') {
   const sel = (selOf(s) || '').replace(/^page\./, P + '.'), txt = s.text != null && String(s.text).startsWith('=') ? String(s.text).slice(1).trim() : q(s.text ?? '');
   const lv = s.levels && s.levels[s.level], what = lv ? (lv.label || lv.tag) : '';
-  const act = { click: `await clickEl(${sel}); continue;`, ifClick: `await clickEl(${sel}); continue;`, type: `await typeEl(${sel}, ${txt}${s.enter ? ', { enter: true }' : ''}); continue;`, ifType: `await typeEl(${sel}, ${txt}${s.enter ? ', { enter: true }' : ''}); continue;`,
-    hover: `await hoverEl(${sel}); continue;`, ifHover: `await hoverEl(${sel}); continue;`, loopFail: `throw new Error(${q('Gặp: ' + what)});` }[s.action];
-  if (s.action === 'loopBreak') return `if (await isShown(${sel})) break; // xong -- thoát While`;
-  return act ? `if (await isShown(${sel})) { ${act} }` : stepCode(s, P); // bước khác (Wait, Lấy text...) để nguyên
+  const cond = s.cond === 'dom' ? `(await ${sel}.count()) > 0` : `await isShown(${sel})`, next = s.thenBreak ? 'break;' : 'continue;';
+  const act = { click: `await clickEl(${sel});`, ifClick: `await clickEl(${sel});`, type: `await typeEl(${sel}, ${txt}${s.enter ? ', { enter: true }' : ''});`, ifType: `await typeEl(${sel}, ${txt}${s.enter ? ', { enter: true }' : ''});`,
+    hover: `await hoverEl(${sel});`, ifHover: `await hoverEl(${sel});` }[s.action];
+  if (s.action === 'loopBreak') return `if (${cond}) break; // xong -- thoát While`;
+  if (s.action === 'loopFail') return `if (${cond}) throw new Error(${q('Gặp: ' + what)});`;
+  return act ? `if (${cond}) { ${act} ${next} }${s.thenBreak ? ' // xong -- thoát While' : ''}` : stepCode(s, P); // bước khác (Wait, Lấy text...) để nguyên; chú thích để SAU dấu } (để trong thì nuốt mất dấu })
 }
 const loopIds = (steps) => new Set(steps.filter((s) => s.action === 'loop').map((s) => s.id));
 // Mỗi bước nằm trong khối gần nhất chứa nó: While (s.loop) > tab mới do clickTab mở (s.tab) > ngoài cùng
@@ -87,7 +92,7 @@ function bodyOf(steps) {
       if (!code) continue;
       out.push(ind + code);
       if (s.action === 'loop') {
-        out.push(`${ind}while (Date.now() < end${s.id}) {`);
+        if (+s.timeout > 0) out.push(`${ind}while (Date.now() < end${s.id}) {`); // không giới hạn giây thì dòng code ở trên đã là `while (true) {`
         emit('L' + s.id, ind + '  ');
         out.push(`${ind}  await ${P}.waitForTimeout(500); // chưa gặp cái nào -- nghỉ rồi quét lại`, `${ind}}`);
       }
@@ -152,7 +157,7 @@ function stateOf(id) {
   for (const s of r.steps) if (s.text != null && s.sugFor !== s.text) { s.suggest = suggestFor(r, s.text); s.sugFor = s.text; } // chỉ tính lại khi chữ đổi
   const vars = tabVars(r.steps), loops = loopIds(r.steps);
   const codeOf = (s) => (loops.has(s.loop) ? loopCode(s, vars[s.tab] || 'page') : stepCode(s, vars[s.tab] || 'page'));
-  const loopInfo = (s) => (s.action === 'loop' ? { inner: r.steps.filter((x) => x.loop === s.id).length, hasBreak: r.steps.some((x) => x.loop === s.id && x.action === 'loopBreak') } : {});
+  const loopInfo = (s) => (s.action === 'loop' ? { inner: r.steps.filter((x) => x.loop === s.id).length, hasBreak: r.steps.some((x) => x.loop === s.id && (x.action === 'loopBreak' || (x.thenBreak && x.action !== 'skip'))) } : {});
   return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, openLoop: loops.has(r.openLoop) ? r.openLoop : null, loopActions: LOOP_ACTIONS, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...loopInfo(s), code: codeOf(s), tabVar: vars[s.tab], inLoop: loops.has(s.loop) })), actions: ACTIONS, code: buildCode(r.steps) };
 }
 
@@ -182,8 +187,8 @@ function onEvent(r, ev, page) {
     return add({ action: 'nav', url: ev.url, auto, tab });
   }
   const base = { levels: ev.levels, level: ev.level, url: ev.pageUrl, href: ev.href, linkLevel: ev.linkLevel };
-  if (ev.kind === 'loop') return add({ action: 'loop', timeout: 60, loop: undefined });
-  if (ev.kind === 'pick') return add({ ...base, action: ev.action, alt: ev.alt || 0, custom: ev.custom || null, text: ev.text, enter: !!ev.enter });
+  if (ev.kind === 'loop') return add({ action: 'loop', timeout: 0, loop: undefined }); // 0 = while (true), thoát bằng break
+  if (ev.kind === 'pick') return add({ ...base, action: ev.action, alt: ev.alt || 0, custom: ev.custom || null, text: ev.text, enter: !!ev.enter, thenBreak: !!ev.thenBreak, cond: ev.cond });
   if (ev.kind === 'click') return add({ ...base, action: 'click' });
   if (ev.kind === 'type') {
     if (last && sameEl(last, ev) && last.action === 'type') { last.text = ev.value; last.at = now; return; }
@@ -277,7 +282,7 @@ async function handle(id, page, msg) {
       const p = msg.patch || {};
       if (p.level != null && s.levels && p.level >= 0 && p.level < s.levels.length) { s.level = p.level; s.alt = 0; s.custom = null; }
       if (p.alt != null) { s.alt = p.alt; s.custom = null; }
-      for (const k of ['action', 'text', 'enter', 'custom', 'url', 'key', 'auto', 'tabUrl', 'timeout']) if (p[k] !== undefined) s[k] = p[k];
+      for (const k of ['action', 'text', 'enter', 'custom', 'url', 'key', 'auto', 'tabUrl', 'timeout', 'thenBreak', 'cond']) if (p[k] !== undefined) s[k] = p[k];
       if (p.action === 'gotoLink' && s.linkLevel >= 0 && s.linkLevel < s.levels.length) Object.assign(s, { level: s.linkLevel, alt: 0, custom: null }); // đọc href -> chọn đúng thẻ <a>
     }
   }
@@ -629,7 +634,7 @@ function pageRecorder() {
   }
   // Nhóm nút hành động ở bảng Alt. Đang mở While: mọi lựa chọn là "if đang hiện thì ..." trong vòng lặp (nhãn theo state.loopActions)
   const PICK_GROUPS = [['Làm ngay', ['click', 'type', 'hover', 'getText']], ['Chờ', ['wait', 'waitGone']], ['If hiện (chờ tối đa 5s, không có thì bỏ qua)', ['ifClick', 'ifType', 'ifHover']]];
-  const LOOP_GROUPS = [['Trong While -- mỗi vòng xét lần lượt, gặp cái nào đang hiện thì làm rồi quét lại', ['click', 'type', 'hover', 'loopBreak', 'loopFail']]];
+  const LOOP_GROUPS = [['Trong While -- mỗi vòng xét lần lượt, gặp cái nào thì làm rồi quét lại', ['click', 'type', 'hover', 'loopBreak', 'loopFail']]];
   const loopN = () => (st && st.openLoop ? st.steps.filter((x) => x.loop === st.openLoop).length : 0);
   // Thanh While -- luôn ở ĐẦU bảng (chọn While trước rồi mới chọn các if bên trong)
   const whileBar = (live) => (st && st.openLoop
@@ -646,6 +651,8 @@ function pageRecorder() {
       <div class="r"><input class="grow" data-f="ptext" value="${esc(pick.text)}" placeholder="Chữ để gõ (cho Gõ) -- bắt đầu bằng = để dùng biểu thức JS"><label class="lv"><input type="checkbox" data-f="penter" ${pick.enter ? 'checked' : ''}> Enter</label></div>
       ${srcSelect('psrc')}
       ${(st && st.openLoop ? LOOP_GROUPS : PICK_GROUPS).map(([g, list]) => `<div class="ag">${esc(g)}</div><div class="acts">${list.map((a) => `<button data-act="${a}" ${a === 'click' ? 'class="pri"' : ''}>${esc((st.openLoop ? st.loopActions : acts)[a] || a)}</button>`).join('')}</div>`).join('')}
+      ${st && st.openLoop ? `<div class="r"><label class="lv" title="Làm xong (Click / Gõ / Hover) thì break -- thoát While"><input type="checkbox" data-f="pbreak" ${pick.thenBreak ? 'checked' : ''}> rồi Break</label>
+        <label class="lv" title="Điều kiện if: có trong DOM (count() > 0, kể cả đang ẩn) thay vì phải đang hiện"><input type="checkbox" data-f="pdom" ${pick.dom ? 'checked' : ''}> có trong DOM (kể cả ẩn)</label></div>` : ''}
       <label class="lv"><input type="checkbox" data-f="pdo" ${pick.perform ? 'checked' : ''}> Làm luôn trên trang (Click / Gõ / Hover)</label></div>`;
     setHTML(p, html);
     p.hidden = false;
@@ -662,7 +669,8 @@ function pageRecorder() {
     if (!r) return;
     const ch = chainFor(r.el, { level: 0, alts0: r.alts });
     const perform = pick.perform && ['click', 'type', 'hover', 'ifClick', 'ifType', 'ifHover'].includes(action);
-    send({ kind: 'pick', action, ...ch, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom, text: pick.text, enter: pick.enter, perform });
+    const inLoop = !!(st && st.openLoop);
+    send({ kind: 'pick', action, ...ch, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom, text: pick.text, enter: pick.enter, perform, thenBreak: inLoop && pick.thenBreak, cond: inLoop && pick.dom ? 'dom' : undefined });
     toast(`Đã ghi: ${((st && (st.openLoop ? st.loopActions : st.actions)) || {})[action] || action}${st && st.openLoop ? ' (trong While)' : ''}${perform ? ' (đang làm trên trang...)' : ''}`);
     closePick();
   }
@@ -675,6 +683,8 @@ function pageRecorder() {
       else if (f === 'ptext') pick.text = el.value;
       else if (f === 'penter') pick.enter = el.checked;
       else if (f === 'pdo') pick.perform = el.checked;
+      else if (f === 'pbreak') pick.thenBreak = el.checked;
+      else if (f === 'pdom') pick.dom = el.checked;
       return;
     }
     if (pick.live) return;
@@ -693,10 +703,10 @@ function pageRecorder() {
   const setHTML = (el, html) => { el.innerHTML = tt ? tt.createHTML(html) : html; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const CSS_UI = `*{box-sizing:border-box;font-family:Segoe UI,system-ui,sans-serif;font-size:12px}
-    .pill{display:flex;align-items:center;gap:6px;background:#1a1d27;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:999px;padding:4px 4px 4px 12px;cursor:pointer;box-shadow:0 4px 16px #0006;user-select:none}
-    .pill button{border-radius:999px;padding:2px 8px}.pill button[hidden]{display:none}.paused .dot{background:#e8a33d}
-    .dot{width:10px;height:10px;border-radius:50%;background:#666}.rec .dot{background:#ef4444;animation:p 1.2s infinite}@keyframes p{50%{opacity:.35}}
-    .panel{position:absolute;right:0;bottom:44px;width:560px;max-width:calc(100vw - 32px);max-height:72vh;display:flex;flex-direction:column;background:#12141c;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:12px;box-shadow:0 10px 40px #000a;overflow:hidden}
+    .pill{display:flex;align-items:center;gap:10px;background:#1a1d27;color:#e8e9ed;border:1px solid #3a3f4d;border-radius:999px;padding:7px 7px 7px 18px;min-height:46px;cursor:pointer;box-shadow:0 6px 20px #0008;user-select:none}
+    .pill .lbl{font-size:15px;font-weight:600;white-space:nowrap}.pill button{border-radius:999px;padding:6px 14px;font-size:14px}.pill button[hidden]{display:none}.paused .dot{background:#e8a33d}
+    .dot{width:14px;height:14px;border-radius:50%;background:#666;flex:none}.rec .dot{background:#ef4444;animation:p 1.2s infinite}@keyframes p{50%{opacity:.35}}
+    .panel{position:absolute;right:0;bottom:56px;width:560px;max-width:calc(100vw - 32px);max-height:72vh;display:flex;flex-direction:column;background:#12141c;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:12px;box-shadow:0 10px 40px #000a;overflow:hidden}
     .panel[hidden],.pick[hidden],.toast[hidden]{display:none}.hd{display:flex;gap:6px;align-items:center;padding:8px;border-bottom:1px solid #2a2e3a;cursor:move}.hd b{flex:1;white-space:nowrap}.hd button{white-space:nowrap}
     button{background:#1a1d27;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:6px;padding:3px 8px;cursor:pointer}button:hover:not(:disabled){border-color:#e8a33d;color:#f5b455}button:disabled{opacity:.35;cursor:default}
     .pri{background:#e8a33d;color:#1a1206;border-color:#e8a33d}.pri:hover{color:#1a1206!important;filter:brightness(1.1)}
@@ -718,7 +728,7 @@ function pageRecorder() {
     .ag{font-size:10px;opacity:.6;margin:6px 0 2px;text-transform:uppercase;letter-spacing:.03em}
     .st.loop{border-color:#a78bfa;background:#a78bfa14}.st.loop b{color:#c4b5fd}.st.inloop{margin-left:14px;border-left:3px solid #a78bfa}
     .det{border-top:1px solid #2a2e3a;margin-top:6px;padding-top:6px}.acts{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
-    .toast{position:absolute;right:0;bottom:44px;background:#1a1d27;color:#e8e9ed;border:1px solid #e8a33d;border-radius:8px;padding:6px 10px;white-space:nowrap;box-shadow:0 4px 16px #0006}`;
+    .toast{position:absolute;right:0;bottom:56px;background:#1a1d27;color:#e8e9ed;border:1px solid #e8a33d;border-radius:8px;padding:6px 10px;white-space:nowrap;box-shadow:0 4px 16px #0006}`;
 
   function mount() {
     if (!document.body) return setTimeout(mount, 100);
@@ -802,8 +812,8 @@ function pageRecorder() {
   const sugHTML = (x) => (x.suggest && x.suggest.length ? `<div class="sug"><span>Khớp ô:</span>${x.suggest.map((g) => `<button data-op="src" data-code="${esc(g.code)}" title="Dùng ${esc(g.code)}">${esc(g.label)}</button>`).join('')}</div>` : '');
   function stepHTML(x, i, acts) {
     const tools = `<span class="grow"></span><button data-op="up" title="Lên trên">↑</button><button data-op="down" title="Xuống dưới">↓</button><button data-op="del" title="Xoá bước${x.action === 'loop' ? ' (các If bên trong ra ngoài thành bước thường)' : ''}">✕</button>`;
-    if (x.action === 'loop') return `<div class="st loop" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span><b>⟳ While</b><span class="lv">tối đa</span><input type="number" min="1" data-f="timeout" value="${+x.timeout || 60}" style="width:60px"><span class="lv">giây · ${x.inner} if${st.openLoop === x.id ? ' · đang mở' : ''}</span>${tools}</div>
-      ${x.hasBreak ? '' : `<div class="tag">⚠ chưa có "If hiện → Thoát While" -- vòng lặp sẽ chạy đủ ${+x.timeout || 60} giây mới ra</div>`}<div class="code">${esc(x.code)}</div></div>`;
+    if (x.action === 'loop') return `<div class="st loop" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span><b>⟳ While${+x.timeout > 0 ? '' : ' (true)'}</b><span class="lv">giới hạn</span><input type="number" min="0" data-f="timeout" value="${+x.timeout || 0}" style="width:56px" title="0 = while (true), chỉ thoát khi gặp break"><span class="lv">giây (0 = không) · ${x.inner} if${st.openLoop === x.id ? ' · đang mở' : ''}</span>${tools}</div>
+      ${x.hasBreak ? '' : `<div class="tag">⚠ chưa có Break -- ${+x.timeout > 0 ? `vòng lặp chạy đủ ${+x.timeout} giây mới ra` : 'while (true) sẽ chạy mãi (tới khi hết giờ script)'}; thêm "If có → Break" hoặc tick "rồi Break" ở 1 If</div>`}<div class="code">${esc(x.code)}</div></div>`;
     if (x.inLoop) acts = st.loopActions;
     if (!x.levels) return `<div class="st" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span>
       <select data-f="action"><option value="${x.action === 'skip' ? (x.url ? 'nav' : 'press') : x.action}">${esc(acts[x.url ? 'nav' : 'press'])}</option><option value="skip" ${x.action === 'skip' ? 'selected' : ''}>Bỏ qua</option></select>
@@ -817,6 +827,7 @@ function pageRecorder() {
       <button data-op="child" title="Quay về phần tử CON bên trong" ${x.level <= 0 ? 'disabled' : ''}>⬇ con</button>
       <span class="lv">cấp ${x.level}/${x.levels.length - 1}</span>${tools}</div>
       <div class="info">&lt;${esc(lv.tag)}&gt; ${esc(lv.size)} ${esc(lv.label)}</div>${tags ? `<div class="tag">${esc(tags)}</div>` : ''}
+      ${x.inLoop ? `<div class="r">${['loopBreak', 'loopFail'].includes(x.action) ? '' : `<label class="lv"><input type="checkbox" data-f="thenBreak" ${x.thenBreak ? 'checked' : ''}> rồi Break</label>`}<label class="lv" title="count() > 0, kể cả đang ẩn -- bỏ tick = phải đang hiện"><input type="checkbox" data-f="cond" ${x.cond === 'dom' ? 'checked' : ''}> có trong DOM (kể cả ẩn)</label></div>` : ''}
       <div class="r"><select data-f="alt" class="grow">${lv.alts.map((a, k) => `<option value="${k}" ${k === x.alt && !x.custom ? 'selected' : ''}>${esc(altLabel(a))}</option>`).join('')}${x.custom ? `<option value="custom" selected>sửa tay: ${esc(x.custom)}</option>` : ''}</select>
       <button data-op="edit" title="Tự sửa selector">✎</button></div>
       ${editing === x.id ? `<div class="r"><input class="grow" data-f="custom" value="${esc(x.custom || (lv.alts[x.alt] || lv.alts[0] || {}).code)}" title="Enter để lưu, Esc để huỷ"></div>` : ''}
@@ -857,7 +868,8 @@ function pageRecorder() {
       else if (f === 'alt') { if (el.value !== 'custom') upd(stepId, { alt: +el.value }); }
       else if (f === 'text') upd(stepId, { text: el.value });
       else if (f === 'src') { if (el.value) upd(stepId, { text: '= ' + el.value }); }
-      else if (f === 'timeout') upd(stepId, { timeout: Math.max(1, +el.value || 60) });
+      else if (f === 'timeout') upd(stepId, { timeout: Math.max(0, +el.value || 0) });
+      else if (f === 'cond') upd(stepId, { cond: el.checked ? 'dom' : null });
       else if (f === 'custom') { editing = null; if (el.value.trim()) upd(stepId, { custom: el.value.trim() }); else draw(st); }
       else upd(stepId, { [f]: el.checked });
       el.blur();
