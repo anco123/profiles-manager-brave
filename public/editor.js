@@ -5,17 +5,10 @@
  * initCodeEditor/TEMPLATE_GROUPS/SCRIPT_TEMPLATES/insertSnippet/
  * renderChipGroups are already available here.
  *
- * Mental model: "main" is the one tab that's always open and can't be
- * closed, and it's what actually runs (its content is POSTed to
- * /api/profiles/:id/run) -- but it IS a real file too, saved on disk as
- * scripts/main.js, same as any other tab. The only things still special
- * about it: it can't be closed or deleted, and on disk its name is
- * "main.js" while its internal tab key is just "main" (see
- * diskNameFor() below for that one mapping). Every other open tab is a
- * REAL file in scripts/, readable via require('./name') from main or
- * from each other -- closing a tab just hides it from the tab bar, the
- * file stays on disk; deleting (via the file menu's x) actually removes
- * it.
+ * Mental model: mỗi tab là 1 file THẬT trong scripts/ (tên tab = tên file, kể cả main.js), đọc được qua require('./name')
+ * từ file khác. Mở trang không có tab nào -- vùng code hiện danh sách file (fileHome), bấm file nào thì file đó mở ra.
+ * Đóng tab chỉ ẩn khỏi thanh tab, file vẫn trên đĩa; đóng tab cuối thì quay về danh sách file. Xoá (nút x trong menu file)
+ * mới xoá thật. main.js chỉ còn khác ở chỗ: không xoá / đổi tên được (queue tự chạy mặc định file này).
  * -----------------------------------------------------------------------
  */
 
@@ -34,16 +27,14 @@ const toastEl = document.getElementById('toast');
 // plenty fast for editing a handful of short scripts.
 const editor = initCodeEditor('editorTextarea', null, null);
 
-let openTabs = ['main']; // tab names, in tab-bar order. 'main' is special (see header comment).
-let tabContents = { main: '' };
-let activeTab = 'main';
-
-// The only place "main" the tab key and "main.js" the on-disk filename
-// ever need reconciling -- every read/write against the server goes
-// through this so the mapping only has to be right in one spot.
-function diskNameFor(tabKey) {
-  return tabKey === 'main' ? 'main.js' : tabKey;
-}
+let openTabs = []; // tên file, theo thứ tự trên thanh tab
+let tabContents = {};
+let activeTab = null; // null = chưa mở file nào -> hiện danh sách file
+let loadingTab = false; // true trong lúc switchToTab() nạp file vào editor
+const fileHome = document.getElementById('fileHome');
+const fileHomeList = document.getElementById('fileHomeList');
+const fileHomeSearch = document.getElementById('fileHomeSearch');
+const editorCanvas = document.querySelector('.editor-canvas');
 
 let toastTimer = null;
 function showToast(message, isError = false) {
@@ -73,13 +64,11 @@ const dirtyTabs = new Set();
 function renderTabBar() {
   tabBar.innerHTML = '';
   for (const name of openTabs) {
-    const isMain = name === 'main';
     const isDirty = dirtyTabs.has(name);
     const tab = document.createElement('div');
-    tab.className = 'editor-tab' + (name === activeTab ? ' is-active' : '') + (isMain ? ' is-main' : '');
-    const displayName = isMain ? 'main.js' : name;
+    tab.className = 'editor-tab' + (name === activeTab ? ' is-active' : '');
     tab.innerHTML =
-      `<span>${displayName}${isDirty ? ' <span class="tab-dirty-dot" title="Unsaved changes">\u25cf</span>' : ''}</span>` +
+      `<span>${name}${isDirty ? ' <span class="tab-dirty-dot" title="Unsaved changes">\u25cf</span>' : ''}</span>` +
       `<span class="tab-close" title="Close tab">&times;</span>`;
     tab.addEventListener('click', (e) => {
       if (e.target.classList.contains('tab-close')) {
@@ -90,10 +79,50 @@ function renderTabBar() {
     });
     tabBar.appendChild(tab);
   }
+  // chưa mở file nào -> thay vùng code bằng danh sách file
+  const home = !activeTab;
+  editorCanvas.hidden = home;
+  fileHome.hidden = !home;
+  if (home) renderFileHome();
+}
+
+// -------------------------------------------------------------------
+// Danh sách file (hiện khi chưa mở tab nào): bấm file nào mở file đó
+// -------------------------------------------------------------------
+let fileHomeFiles = null;
+async function renderFileHome(reload = false) {
+  if (!fileHomeFiles || reload) {
+    try { fileHomeFiles = await (await fetch('/api/scripts')).json(); } catch { fileHomeFiles = []; }
+  }
+  const term = fileHomeSearch.value.trim().toLowerCase();
+  const list = fileHomeFiles.filter((f) => !term || f.toLowerCase().includes(term));
+  fileHomeList.innerHTML = '';
+  for (const name of list) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'file-home-item' + (name === 'main.js' ? ' is-main' : '');
+    btn.textContent = name;
+    btn.addEventListener('click', () => openFileTab(name));
+    fileHomeList.appendChild(btn);
+  }
+  if (!list.length) fileHomeList.innerHTML = `<p class="muted file-home-empty">${fileHomeFiles.length ? 'Không có file nào khớp' : 'Chưa có file nào -- bấm "+ File mới"'}</p>`;
+}
+fileHomeSearch.addEventListener('input', () => renderFileHome());
+fileHomeSearch.addEventListener('keydown', (e) => { // Enter = mở file đầu tiên trong danh sách đang lọc
+  const first = fileHomeList.querySelector('.file-home-item');
+  if (e.key === 'Enter' && first) first.click();
+});
+document.getElementById('fileHomeNewBtn').addEventListener('click', () => createFileBtn.click());
+
+// Chưa mở file nào thì không có chỗ để chèn code -- báo thay vì chèn vào editor đang ẩn
+function needOpenFile() {
+  if (activeTab) return false;
+  showToast('Mở 1 file trước đã', true);
+  return true;
 }
 
 async function switchToTab(name) {
-  tabContents[activeTab] = editor.getValue(); // remember where we're leaving from -- stays in memory, NOT written to disk
+  if (activeTab) tabContents[activeTab] = editor.getValue(); // remember where we're leaving from -- stays in memory, NOT written to disk
 
   activeTab = name;
 
@@ -105,13 +134,10 @@ async function switchToTab(name) {
   // externally. Skipped only when this tab has unsaved edits sitting in
   // it (the ~800ms autosave in editor.on('change') below almost always
   // clears that within a second anyway) -- never clobber those with
-  // whatever's on disk. This is also why "main" starts genuinely blank
-  // instead of showing a canned default: nothing is pre-fetched at page
-  // load anymore (see the bottom of this file), it only loads the
-  // moment you actually click into it.
+  // whatever's on disk.
   if (!dirtyTabs.has(name)) {
     try {
-      const res = await fetch(`/api/scripts/${encodeURIComponent(diskNameFor(name))}`);
+      const res = await fetch(`/api/scripts/${encodeURIComponent(name)}`);
       if (res.ok) {
         tabContents[name] = (await res.json()).code;
       } else if (res.status === 404) {
@@ -123,36 +149,44 @@ async function switchToTab(name) {
     }
   }
 
+  loadingTab = true; // nạp nội dung file vào editor không phải là "sửa" -- không đánh dấu chưa lưu, không tự lưu lại y nguyên
   editor.setValue(tabContents[name] ?? '');
+  loadingTab = false;
+  renderTabBar(); // hiện lại vùng code (nếu đang ở danh sách file) TRƯỚC refresh, không CodeMirror đo kích thước sai
   editor.refresh();
-  renderTabBar();
 }
 
+// content: nội dung đã có sẵn (VD file vừa tạo); bỏ trống thì switchToTab tự đọc từ đĩa
 async function openFileTab(name, content) {
   if (!openTabs.includes(name)) openTabs.push(name);
-  tabContents[name] = content;
+  if (content !== undefined) tabContents[name] = content;
   await switchToTab(name);
 }
 
-async function closeTab(name) {
-  if (name === 'main') return; // main can't be closed, only cleared
-  if (activeTab === name) tabContents[name] = editor.getValue();
-  if (dirtyTabs.has(name) && !confirm(`"${name}" has unsaved changes. Close without saving them?`)) return;
+// Bỏ 1 tab khỏi thanh tab; đang xem tab đó thì chuyển sang tab bên cạnh, hết tab thì về danh sách file
+async function dropTab(name) {
+  const idx = openTabs.indexOf(name);
   openTabs = openTabs.filter((t) => t !== name);
   delete tabContents[name];
   dirtyTabs.delete(name);
-  if (activeTab === name) await switchToTab('main');
-  else renderTabBar();
+  if (activeTab !== name) return renderTabBar();
+  activeTab = null;
+  const next = openTabs[Math.min(idx, openTabs.length - 1)];
+  if (next) await switchToTab(next);
+  else { editor.setValue(''); renderFileHome(true); renderTabBar(); }
+}
+
+async function closeTab(name) {
+  if (activeTab === name) tabContents[name] = editor.getValue();
+  if (dirtyTabs.has(name) && !confirm(`"${name}" has unsaved changes. Close without saving them?`)) return;
+  await dropTab(name);
   refreshFileMenu();
 }
 
-// Writes to disk. `name` is a TAB KEY ('main' or a real filename) --
-// mapped to the actual on-disk filename internally, so callers never
-// have to remember that "main" the tab is "main.js" the file. Returns
-// true/false so callers can tell whether it's safe to clear a dirty
-// flag -- a failed save must NOT look saved.
+// Writes to disk. Returns true/false so callers can tell whether it's
+// safe to clear a dirty flag -- a failed save must NOT look saved.
 async function saveFile(name, code) {
-  const diskName = diskNameFor(name);
+  const diskName = name;
   try {
     const res = await fetch(`/api/scripts/${encodeURIComponent(diskName)}`, {
       method: 'PUT',
@@ -173,13 +207,14 @@ async function saveFile(name, code) {
 // server side, nothing extra needed here for the create-vs-overwrite
 // distinction.
 async function saveActiveTab() {
+  if (!activeTab) return;
   const code = editor.getValue();
   tabContents[activeTab] = code;
   const ok = await saveFile(activeTab, code);
   if (ok) {
     dirtyTabs.delete(activeTab);
     renderTabBar();
-    showToast(`Saved ${diskNameFor(activeTab)}`);
+    showToast(`Saved ${activeTab}`);
   }
 }
 
@@ -225,6 +260,7 @@ async function autosaveTab(name) {
 }
 
 editor.on('change', () => {
+  if (!activeTab || loadingTab) return; // đang ở danh sách file (editor ẩn) / đang nạp file -- không phải người dùng sửa
   if (!dirtyTabs.has(activeTab)) {
     dirtyTabs.add(activeTab);
     renderTabBar(); // only re-render on the 0-\u2192dirty transition, not every keystroke
@@ -251,6 +287,7 @@ createFileBtn.addEventListener('click', async () => {
     return showToast('Invalid name -- letters, numbers, - and _ only', true);
   }
   await saveFile(name, `module.exports = {\n  // your function here\n};\n`);
+  fileHomeFiles = null; // danh sách file có thêm file mới
   await openFileTab(name, `module.exports = {\n  // your function here\n};\n`);
   fileMenu.hidden = true;
   showToast(`Created ${name}`);
@@ -258,7 +295,8 @@ createFileBtn.addEventListener('click', async () => {
 
 async function refreshFileMenu() {
   const res = await fetch('/api/scripts');
-  const files = (await res.json()).filter((f) => f !== 'main.js'); // main.js is always represented by the special 'main' tab already -- listing it again here would let you open a second, disconnected tab pointing at the same file
+  const files = await res.json();
+  fileHomeFiles = files;
 
   fileMenuList.innerHTML = '';
   if (files.length === 0) {
@@ -269,22 +307,18 @@ async function refreshFileMenu() {
     const isOpen = openTabs.includes(name);
     const row = document.createElement('div');
     row.className = 'file-menu-row';
+    const isMain = name === 'main.js'; // file chạy mặc định của queue -- server không cho xoá, nên cũng không đổi tên (đổi tên = tạo mới + xoá cũ)
     row.innerHTML =
       `<button type="button" class="file-menu-item">${name}${isOpen ? ' <span class="muted" style="font-size:0.7rem;">(open)</span>' : ''}</button>` +
-      `<button type="button" class="file-menu-rename" title="Rename">&#9998;</button>` +
-      `<button type="button" class="file-menu-delete" title="Delete permanently">&times;</button>`;
+      (isMain ? '' : `<button type="button" class="file-menu-rename" title="Rename">&#9998;</button>` +
+      `<button type="button" class="file-menu-delete" title="Delete permanently">&times;</button>`);
 
     row.querySelector('.file-menu-item').addEventListener('click', async () => {
-      if (isOpen) {
-        await switchToTab(name);
-      } else {
-        const fileRes = await fetch(`/api/scripts/${encodeURIComponent(name)}`);
-        const data = await fileRes.json();
-        await openFileTab(name, data.code);
-      }
+      await openFileTab(name);
       fileMenu.hidden = true;
     });
 
+    if (isMain) { fileMenuList.appendChild(row); continue; }
     row.querySelector('.file-menu-rename').addEventListener('click', async (e) => {
       e.stopPropagation();
       await renameFile(name);
@@ -297,7 +331,7 @@ async function refreshFileMenu() {
       const delData = await delRes.json();
       if (!delRes.ok) return showToast(delData.error, true);
 
-      if (openTabs.includes(name)) removeOpenTabWithoutSaving(name); // it's gone from disk -- don't let a normal close accidentally recreate it
+      if (openTabs.includes(name)) await dropTab(name); // it's gone from disk -- bỏ tab luôn, không lưu (lưu = tạo lại file vừa xoá)
       showToast(`Deleted ${name}`);
       refreshFileMenu();
     });
@@ -306,7 +340,7 @@ async function refreshFileMenu() {
   }
 }
 
-// Scans main.js's content plus every file in scripts/ for
+// Scans every file in scripts/ for
 // require('./oldBase') or require('./oldBase.js') (either quote style)
 // and rewrites it to point at newBase instead. Returns how many places
 // were changed. Uses a fresh RegExp per call site rather than reusing
@@ -318,18 +352,8 @@ async function updateRequireReferences(oldBase, newBase) {
 
   let updatedCount = 0;
 
-  if (pattern().test(tabContents.main)) {
-    const updatedMain = tabContents.main.replace(pattern(), `$1${newBase}$2`);
-    tabContents.main = updatedMain;
-    if (activeTab === 'main') editor.setValue(updatedMain);
-    const ok = await saveFile('main', updatedMain); // main.js is a real file now too -- persist the rewrite, don't just leave it sitting in memory
-    if (ok) dirtyTabs.delete('main');
-    updatedCount++;
-  }
-
   const allFiles = await (await fetch('/api/scripts')).json();
   for (const fileName of allFiles) {
-    if (fileName === 'main.js') continue; // already handled above via tabContents.main -- the on-disk copy is stale until that save lands, don't double-process it here
     let code = tabContents[fileName];
     if (code === undefined) {
       const res = await fetch(`/api/scripts/${encodeURIComponent(fileName)}`);
@@ -407,21 +431,6 @@ async function renameFile(oldName) {
   }
 }
 
-// Drops a file from the open-tabs state without saving it first -- used
-// after the file was just deleted, where a normal close's "save on the
-// way out" would silently recreate it.
-function removeOpenTabWithoutSaving(name) {
-  openTabs = openTabs.filter((t) => t !== name);
-  delete tabContents[name];
-  dirtyTabs.delete(name);
-  if (activeTab === name) {
-    activeTab = 'main';
-    editor.setValue(tabContents.main ?? '');
-    editor.refresh();
-  }
-  renderTabBar();
-}
-
 document.addEventListener('click', (e) => {
   if (!fileMenu.hidden && !fileMenu.contains(e.target) && e.target !== newFileBtn) {
     fileMenu.hidden = true;
@@ -491,7 +500,7 @@ const stopRunBtn = document.getElementById('stopRunBtn');
 const confirmRunBtn = document.getElementById('confirmRunBtn');
 
 const runSelectedIds = new Set();
-let runSelectedScript = 'main';
+let runSelectedScript = 'main.js';
 let queueIsRunning = false; // kept in sync by refreshRunModalStatus -- guards closing the modal
 let runModalForceConfig = false; // true after "Configure a new run" -- overrides the log view even if a finished run's log still exists
 let runRangeAnchorId = null; // last profile chip clicked (no shift) -- Shift+click another one selects everything between the two
@@ -519,8 +528,7 @@ function syncConfirmRunBtnMode() {
 }
 
 function openRunModal() {
-  if (activeTab === 'main') tabContents.main = editor.getValue();
-  runSelectedScript = activeTab; // default to whichever tab you're currently looking at
+  runSelectedScript = activeTab || 'main.js'; // default to whichever tab you're currently looking at (chưa mở file nào -> main.js)
   renderRunScriptPicker();
   renderRunProfileGrid();
   runModalOverlay.hidden = false;
@@ -557,11 +565,10 @@ backToConfigBtn.addEventListener('click', () => {
 
 function renderRunScriptPicker() {
   runScriptPicker.innerHTML = '';
-  for (const name of openTabs) {
+  for (const name of openTabs.includes(runSelectedScript) ? openTabs : [runSelectedScript, ...openTabs]) {
     const label = document.createElement('label');
     label.className = 'run-script-option' + (name === runSelectedScript ? ' is-checked' : '');
-    const displayName = name === 'main' ? 'main.js' : name;
-    label.innerHTML = `<input type="radio" name="runScript" value="${displayName}" ${name === runSelectedScript ? 'checked' : ''} /><span>${displayName}</span>`;
+    label.innerHTML = `<input type="radio" name="runScript" value="${name}" ${name === runSelectedScript ? 'checked' : ''} /><span>${name}</span>`;
     label.querySelector('input').addEventListener('change', () => {
       runSelectedScript = name;
       renderRunScriptPicker();
@@ -1295,28 +1302,26 @@ confirmRunBtn.addEventListener('click', async () => {
   const ids = [...runSelectedIds];
   if (ids.length === 0) return showToast('Select at least one profile', true);
 
-  if (activeTab === 'main') tabContents.main = editor.getValue();
-  else tabContents[activeTab] = editor.getValue();
+  if (activeTab) tabContents[activeTab] = editor.getValue();
 
   // Unsaved file-backed tabs would mean require('./x') inside the
   // running script picks up whatever's STILL on disk from before your
   // latest edits, not what the editor is showing -- refuse to run
   // rather than silently use stale code (or silently save behind your
-  // back). "main" is exempt: it isn't a file, its in-memory content is
-  // always what actually runs.
+  // back).
   if (dirtyTabs.size > 0) {
     return showToast(`Save before running: ${[...dirtyTabs].join(', ')}`, true);
   }
 
   // The dirty-check above guarantees nothing is unsaved right now, so
   // disk and the editor agree for every open tab -- but a script that
-  // was never opened this session (most commonly "main" now that it no
-  // longer preloads at page load, see switchToTab()) has nothing in
+  // was never opened this session (most commonly main.js now that the
+  // editor opens on the file list, not on a file) has nothing in
   // tabContents at all yet. Fetch it fresh rather than risk sending an
   // empty script to the queue.
   let scriptCode;
   try {
-    const res = await fetch(`/api/scripts/${encodeURIComponent(diskNameFor(runSelectedScript))}`);
+    const res = await fetch(`/api/scripts/${encodeURIComponent(runSelectedScript)}`);
     scriptCode = res.ok ? (await res.json()).code : '';
   } catch (err) {
     scriptCode = tabContents[runSelectedScript] || ''; // offline hiccup -- fall back to whatever's cached rather than running nothing at all
@@ -1339,7 +1344,7 @@ confirmRunBtn.addEventListener('click', async () => {
   ids.forEach((id, i) => { inputsById[id] = inputLines[i] || ''; });
 
   try {
-    await startQueueRun(ids, { script: scriptCode, scriptName: diskNameFor(runSelectedScript), maxConcurrent, maxPerProxy, retryCount, scriptTimeoutMs, inputsById });
+    await startQueueRun(ids, { script: scriptCode, scriptName: runSelectedScript, maxConcurrent, maxPerProxy, retryCount, scriptTimeoutMs, inputsById });
     showToast(`Started on ${ids.length} profile(s)`);
     runModalForceConfig = false; // a fresh run always shows its own log view, even if "Configure a new run" was clicked earlier
     // Brand-new run -- any red/picked state from a previous one no
@@ -1837,17 +1842,11 @@ function renderLogsViewDetail(byKey) {
 // -------------------------------------------------------------------
 editorOutput.textContent = 'Chưa chạy script nào \u2014 bấm "Run\u2026" ở trên.';
 
-// main.js used to be eagerly pre-fetched here at page load, showing
-// whatever was last saved (or a blank default for a brand-new project)
-// immediately. Removed on purpose: now that editing can also happen
-// outside the browser (see the "Open in VS Code" button), pre-loading
-// it here just means the tab silently shows a stale snapshot from
-// whenever the PAGE was opened, not whenever the FILE was last touched.
-// main now behaves like every other file -- genuinely blank/unopened
-// until you actually click into it, at which point switchToTab() above
-// fetches its current on-disk content fresh. Running still works even
-// if you never click the tab at all -- the Run handler fetches
-// runSelectedScript's content fresh right before sending it, same reasoning.
+// Không mở sẵn file nào (kể cả main.js) -- renderTabBar() thấy chưa có tab thì hiện danh sách file, bấm file nào mở file đó
+// (switchToTab() đọc nội dung mới nhất trên đĩa đúng lúc mở). Run vẫn chạy được dù chưa mở file: Run handler tự đọc file
+// runSelectedScript ngay trước khi gửi đi.
+// Mẫu code ở thanh bên trái chèn vào file đang mở -- chưa mở file thì chặn lại, không chèn vào editor đang ẩn
+document.getElementById('editorChipGroups').addEventListener('click', (e) => { if (e.target.closest('button') && needOpenFile()) e.stopPropagation(); }, true);
 
 renderTabBar();
 refreshProfiles();
@@ -1925,12 +1924,14 @@ function renderSnippetButtons() {
 // initCodeEditor()'s fallback object in shared.js, which has no
 // cursor/selection concept at all since it's just a plain <textarea>).
 function insertSnippetAtCursor(code) {
+  if (needOpenFile()) return false;
   if (typeof editor.replaceSelection === 'function') {
     editor.replaceSelection(code);
   } else {
     editor.setValue(editor.getValue() + code);
   }
   editor.focus();
+  return true;
 }
 
 function openSnippetContextMenu(anchorEl, id) {
@@ -2118,13 +2119,14 @@ taskStateOverlay.addEventListener('click', (e) => { if (e.target === taskStateOv
 // -------------------------------------------------------------------
 // Record thao tác (recorder.js ở server): chọn profile -> nút ⏺ REC hiện trong trình duyệt của profile đó -> thao tác tay ->
 // "Chèn code" lấy code clickEl/typeEl... về chèn vào chỗ con trỏ. Chưa mở profile thì tự Launch trước.
+// Bấm REC trong trình duyệt để dừng 1 đoạn -> lần poll sau tự chèn code của đúng đoạn đó (recLastExport = id đoạn cuối đã chèn).
 // -------------------------------------------------------------------
 const recModalOverlay = document.getElementById('recModalOverlay');
 const recProfileList = document.getElementById('recProfileList');
 const recSearch = document.getElementById('recSearch');
 const recBar = document.getElementById('recBar');
 const recBarText = document.getElementById('recBarText');
-let recProfileId = null, recPollTimer = null;
+let recProfileId = null, recPollTimer = null, recLastExport = 0;
 
 function renderRecProfiles() {
   const term = recSearch.value.trim().toLowerCase();
@@ -2153,6 +2155,7 @@ async function startRecording(p) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     recProfileId = p.id;
+    recLastExport = data.exportSeq || 0; // đoạn đã xuất từ lần record trước -- không chèn lại
     recBar.dataset.name = p.name;
     recModalOverlay.hidden = true;
     updateRecBar(data);
@@ -2171,9 +2174,26 @@ function updateRecBar(st) {
   recBarText.textContent = `${st.recording ? 'Đang ghi' : 'Tạm dừng'}: ${recBar.dataset.name} · ${st.steps.length} bước`;
 }
 
+// Chèn code các đoạn vừa dừng (exports có id > recLastExport); thiếu dòng require xlv1_actions thì thêm vào đầu đoạn
+let recWaitWarned = false;
+function applyRecExports(list, header) {
+  for (const e of list || []) {
+    if (e.id <= recLastExport) continue;
+    if (!activeTab) { if (!recWaitWarned) showToast('Có code vừa ghi -- mở 1 file để chèn vào', true); recWaitWarned = true; return; } // giữ lại, lần poll sau (đã mở file) mới chèn
+    recWaitWarned = false;
+    recLastExport = e.id;
+    insertSnippetAtCursor((editor.getValue().includes("require('./xlv1_actions')") ? '' : header || '') + e.body);
+    showToast(`Đã chèn ${e.count} bước vừa ghi`);
+  }
+}
+
 async function pollRecorder() {
   if (!recProfileId) return;
-  try { updateRecBar(await (await fetch(`/api/profiles/${recProfileId}/recorder`)).json()); } catch {}
+  try {
+    const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?since=${recLastExport}`)).json();
+    applyRecExports(st.exports, st.header);
+    updateRecBar(st);
+  } catch {}
 }
 
 document.getElementById('openRecordBtn').addEventListener('click', async () => {
@@ -2192,12 +2212,12 @@ document.getElementById('recInsertBtn').addEventListener('click', async () => {
   const hasRequire = editor.getValue().includes("require('./xlv1_actions')"); // đã require rồi thì không chèn lại (khai báo const trùng = lỗi cú pháp)
   const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?require=${hasRequire ? 0 : 1}`)).json();
   if (!st.steps || !st.steps.length) return showToast('Chưa ghi bước nào', true);
-  insertSnippetAtCursor(st.code);
-  showToast(`Đã chèn ${st.steps.length} bước`);
+  if (insertSnippetAtCursor(st.code)) showToast(`Đã chèn ${st.steps.length} bước`);
 });
 document.getElementById('recStopBtn').addEventListener('click', async () => {
   if (!recProfileId) return;
-  await fetch(`/api/profiles/${recProfileId}/recorder/stop`, { method: 'POST' }).catch(() => {});
+  const st = await fetch(`/api/profiles/${recProfileId}/recorder/stop`, { method: 'POST' }).then((r) => r.json()).catch(() => null);
+  if (st && st.exported) applyRecExports([st.exported], st.header); // đang ghi dở 1 đoạn -> chèn nốt đoạn đó
   updateRecBar(null);
   showToast('Đã dừng record');
 });

@@ -178,6 +178,15 @@
       <div class="editor-canvas">
         <textarea id="editorTextarea"></textarea>
       </div>
+      <!-- Chưa mở file nào (mới vào trang / đóng hết tab) -> hiện danh sách file thay cho vùng code, bấm file nào mở file đó -->
+      <div class="file-home" id="fileHome" hidden>
+        <div class="file-home-head">
+          <h2>Chọn file để mở</h2>
+          <input type="search" class="task-state-search" id="fileHomeSearch" placeholder="Tìm file... (Enter mở file đầu tiên)" spellcheck="false" />
+          <button type="button" class="btn btn-ghost" id="fileHomeNewBtn">+ File mới</button>
+        </div>
+        <div class="file-home-list" id="fileHomeList"></div>
+      </div>
 
       <div class="editor-output-bar">
         <span id="outputLabel" class="muted">Output</span>
@@ -331,7 +340,7 @@
       <button class="icon-btn" id="closeRecModalBtn" aria-label="Close">&times;</button>
     </div>
     <div class="snippet-modal-body">
-      <p class="rec-hint">Chọn profile để ghi. Trong cửa sổ trình duyệt của profile sẽ hiện nút <b>&#9210; REC</b> ở góc dưới phải -- cứ thao tác bình thường, bấm nút đó để xem / sửa các bước (đổi phần tử cha-con, đổi selector, đổi hành động). Xong bấm <b>Chèn code</b> ở thanh trên cùng.</p>
+      <p class="rec-hint">Chọn profile để ghi. Trong cửa sổ trình duyệt của profile sẽ hiện nút <b>&#9210; REC</b> ở góc dưới phải -- bấm nút đó để bắt đầu / dừng ghi 1 đoạn -- dừng là code của đoạn đó tự chèn vào chỗ con trỏ ở đây (kèm copy clipboard). <b>Giữ Alt + rê chuột</b> để xem các lớp phần tử chồng nhau dưới con trỏ (lăn chuột đổi lớp, nhả Alt để chọn selector + hành động). Nút <b>&#9776;</b> cạnh REC: xem / sửa các bước (cha-con, selector, hành động). <b>Chèn code</b> ở thanh trên cùng = chèn tất cả các bước.</p>
       <input type="search" class="task-state-search" id="recSearch" placeholder="Tìm profile..." spellcheck="false" />
       <div class="rec-profile-list" id="recProfileList"></div>
     </div>
