@@ -67,7 +67,11 @@
         </div>
       </div>
 
-      <div class="editor-sidebar-section chip-groups" id="editorChipGroups"></div>
+      <!-- Mẫu code: thu gọn mặc định, bấm tiêu đề mới hiện (mỗi nhóm bên trong cũng là 1 dropdown -- xem renderChipGroups() trong shared.js) -->
+      <details class="editor-sidebar-section chip-groups-box" id="chipGroupsBox">
+        <summary class="editor-sidebar-head">Mẫu code</summary>
+        <div class="chip-groups" id="editorChipGroups"></div>
+      </details>
 
       <!-- Import variables from Excel -- lives on the page itself, not
            inside the Run popup, since it's matched against your WHOLE

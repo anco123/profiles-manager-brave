@@ -293,13 +293,25 @@ function insertSnippet(editor, snippet) {
 
 // Builds the category labels + chip buttons into `container` from
 // TEMPLATE_GROUPS, wiring each button to insert into `editor`.
+// Mỗi nhóm là 1 dropdown (<details>) mặc định đóng -- bấm tên nhóm mới hiện các nút; nhóm nào đang mở thì nhớ lại
+// trong localStorage cho lần mở trang sau.
 function renderChipGroups(container, editor) {
   container.innerHTML = '';
+  let openGroups = [];
+  try { openGroups = JSON.parse(localStorage.getItem('chipGroupsOpen') || '[]'); } catch (e) {}
   for (const group of TEMPLATE_GROUPS) {
-    const label = document.createElement('p');
+    const box = document.createElement('details');
+    box.className = 'chip-group';
+    box.open = openGroups.includes(group.label);
+    box.addEventListener('toggle', () => {
+      const now = [...container.querySelectorAll('details.chip-group[open] > summary')].map((s) => s.dataset.label);
+      try { localStorage.setItem('chipGroupsOpen', JSON.stringify(now)); } catch (e) {}
+    });
+    const label = document.createElement('summary');
     label.className = 'chip-group-label';
-    label.textContent = group.label;
-    container.appendChild(label);
+    label.dataset.label = group.label;
+    label.textContent = `${group.label} (${group.items.length})`;
+    box.appendChild(label);
 
     const row = document.createElement('div');
     row.className = 'template-row';
@@ -311,7 +323,8 @@ function renderChipGroups(container, editor) {
       btn.addEventListener('click', () => insertSnippet(editor, SCRIPT_TEMPLATES[item.key]));
       row.appendChild(btn);
     }
-    container.appendChild(row);
+    box.appendChild(row);
+    container.appendChild(box);
   }
 }
 
