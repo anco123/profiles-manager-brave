@@ -42,7 +42,7 @@ function stepCode(s, P = 'page') {
   const opt = s.enter ? ', { enter: true }' : '';
   switch (s.action) {
     case 'click': return s.download ? `const [dl${s.id}] = await Promise.all([${P}.waitForEvent('download'), clickEl(${sel})]); log('Đã tải: ' + dl${s.id}.suggestedFilename() + ' -> ' + await dl${s.id}.path()); // dl${s.id}.saveAs('đường dẫn') để lưu hẳn` : `await clickEl(${sel});`;
-    case 'clickTab': return `const tab${s.id} = await clickNewTab(${sel}); // click rồi xem có mở tab mới không (null = không)`;
+    case 'clickTab': return `const tab${s.id} = await clickNewTab(${sel}); // click rồi xem có mở tab mới không (null = không); chưa chắc ra ngay thì thêm , { tries: 3 } để tự click lại`;
     case 'type': return `await typeEl(${sel}, ${txt}${opt});`;
     case 'hover': return `await hoverEl(${sel});`;
     case 'wait': return `await waitEl(${sel}, 15000);`;

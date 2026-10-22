@@ -20,7 +20,7 @@
  *     { el: page.locator('[data-testid="SideNav_AccountSwitcher_Button"]'), done: true },
  *   ], { timeout: 60000 });
  *   // click có thể mở tab mới: clickNewTab trả về tab mới (null = không mở) -> if; xong thì đóng hết, chỉ giữ tab đầu tiên
- *   const newTab = await clickNewTab(page.locator('a.open'));
+ *   const newTab = await clickNewTab(page.locator('a.open'));                   // hoặc clickNewTab(el, { tries: 3 }): chưa ra tab thì tự click lại
  *   if (newTab) await clickEl(newTab.getByRole('button', { name: 'OK' }));
  *   await closeOtherTabs(page);
  * -----------------------------------------------------------------------
@@ -168,16 +168,28 @@ async function whileHandle(rules, opts = {}) {
 
 // Click rồi xem có tab mới mở ra không: có -> trả về tab mới (đã tải xong DOM), không -> null. Chờ tối đa `wait` ms tính từ SAU cú click
 // (clickEl lăn + đi chuột mất vài giây -- tính từ trước cú click thì dễ hết giờ oan). Click không được cũng trả null.
-async function clickNewTab(el, wait = 5000) {
-  const t = first(el), page = t.page(), ctx = page.context();
-  let tab = null;
-  const on = (p) => { tab = tab || p; };
+// opts: số (= wait) hoặc { wait = 5000, tries = 1 }. tries > 1: chưa thấy tab thì tự click lại -- DÙNG CÁI NÀY thay vì tự bọc while:
+// trong suốt mọi lần thử vẫn nghe tab mới, nên tab mở CHẬM của lần click trước vẫn bắt được (không click thêm ra tab nữa); lỡ 2 lần click
+// đều ra tab thì giữ tab đầu, đóng tab sau. (Bọc while bên ngoài: mỗi lần gọi thôi nghe khi hết giờ -> tab chậm thành tab thừa.)
+async function clickNewTab(el, opts = {}) {
+  const { wait = 5000, tries = 1 } = typeof opts === 'number' ? { wait: opts } : opts;
+  const t = first(el), page = t.page(), ctx = page.context(), seen = [];
+  const on = (p) => seen.push(p);
+  const live = () => seen.find((p) => !p.isClosed()); // tab bắt được có thể bị đóng giữa chừng (cú click lại gọi ensureSingleTab) -> lấy tab còn mở
   ctx.on('page', on);
   try {
-    if (!(await clickEl(t))) return null;
-    for (const end = Date.now() + wait; !tab && Date.now() < end;) await page.waitForTimeout(100);
+    for (let i = 0; i < tries && !live(); i++) {
+      if (i) log(`[clickNewTab] ${nameOf(el)}: chưa thấy tab mới -- click lại (${i + 1}/${tries})`);
+      if (!(await clickEl(t))) break;
+      for (const end = Date.now() + wait; !live() && Date.now() < end;) await page.waitForTimeout(100);
+    }
+    if (live() && tries > 1) await page.waitForTimeout(800); // gom tab thừa (lần click trước mở chậm, ra cùng lúc) để đóng luôn
   } finally { ctx.off('page', on); }
-  if (!tab) { log(`[clickNewTab] ${nameOf(el)}: không thấy tab mới trong ${wait}ms`); return null; }
+  const tab = live() || null, extra = seen.filter((p) => p !== tab && !p.isClosed());
+  // đóng tab thừa -- p.close() có lúc treo với tab do extension mở (xem xlv1_ensureSingleTab), nên mỗi tab chờ tối đa 3s
+  await Promise.all(extra.map((p) => Promise.race([p.close().catch(() => {}), new Promise((r) => setTimeout(r, 3000))])));
+  if (extra.length) log(`[clickNewTab] ${nameOf(el)}: đóng ${extra.length} tab mở thừa`);
+  if (!tab) { log(`[clickNewTab] ${nameOf(el)}: không thấy tab mới (${tries} lần click, mỗi lần chờ ${wait}ms)`); return null; }
   await tab.waitForLoadState('domcontentloaded').catch(() => {});
   return tab;
 }

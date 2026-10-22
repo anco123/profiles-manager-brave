@@ -167,7 +167,8 @@ async function ensureActionable(page, locator, box) {
 async function clickVisibly(page, locatorOrBox, timeout = 15000) {
   // Đóng hết tab ngoài tab chính (index 0) trước khi click, phòng
   // extension tự ý bật thêm tab giữa chừng -- xem xlv1_ensureSingleTab.js.
-  await require('./xlv1_ensureSingleTab').ensureSingleTab(page.context());
+  // Giữ lại `page` (tab đang click): click trong tab mới do clickNewTab mở thì không tự đóng mất tab đó.
+  await require('./xlv1_ensureSingleTab').ensureSingleTab(page.context(), undefined, page);
 
   let box;
   if (locatorOrBox.boundingBox) {

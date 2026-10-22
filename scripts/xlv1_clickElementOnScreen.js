@@ -3,8 +3,8 @@ async function clickElementOnScreen(page, log, deps, element) {
   const { moveMouseVisibly } = deps;
 
   // Đóng hết tab ngoài tab chính (index 0) trước khi click, phòng
-  // extension tự ý bật thêm tab giữa chừng -- xem xlv1_ensureSingleTab.js.
-  await require('./xlv1_ensureSingleTab').ensureSingleTab(page.context(), log);
+  // extension tự ý bật thêm tab giữa chừng -- xem xlv1_ensureSingleTab.js. Giữ lại `page` (tab đang click).
+  await require('./xlv1_ensureSingleTab').ensureSingleTab(page.context(), log, page);
 
   // 1. Chỉ kiểm tra element có tồn tại trong DOM
   if (await element.count() === 0) {
