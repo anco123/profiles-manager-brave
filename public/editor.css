@@ -152,7 +152,17 @@ html, body.editor-body { height: 100%; overflow: hidden; }
   line-height: 1;
 }
 .editor-tab .tab-close:hover { color: var(--danger-strong); background: var(--bg); }
-.editor-tab.is-main .tab-close { visibility: hidden; } /* main.js can't be closed */
+
+/* Danh sách file -- hiện khi chưa mở tab nào (xem renderFileHome() trong editor.js) */
+.file-home { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px; }
+.file-home-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.file-home-head h2 { margin: 0; font-size: 1rem; flex-shrink: 0; }
+.file-home-head .task-state-search { flex: 1; min-width: 180px; margin: 0; }
+.file-home-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
+.file-home-item { text-align: left; padding: 9px 12px; font-family: var(--font-mono); font-size: 0.82rem; color: var(--text); background: var(--surface); border: 1px solid var(--border-soft); border-radius: 8px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-home-item:hover { border-color: var(--accent); color: var(--accent-strong); background: var(--surface-raised); }
+.file-home-item.is-main { border-color: var(--accent); }
+.file-home-empty { grid-column: 1 / -1; margin: 0; }
 
 .editor-canvas { flex: 1; min-height: 0; }
 .editor-canvas .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 0.88rem; line-height: 1.55; }

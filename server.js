@@ -432,7 +432,7 @@ app.put('/api/scripts/:name', (req, res) => {
 app.delete('/api/scripts/:name', (req, res) => {
   if (!validScriptFilename(req.params.name)) return res.status(400).json({ error: 'Invalid filename' });
   if (req.params.name === 'helpers.js') return res.status(400).json({ error: "helpers.js ships as the example -- rename your own file instead of deleting it" });
-  if (req.params.name === 'main.js') return res.status(400).json({ error: "main.js is the entry point that's always open in the editor -- clear its contents instead of deleting it" });
+  if (req.params.name === 'main.js') return res.status(400).json({ error: "main.js là file chạy mặc định của queue -- không xoá được, chỉ xoá nội dung bên trong" });
   const filePath = path.join(SCRIPTS_DIR, req.params.name);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   res.json({ success: true });

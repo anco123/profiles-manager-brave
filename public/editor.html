@@ -178,6 +178,15 @@
       <div class="editor-canvas">
         <textarea id="editorTextarea"></textarea>
       </div>
+      <!-- Chưa mở file nào (mới vào trang / đóng hết tab) -> hiện danh sách file thay cho vùng code, bấm file nào mở file đó -->
+      <div class="file-home" id="fileHome" hidden>
+        <div class="file-home-head">
+          <h2>Chọn file để mở</h2>
+          <input type="search" class="task-state-search" id="fileHomeSearch" placeholder="Tìm file... (Enter mở file đầu tiên)" spellcheck="false" />
+          <button type="button" class="btn btn-ghost" id="fileHomeNewBtn">+ File mới</button>
+        </div>
+        <div class="file-home-list" id="fileHomeList"></div>
+      </div>
 
       <div class="editor-output-bar">
         <span id="outputLabel" class="muted">Output</span>
