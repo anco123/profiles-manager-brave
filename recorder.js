@@ -325,7 +325,8 @@ function pageRecorder() {
   const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim();
   const cssEsc = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'));
   const attrEsc = (s) => String(s).replace(/["\\]/g, '\\$&');
-  const goodId = (id) => !/\d{3,}|^[:\-_]/.test(id);
+  // id tự sinh (đổi theo lần tải / thứ tự render, nhiều layer còn trùng nhau): uid_10, :r1:, react-select-2-input, mui-123, ember45, dãy 3+ số...
+  const goodId = (id) => !/\d{3,}|^[:\-_]|[-_:.]\d+([-_:.]|$)|^[a-z]+\d+$|:\w*\d\w*:/i.test(id);
   let host = null;
   const ours = (e) => host && e.composedPath().includes(host);
 
@@ -373,7 +374,8 @@ function pageRecorder() {
     return { code: i <= 0 ? `${code}.first()` : `${code}.nth(${i})`, base: code, unique: false, nth: true, note: `${list.length} cái giống` };
   }
   // ưu tiên selector khớp đúng 1 phần tử, có nghĩa (testid/id/role/...) trước đường dẫn css (dễ gãy khi trang đổi bố cục); sort ổn định -> giữ thứ tự testid > id > role > ...
-  const rank = (a) => (a.unique ? (a.kind === 'css' ? 1 : 0) : 2);
+  // ô nhập: name="..." đứng trước getByRole(name: aria-label) -- aria-label đổi theo ngôn ngữ giao diện (VD Discord tiếng Việt), name thì không
+  const rank = (a) => (a.unique ? (a.kind === 'css' ? 1 : a.field && a.kind === 'name' ? -1 : 0) : 2);
   const sortAlts = (alts) => alts.sort((a, b) => rank(a) - rank(b));
   // scope/pre: tìm TRONG 1 phần tử cha (scope) và viết code nối tiếp locator của cha đó (pre) -- dùng cho scopedAlts
   function altsFor(el, scope = document, pre = 'page') {
@@ -381,7 +383,7 @@ function pageRecorder() {
     const all = (css) => { try { return [...scope.querySelectorAll(css)]; } catch { return []; } };
     const tid = el.getAttribute('data-testid');
     if (tid) alts.push({ kind: 'testid', ...withNth(`${pre}.getByTestId(${sq(tid)})`, all(`[data-testid="${cssEsc(tid)}"]`), el) });
-    if (top && el.id && goodId(el.id)) alts.push({ kind: 'id', code: `${pre}.locator(${sq('#' + cssEsc(el.id))})`, unique: true });
+    if (top && el.id && goodId(el.id)) alts.push({ kind: 'id', ...withNth(`${pre}.locator(${sq('#' + cssEsc(el.id))})`, all('#' + cssEsc(el.id)), el) }); // id trùng cũng có (trang viết ẩu) -> đếm như các selector khác
     const role = roleOf(el), name = nameOf(el);
     if (role && name && name.length <= 50) {
       const same = all('*').filter((n) => n === el || (roleOf(n) === role && nameOf(n) === name && isVis(n)));
@@ -391,7 +393,7 @@ function pageRecorder() {
       const v = el.getAttribute(a);
       if (!v || (a === 'type' && !['INPUT', 'BUTTON'].includes(el.tagName)) || (a === 'href' && v.length > 80)) continue;
       const css = `${tag}[${a}="${attrEsc(v)}"]`, list = all(css);
-      if (list.length) alts.push({ kind: a, ...withNth(`${pre}.locator(${sq(css)})`, list, el) });
+      if (list.length) alts.push({ kind: a, field: ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName), ...withNth(`${pre}.locator(${sq(css)})`, list, el) });
       if (a === 'placeholder') alts.push({ kind: 'placeholder', code: `${pre}.getByPlaceholder(${sq(v)}, { exact: true })`, base: `${pre}.getByPlaceholder(${sq(v)}, { exact: true })`, unique: list.length === 1 });
     }
     const own = clean(el.innerText);
