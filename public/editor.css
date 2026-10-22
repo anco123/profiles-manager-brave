@@ -61,7 +61,17 @@ html, body.editor-body { height: 100%; overflow: hidden; }
 }
 .editor-sidebar-section { padding: 16px; border-bottom: 1px solid var(--border-soft); }
 .editor-sidebar-section:last-child { border-bottom: none; }
-.editor-sidebar-section.chip-groups { gap: 16px; }
+/* Mẫu code thu gọn: <details> lồng nhau, mũi tên ▸ / ▾ tự vẽ (bỏ marker mặc định của trình duyệt) */
+.chip-groups-box > summary, .chip-group > summary { cursor: pointer; list-style: none; user-select: none; }
+.chip-groups-box > summary::-webkit-details-marker, .chip-group > summary::-webkit-details-marker { display: none; }
+.chip-groups-box > summary { justify-content: flex-start; gap: 6px; margin-bottom: 0; }
+.chip-groups-box[open] > summary { margin-bottom: 10px; }
+.chip-groups-box > summary::before, .chip-group > summary::before { content: '\25B8'; display: inline-block; width: 10px; transition: transform 0.12s ease; }
+.chip-groups-box[open] > summary::before, .chip-group[open] > summary::before { transform: rotate(90deg); }
+.chip-groups-box > summary:hover, .chip-group > summary:hover { color: var(--text); }
+.chip-groups-box .chip-groups { gap: 8px; }
+.chip-group > summary { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.chip-group[open] > summary { margin-bottom: 8px; }
 .editor-sidebar-head {
   display: flex;
   align-items: center;
