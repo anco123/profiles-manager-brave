@@ -61,17 +61,18 @@ html, body.editor-body { height: 100%; overflow: hidden; }
 }
 .editor-sidebar-section { padding: 16px; border-bottom: 1px solid var(--border-soft); }
 .editor-sidebar-section:last-child { border-bottom: none; }
-/* Mẫu code thu gọn: <details> lồng nhau, mũi tên ▸ / ▾ tự vẽ (bỏ marker mặc định của trình duyệt) */
-.chip-groups-box > summary, .chip-group > summary { cursor: pointer; list-style: none; user-select: none; }
-.chip-groups-box > summary::-webkit-details-marker, .chip-group > summary::-webkit-details-marker { display: none; }
-.chip-groups-box > summary { justify-content: flex-start; gap: 6px; margin-bottom: 0; }
-.chip-groups-box[open] > summary { margin-bottom: 10px; }
-.chip-groups-box > summary::before, .chip-group > summary::before { content: '\25B8'; display: inline-block; width: 10px; transition: transform 0.12s ease; }
-.chip-groups-box[open] > summary::before, .chip-group[open] > summary::before { transform: rotate(90deg); }
-.chip-groups-box > summary:hover, .chip-group > summary:hover { color: var(--text); }
-.chip-groups-box .chip-groups { gap: 8px; }
+/* Mục thu gọn ở thanh bên trái (Mẫu code, Import from Excel): <details> lồng nhau, mũi tên ▸ / ▾ tự vẽ (bỏ marker mặc định của trình duyệt) */
+.sidebar-fold > summary, .chip-group > summary { cursor: pointer; list-style: none; user-select: none; }
+.sidebar-fold > summary::-webkit-details-marker, .chip-group > summary::-webkit-details-marker { display: none; }
+.sidebar-fold > summary { justify-content: flex-start; gap: 6px; margin-bottom: 0; }
+.sidebar-fold[open] > summary { margin-bottom: 10px; }
+.sidebar-fold > summary::before, .chip-group > summary::before { content: '\25B8'; display: inline-block; width: 10px; transition: transform 0.12s ease; }
+.sidebar-fold[open] > summary::before, .chip-group[open] > summary::before { transform: rotate(90deg); }
+.sidebar-fold > summary:hover, .chip-group > summary:hover { color: var(--text); }
+.sidebar-fold .chip-groups { gap: 8px; }
 .chip-group > summary { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
 .chip-group[open] > summary { margin-bottom: 8px; }
+.sidebar-fold-badge { color: var(--accent-strong); text-transform: none; letter-spacing: 0; }
 .editor-sidebar-head {
   display: flex;
   align-items: center;

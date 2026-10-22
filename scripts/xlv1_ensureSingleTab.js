@@ -31,9 +31,13 @@
  * setTimeout) -- quá hạn thì BỎ QUA tab đó (không chờ thêm), không để 1
  * tab "cứng đầu" chặn đứng toàn bộ phiên.
  *
+ * keep (tuỳ chọn): 1 tab được GIỮ LẠI ngoài tab index 0 -- clickVisibly / clickElementOnScreen truyền chính tab đang click vào đây,
+ * để click TRONG 1 tab mới (clickNewTab trong xlv1_actions.js) không tự đóng mất tab đó; click trên tab chính thì y như cũ.
+ *
  * Usage:
  *   const { ensureSingleTab } = require('./xlv1_ensureSingleTab');
  *   await ensureSingleTab(context, log); // trước goto hoặc trước click trên tab chính
+ *   await ensureSingleTab(context, log, page); // đóng tab thừa nhưng giữ `page` (đang thao tác trên tab phụ)
  */
 const CLOSE_TIMEOUT_MS = 3000;
 
@@ -63,11 +67,11 @@ function closeWithTimeout(p, timeoutMs) {
   });
 }
 
-async function ensureSingleTab(context, log) {
+async function ensureSingleTab(context, log, keep) {
   const pages = context.pages();
   if (!pages || pages.length <= 1) return;
 
-  const extras = pages.filter((p, i) => i >= 1 && p && !p.isClosed());
+  const extras = pages.filter((p, i) => i >= 1 && p && p !== keep && !p.isClosed());
   if (extras.length === 0) return;
 
   // Đóng song song, mỗi tab 1 timeout riêng -- tổng thời gian chờ bị

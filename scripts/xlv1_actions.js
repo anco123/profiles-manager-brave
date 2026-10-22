@@ -19,12 +19,17 @@
  *     { el: page.locator('input[name="password"]'), type: 'mat_khau' },
  *     { el: page.locator('[data-testid="SideNav_AccountSwitcher_Button"]'), done: true },
  *   ], { timeout: 60000 });
+ *   // click có thể mở tab mới: clickNewTab trả về tab mới (null = không mở) -> if; xong thì đóng hết, chỉ giữ tab đầu tiên
+ *   const newTab = await clickNewTab(page.locator('a.open'));                   // hoặc clickNewTab(el, { tries: 3 }): chưa ra tab thì tự click lại
+ *   if (newTab) await clickEl(newTab.getByRole('button', { name: 'OK' }));
+ *   await closeOtherTabs(page);
  * -----------------------------------------------------------------------
  */
 
 const helpers = require('./helpers');
 const { clickPoint, humanType } = require('./xlv1_humanInput');
 const { scrollToElement } = require('./xlv1_scrollToElement');
+const { ensureSingleTab } = require('./xlv1_ensureSingleTab');
 
 let log = (...a) => console.log(...a);
 function useLog(fn) { if (typeof fn === 'function') log = fn; }
@@ -161,4 +166,42 @@ async function whileHandle(rules, opts = {}) {
   return { ok: false, reason: 'timeout' };
 }
 
-module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle };
+// Click rồi xem có tab mới mở ra không: có -> trả về tab mới (đã tải xong DOM), không -> null. Chờ tối đa `wait` ms tính từ SAU cú click
+// (clickEl lăn + đi chuột mất vài giây -- tính từ trước cú click thì dễ hết giờ oan). Click không được cũng trả null.
+// opts: số (= wait) hoặc { wait = 5000, tries = 1 }. tries > 1: chưa thấy tab thì tự click lại -- DÙNG CÁI NÀY thay vì tự bọc while:
+// trong suốt mọi lần thử vẫn nghe tab mới, nên tab mở CHẬM của lần click trước vẫn bắt được (không click thêm ra tab nữa); lỡ 2 lần click
+// đều ra tab thì giữ tab đầu, đóng tab sau. (Bọc while bên ngoài: mỗi lần gọi thôi nghe khi hết giờ -> tab chậm thành tab thừa.)
+async function clickNewTab(el, opts = {}) {
+  const { wait = 5000, tries = 1 } = typeof opts === 'number' ? { wait: opts } : opts;
+  const t = first(el), page = t.page(), ctx = page.context(), seen = [];
+  const on = (p) => seen.push(p);
+  const live = () => seen.find((p) => !p.isClosed()); // tab bắt được có thể bị đóng giữa chừng (cú click lại gọi ensureSingleTab) -> lấy tab còn mở
+  ctx.on('page', on);
+  try {
+    for (let i = 0; i < tries && !live(); i++) {
+      if (i) log(`[clickNewTab] ${nameOf(el)}: chưa thấy tab mới -- click lại (${i + 1}/${tries})`);
+      if (!(await clickEl(t))) break;
+      for (const end = Date.now() + wait; !live() && Date.now() < end;) await page.waitForTimeout(100);
+    }
+    if (live() && tries > 1) await page.waitForTimeout(800); // gom tab thừa (lần click trước mở chậm, ra cùng lúc) để đóng luôn
+  } finally { ctx.off('page', on); }
+  const tab = live() || null, extra = seen.filter((p) => p !== tab && !p.isClosed());
+  // đóng tab thừa -- p.close() có lúc treo với tab do extension mở (xem xlv1_ensureSingleTab), nên mỗi tab chờ tối đa 3s
+  await Promise.all(extra.map((p) => Promise.race([p.close().catch(() => {}), new Promise((r) => setTimeout(r, 3000))])));
+  if (extra.length) log(`[clickNewTab] ${nameOf(el)}: đóng ${extra.length} tab mở thừa`);
+  if (!tab) { log(`[clickNewTab] ${nameOf(el)}: không thấy tab mới (${tries} lần click, mỗi lần chờ ${wait}ms)`); return null; }
+  await tab.waitForLoadState('domcontentloaded').catch(() => {});
+  return tab;
+}
+
+// Đóng hết tab, chỉ giữ tab đầu tiên (index 0) rồi đưa nó lên trước -- dùng sau khi click mở tab mới. Nhận page hoặc locator; trả về tab đầu tiên.
+// Dùng lại ensureSingleTab (mỗi tab có timeout riêng -- tab extension "cứng đầu" không làm treo script).
+async function closeOtherTabs(pageOrEl) {
+  const page = typeof pageOrEl.page === 'function' ? pageOrEl.page() : pageOrEl, ctx = page.context();
+  await ensureSingleTab(ctx, log);
+  const main = ctx.pages()[0];
+  if (main) await main.bringToFront().catch(() => {});
+  return main;
+}
+
+module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs };
