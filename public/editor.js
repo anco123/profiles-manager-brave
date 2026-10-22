@@ -2182,6 +2182,8 @@ function updateRecBar(st) {
 function recPrelude(body, header) {
   const cur = editor.getValue();
   let pre = cur.includes("require('./xlv1_actions')") ? '' : header || '';
+  const miss = ['clickNewTab', 'closeOtherTabs'].filter((f) => new RegExp(`\\b${f}\\(`).test(body) && !new RegExp(`\\b${f}\\b`).test(cur));
+  if (!pre && miss.length) pre += `const { ${miss.join(', ')} } = require('./xlv1_actions');\n`; // file require từ trước khi có 2 hàm này
   if (/readGoogleSheetCell\(/.test(body) && !/require\(['"]\.\/readGoogleSheetCell['"]\)/.test(cur)) pre += "const { readGoogleSheetCell } = require('./readGoogleSheetCell');\n";
   if (/\brow\.[A-Z]|readGoogleSheetCell\(row\b/.test(body) && !/\b(const|let|var)\s+row\b/.test(cur)) pre += 'const row = input ? JSON.parse(input) : {};\n';
   return pre + (pre && !pre.endsWith('\n\n') ? '\n' : '') + body;

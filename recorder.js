@@ -9,7 +9,9 @@
  *   lăn chuột để đổi lớp, nhả Alt thì bảng đứng yên để chọn selector (đếm số khớp bằng chính Playwright) + hành động.
  * - Trang ghi gì: click, gõ (gộp cả ô thành 1 bước), Enter, chọn <select>, chuyển trang. Chỉ sự kiện THẬT (isTrusted) -- nhưng chuột/phím
  *   của Playwright cũng là "thật", nên server.js tự tạm dừng ghi trong lúc Run script (pauseRecorder). Chỉ khung trang chính, không ghi iframe.
- * - Sau cú click: mở tab mới -> đổi thành page.goto (đọc href lúc chạy, hoặc URL cố định); tải file -> chờ download.
+ * - Sau cú click: mở tab mới -> click + chờ tab mới (không chắc có mở nên bọc if), các bước ghi ở tab mới LỒNG vào trong if (chạy trên
+ *   tab đó), sau if đóng hết tab chỉ giữ tab đầu tiên (closeOtherTabs); muốn thì đổi sang page.goto (đọc href lúc chạy / URL cố định).
+ *   Tải file -> chờ download.
  *   Hộp thoại alert/confirm không cần ghi: Playwright tự đóng (dismiss) cả lúc ghi lẫn lúc chạy script.
  * - Gõ chữ: so với dòng Excel / Google Sheet của profile đang ghi (snapshot đã import ở editor) -> gợi ý thay chữ cố định bằng
  *   row.U / readGoogleSheetCell(row, 'D', 'TAB'); không khớp thì vẫn chọn tay được từ danh sách cột.
@@ -24,8 +26,8 @@ const recorders = {}; // id profile -> { enabled, recording, segOpen, steps, seq
 // segOpen: đang có 1 đoạn chưa xuất (đang ghi HOẶC tạm dừng); recording: đang ghi thật -- tạm dừng = segOpen && !recording
 
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
-const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', getText: 'Lấy text', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
-const HEADER = "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle } = require('./xlv1_actions');\nuseLog(log);\n\n";
+const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', getText: 'Lấy text', clickTab: 'Click → tab mới (if + đóng tab phụ)', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
+const HEADER = "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs } = require('./xlv1_actions');\nuseLog(log);\n\n";
 
 function selOf(step) {
   const lv = step.levels?.[step.level];
@@ -34,11 +36,13 @@ function selOf(step) {
   return (lv.alts[step.alt] || lv.alts[0]).code;
 }
 
-function stepCode(s) {
-  const sel = selOf(s), txt = s.text != null && String(s.text).startsWith('=') ? String(s.text).slice(1).trim() : q(s.text ?? '');
+// P: biến của tab mà bước này chạy trên đó -- 'page' (tab đầu), hoặc tabX nếu bước được ghi ở tab mới do 1 bước clickTab mở (xem bodyOf)
+function stepCode(s, P = 'page') {
+  const sel = (selOf(s) || '').replace(/^page\./, P + '.'), txt = s.text != null && String(s.text).startsWith('=') ? String(s.text).slice(1).trim() : q(s.text ?? '');
   const opt = s.enter ? ', { enter: true }' : '';
   switch (s.action) {
-    case 'click': return s.download ? `const [dl${s.id}] = await Promise.all([page.waitForEvent('download'), clickEl(${sel})]); log('Đã tải: ' + dl${s.id}.suggestedFilename() + ' -> ' + await dl${s.id}.path()); // dl${s.id}.saveAs('đường dẫn') để lưu hẳn` : `await clickEl(${sel});`;
+    case 'click': return s.download ? `const [dl${s.id}] = await Promise.all([${P}.waitForEvent('download'), clickEl(${sel})]); log('Đã tải: ' + dl${s.id}.suggestedFilename() + ' -> ' + await dl${s.id}.path()); // dl${s.id}.saveAs('đường dẫn') để lưu hẳn` : `await clickEl(${sel});`;
+    case 'clickTab': return `const tab${s.id} = await clickNewTab(${sel}); // click rồi xem có mở tab mới không (null = không)`;
     case 'type': return `await typeEl(${sel}, ${txt}${opt});`;
     case 'hover': return `await hoverEl(${sel});`;
     case 'wait': return `await waitEl(${sel}, 15000);`;
@@ -46,18 +50,37 @@ function stepCode(s) {
     case 'ifClick': return `if (await waitEl(${sel}, 5000)) await clickEl(${sel});`;
     case 'ifType': return `if (await waitEl(${sel}, 5000)) await typeEl(${sel}, ${txt}${opt});`;
     case 'getText': return `const text${s.id} = await getText(${sel}); log('text: ' + text${s.id});`;
-    case 'gotoLink': return `await page.goto(new URL(await ${sel}.getAttribute('href'), page.url()).href); // click mở tab mới -> mở thẳng link trong tab này`;
-    case 'gotoUrl': return `await page.goto(${q(s.tabUrl || s.href || '')}); // click mở tab mới -> mở thẳng URL trong tab này`;
-    case 'press': return `await page.keyboard.press(${q(s.key || 'Enter')});`;
+    case 'gotoLink': return `await ${P}.goto(new URL(await ${sel}.getAttribute('href'), ${P}.url()).href); // click mở tab mới -> mở thẳng link trong tab này`;
+    case 'gotoUrl': return `await ${P}.goto(${q(s.tabUrl || s.href || '')}); // click mở tab mới -> mở thẳng URL trong tab này`;
+    case 'press': return `await ${P}.keyboard.press(${q(s.key || 'Enter')});`;
     case 'select': return `await ${sel}.selectOption(${txt});`;
-    case 'nav': return s.auto ? `await page.waitForLoadState('domcontentloaded'); // -> ${s.url}` : `await page.goto(${q(s.url)});`;
+    case 'nav': return s.auto ? `await ${P}.waitForLoadState('domcontentloaded'); // -> ${s.url}` : `await ${P}.goto(${q(s.url)});`;
     default: return '';
   }
 }
 
+// Tab mới do bước clickTab mở -> tên biến tab đó (tab<id bước>). Bước ghi ở tab đó (s.tab) được lồng vào if (tabX) {...} của bước clickTab.
+function tabVars(steps) { const m = {}; for (const s of steps) if (s.action === 'clickTab' && s.opens) m[s.opens] = `tab${s.id}`; return m; }
+function bodyOf(steps) {
+  const vars = tabVars(steps), out = [];
+  const emit = (list, ind) => {
+    for (const s of list) {
+      const P = vars[s.tab] || 'page', code = stepCode(s, P);
+      if (!code) continue;
+      out.push(ind + code);
+      if (s.action !== 'clickTab' || !vars[s.opens]) continue;
+      const t = vars[s.opens];
+      out.push(`${ind}if (${t}) {`);
+      emit(steps.filter((x) => x.tab === s.opens), ind + '  ');
+      out.push(`${ind}}`, `${ind}await closeOtherTabs(${P}); // đóng hết tab, chỉ giữ tab đầu tiên`);
+    }
+  };
+  emit(steps.filter((s) => !vars[s.tab]), '');
+  return out.join('\n');
+}
+
 function buildCode(steps, withRequire = true) {
-  const body = steps.map(stepCode).filter(Boolean).join('\n');
-  return (withRequire ? HEADER : '') + body + '\n';
+  return (withRequire ? HEADER : '') + bodyOf(steps) + '\n';
 }
 
 // ---------------- gợi ý lấy chữ gõ từ Excel / Google Sheet
@@ -105,7 +128,8 @@ function stateOf(id) {
   const r = recorders[id];
   if (!r) return { enabled: false, recording: false, steps: [], code: '' };
   for (const s of r.steps) if (s.text != null && s.sugFor !== s.text) { s.suggest = suggestFor(r, s.text); s.sugFor = s.text; } // chỉ tính lại khi chữ đổi
-  return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, code: stepCode(s) })), actions: ACTIONS, code: buildCode(r.steps) };
+  const vars = tabVars(r.steps);
+  return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, code: stepCode(s, vars[s.tab] || 'page'), tabVar: vars[s.tab] })), actions: ACTIONS, code: buildCode(r.steps) };
 }
 
 // Dừng 1 đoạn -> code của các bước ghi trong đoạn đó (id >= segFrom) vào hàng đợi; editor hỏi /recorder?since=... rồi tự chèn
@@ -124,11 +148,11 @@ const sameEl = (a, b) => a && b && a.levels && b.levels && a.levels[0]?.css === 
 // Sự kiện từ trang -> bước. Gộp: click vào ô rồi gõ = 1 bước gõ; gõ tiếp cùng ô = cập nhật chữ; Enter sau khi gõ = enter: true.
 function onEvent(r, ev, page) {
   const last = r.steps[r.steps.length - 1], now = Date.now();
-  const add = (s) => { const step = { id: ++r.seq, at: now, level: ev.level ?? 0, alt: 0, ...s }; r.steps.push(step); return step; };
+  const add = (s) => { const step = { id: ++r.seq, at: now, level: ev.level ?? 0, alt: 0, tab: page && page.__pmTabId, ...s }; r.steps.push(step); return step; }; // tab: ghi ở tab nào (undefined = tab ban đầu)
   if (ev.kind === 'nav') {
     if (!/^https?:/.test(ev.url) || (last && last.url === ev.url && last.action === 'nav')) return;
     const tab = page && page.__pmTabId;
-    if (tab && last && last.tab === tab) { last.tabUrl = ev.url; return; } // tab mới vừa mở do click (đã đổi thành goto) -- chỉ cập nhật URL, không thêm bước
+    if (tab && last && last.opens === tab) { last.tabUrl = ev.url; return; } // tab mới vừa mở do click (đã đổi thành clickTab / goto) -- lần tải đầu của nó không thành bước
     const auto = !!last && now - last.at < 6000 && ['click', 'type', 'press', 'ifClick'].includes(last.action);
     return add({ action: 'nav', url: ev.url, auto, tab });
   }
@@ -222,6 +246,7 @@ async function handle(id, page, msg) {
       if (p.level != null && s.levels && p.level >= 0 && p.level < s.levels.length) { s.level = p.level; s.alt = 0; s.custom = null; }
       if (p.alt != null) { s.alt = p.alt; s.custom = null; }
       for (const k of ['action', 'text', 'enter', 'custom', 'url', 'key', 'auto', 'tabUrl']) if (p[k] !== undefined) s[k] = p[k];
+      if (p.action === 'gotoLink' && s.linkLevel >= 0 && s.linkLevel < s.levels.length) Object.assign(s, { level: s.linkLevel, alt: 0, custom: null }); // đọc href -> chọn đúng thẻ <a>
     }
   }
   return { ...stateOf(id), exported };
@@ -237,8 +262,8 @@ function watchPage(id, page) {
   });
 }
 
-// Tab mới mở ra ngay sau 1 cú click -> đổi bước click thành page.goto trong tab hiện tại (script khỏi phải xử lý tab mới):
-// có href -> đọc href của thẻ <a> lúc chạy (link mỗi lần mỗi khác vẫn đúng); không có href (trang tự window.open) -> URL cố định của tab mới.
+// Tab mới mở ra ngay sau 1 cú click -> đổi bước click thành clickTab: click + chờ tab mới, if có tab thì làm các bước ghi ở tab đó,
+// xong đóng hết tab trừ tab đầu tiên (xem bodyOf). Bảng ☰ đổi được sang page.goto: gotoLink (đọc href của thẻ <a> lúc chạy) / gotoUrl.
 function onNewTab(id, page) {
   watchPage(id, page);
   const r = recorders[id], t0 = Date.now();
@@ -248,12 +273,11 @@ function onNewTab(id, page) {
     let i = r.steps.length - 1;
     while (i >= 0 && r.steps[i].action === 'nav' && r.steps[i].tab === tab) i--;
     const s = r.steps[i];
-    if (!s || !s.levels || s.action !== 'click' || s.tab || t0 - s.at > 4000) return;
+    if (!s || !s.levels || s.action !== 'click' || s.opens || t0 - s.at > 4000) return;
     const navs = r.steps.slice(i + 1);
     r.steps = r.steps.slice(0, i + 1);
-    s.tab = tab;
-    s.action = s.href ? 'gotoLink' : 'gotoUrl';
-    if (s.href && s.linkLevel >= 0 && s.linkLevel < s.levels.length) Object.assign(s, { level: s.linkLevel, alt: 0, custom: null });
+    s.opens = tab;
+    s.action = 'clickTab';
     s.tabUrl = navs.length ? navs[navs.length - 1].url : /^https?:/.test(page.url()) ? page.url() : s.href || '';
   }, 400);
 }
@@ -735,8 +759,8 @@ function pageRecorder() {
     if (!x.levels) return `<div class="st" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span>
       <select data-f="action"><option value="${x.action === 'skip' ? (x.url ? 'nav' : 'press') : x.action}">${esc(acts[x.url ? 'nav' : 'press'])}</option><option value="skip" ${x.action === 'skip' ? 'selected' : ''}>Bỏ qua</option></select>
       ${x.url ? `<label class="lv"><input type="checkbox" data-f="auto" ${x.auto ? 'checked' : ''}> tự chuyển (do click)</label>` : ''}${tools}</div><div class="code">${esc(x.code || '// (bỏ qua)')}</div></div>`;
-    const lv = x.levels[x.level], list = [...ELACTS, ...(x.href ? ['gotoLink'] : []), ...(x.href || x.tabUrl ? ['gotoUrl'] : [])];
-    const tags = `${x.tab ? `↗ click mở tab mới${x.tabUrl ? ': ' + x.tabUrl : ''} ` : ''}${x.download ? '⬇ tải file ' : ''}${x.error ? '⚠ ' + x.error : ''}`;
+    const lv = x.levels[x.level], list = [...ELACTS, ...(x.opens ? ['clickTab'] : []), ...(x.href ? ['gotoLink'] : []), ...(x.href || x.tabUrl ? ['gotoUrl'] : [])];
+    const tags = `${x.tabVar ? `↳ ở tab mới (${x.tabVar}) ` : ''}${x.opens ? `↗ click mở tab mới${x.tabUrl ? ': ' + x.tabUrl : ''} ` : ''}${x.download ? '⬇ tải file ' : ''}${x.error ? '⚠ ' + x.error : ''}`;
     return `<div class="st" data-id="${x.id}" data-css="${esc(lv.css)}"><div class="r"><span class="n">${i + 1}</span>
       <select data-f="action">${list.map((a) => `<option value="${a}" ${a === x.action ? 'selected' : ''}>${esc(acts[a])}</option>`).join('')}</select>
       <button data-op="parent" title="Chọn phần tử CHA bao ngoài" ${x.level >= x.levels.length - 1 ? 'disabled' : ''}>⬆ cha</button>

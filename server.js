@@ -278,7 +278,7 @@ function writeSnippets(snippets) {
 // Snippet thao tác mặc định (dùng scripts/xlv1_actions.js) -- nạp vào snippets.json 1 LẦN mỗi cái; id đã nạp ghi vào
 // snippets_seeded.json nên bạn xoá nút nào thì nó không tự hiện lại. Thêm snippet mới vào list này = lần chạy server sau tự có nút.
 const DEFAULT_SNIPPETS = [
-  ['act_require', 'Actions: require', "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle } = require('./xlv1_actions');\nuseLog(log);\n"],
+  ['act_require', 'Actions: require', "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs } = require('./xlv1_actions');\nuseLog(log);\n"],
   ['act_click', 'Click', "await clickEl(page.locator('SELECTOR'));\n"],
   ['act_type', 'Input', "await typeEl(page.locator('SELECTOR'), 'TEXT');\n"],
   ['act_type_enter', 'Input + Enter', "await typeEl(page.locator('SELECTOR'), 'TEXT', { enter: true });\n"],
@@ -293,6 +293,8 @@ const DEFAULT_SNIPPETS = [
   ['act_hover', 'Hover', "await hoverEl(page.locator('SELECTOR'));\n"],
   ['act_scroll', 'Scroll to', "await scrollEl(page.locator('SELECTOR'));\n"],
   ['act_text', 'Get text', "const text = await getText(page.locator('SELECTOR'));\nlog('text: ' + text);\n"],
+  ['act_click_tab', 'Click → tab mới', "const newTab = await clickNewTab(page.locator('SELECTOR')); // click rồi xem có mở tab mới không (null = không)\nif (newTab) {\n  // thao tác trên newTab, VD: await clickEl(newTab.locator('SELECTOR'));\n}\nawait closeOtherTabs(page); // đóng hết tab, chỉ giữ tab đầu tiên\n"],
+  ['act_close_tabs', 'Close other tabs', "await closeOtherTabs(page); // đóng hết tab, chỉ giữ tab đầu tiên\n"],
   ['act_pause', 'Pause', "await pause(page, 800, 2000);\n"],
   ['act_while', 'While handle', "const res = await whileHandle([\n  { el: page.locator('POPUP_BUTTON'), click: true },\n  { el: page.locator('INPUT'), type: 'TEXT', enter: true },\n  { el: page.locator('ERROR_TEXT'), fail: 'Gặp lỗi' },\n  { el: page.locator('DONE_ELEMENT'), done: true },\n], { timeout: 60000 });\nif (!res.ok) throw new Error('whileHandle: ' + res.reason);\n"],
 ];

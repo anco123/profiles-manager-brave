@@ -19,12 +19,17 @@
  *     { el: page.locator('input[name="password"]'), type: 'mat_khau' },
  *     { el: page.locator('[data-testid="SideNav_AccountSwitcher_Button"]'), done: true },
  *   ], { timeout: 60000 });
+ *   // click có thể mở tab mới: clickNewTab trả về tab mới (null = không mở) -> if; xong thì đóng hết, chỉ giữ tab đầu tiên
+ *   const newTab = await clickNewTab(page.locator('a.open'));
+ *   if (newTab) await clickEl(newTab.getByRole('button', { name: 'OK' }));
+ *   await closeOtherTabs(page);
  * -----------------------------------------------------------------------
  */
 
 const helpers = require('./helpers');
 const { clickPoint, humanType } = require('./xlv1_humanInput');
 const { scrollToElement } = require('./xlv1_scrollToElement');
+const { ensureSingleTab } = require('./xlv1_ensureSingleTab');
 
 let log = (...a) => console.log(...a);
 function useLog(fn) { if (typeof fn === 'function') log = fn; }
@@ -161,4 +166,30 @@ async function whileHandle(rules, opts = {}) {
   return { ok: false, reason: 'timeout' };
 }
 
-module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle };
+// Click rồi xem có tab mới mở ra không: có -> trả về tab mới (đã tải xong DOM), không -> null. Chờ tối đa `wait` ms tính từ SAU cú click
+// (clickEl lăn + đi chuột mất vài giây -- tính từ trước cú click thì dễ hết giờ oan). Click không được cũng trả null.
+async function clickNewTab(el, wait = 5000) {
+  const t = first(el), page = t.page(), ctx = page.context();
+  let tab = null;
+  const on = (p) => { tab = tab || p; };
+  ctx.on('page', on);
+  try {
+    if (!(await clickEl(t))) return null;
+    for (const end = Date.now() + wait; !tab && Date.now() < end;) await page.waitForTimeout(100);
+  } finally { ctx.off('page', on); }
+  if (!tab) { log(`[clickNewTab] ${nameOf(el)}: không thấy tab mới trong ${wait}ms`); return null; }
+  await tab.waitForLoadState('domcontentloaded').catch(() => {});
+  return tab;
+}
+
+// Đóng hết tab, chỉ giữ tab đầu tiên (index 0) rồi đưa nó lên trước -- dùng sau khi click mở tab mới. Nhận page hoặc locator; trả về tab đầu tiên.
+// Dùng lại ensureSingleTab (mỗi tab có timeout riêng -- tab extension "cứng đầu" không làm treo script).
+async function closeOtherTabs(pageOrEl) {
+  const page = typeof pageOrEl.page === 'function' ? pageOrEl.page() : pageOrEl, ctx = page.context();
+  await ensureSingleTab(ctx, log);
+  const main = ctx.pages()[0];
+  if (main) await main.bringToFront().catch(() => {});
+  return main;
+}
+
+module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs };
