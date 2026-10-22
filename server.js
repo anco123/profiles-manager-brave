@@ -1805,7 +1805,11 @@ app.post('/api/profiles/:id/recorder/start', async (req, res) => {
   const running = runningContexts[req.params.id];
   if (!running) return res.status(400).json({ error: 'Profile này chưa mở -- Launch trước rồi mới Record.' });
   try {
-    const st = await startRecorder(req.params.id, running.context);
+    // dữ liệu để gợi ý "lấy chữ gõ từ Excel / Google Sheet": cột khớp tên profile do editor gửi lên (giống ô chọn cột ở thanh bên trái)
+    const profile = readProfiles().find((p) => p.id === req.params.id);
+    const matchColumn = /^[A-Z]{1,3}$/.test(String((req.body || {}).matchColumn || '')) ? req.body.matchColumn : '';
+    const data = { excelFile: EXCEL_SNAPSHOT_FILE, excelHeaderFile: path.join(DATA_DIR, 'excel-snapshot-header.json'), gsheetFile: path.join(DATA_DIR, 'google-sheet-snapshot.json'), matchColumn, profileName: profile ? profile.name : '' };
+    const st = await startRecorder(req.params.id, running.context, data);
     (running.context.pages()[0] || running.page).bringToFront().catch(() => {});
     res.json(st);
   } catch (err) { res.status(500).json({ error: err.message }); }

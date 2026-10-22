@@ -2151,7 +2151,7 @@ async function startRecording(p) {
       const r = await fetch(`/api/profiles/${p.id}/launch`, { method: 'POST' });
       if (!r.ok) throw new Error((await r.json()).error || 'Launch lỗi');
     }
-    const res = await fetch(`/api/profiles/${p.id}/recorder/start`, { method: 'POST' });
+    const res = await fetch(`/api/profiles/${p.id}/recorder/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ matchColumn: excelMatchColumnSelect.value }) }); // cột khớp tên profile -> recorder gợi ý row.X / readGoogleSheetCell
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     recProfileId = p.id;
@@ -2174,7 +2174,16 @@ function updateRecBar(st) {
   recBarText.textContent = `${st.recording ? 'Đang ghi' : 'Tạm dừng'}: ${recBar.dataset.name} · ${st.steps.length} bước`;
 }
 
-// Chèn code các đoạn vừa dừng (exports có id > recLastExport); thiếu dòng require xlv1_actions thì thêm vào đầu đoạn
+// Code record dùng tới mà file đang mở chưa có thì thêm vào đầu đoạn: require xlv1_actions, `row` (dòng Excel của profile), readGoogleSheetCell
+function recPrelude(body, header) {
+  const cur = editor.getValue();
+  let pre = cur.includes("require('./xlv1_actions')") ? '' : header || '';
+  if (/readGoogleSheetCell\(/.test(body) && !/require\(['"]\.\/readGoogleSheetCell['"]\)/.test(cur)) pre += "const { readGoogleSheetCell } = require('./readGoogleSheetCell');\n";
+  if (/\brow\.[A-Z]|readGoogleSheetCell\(row\b/.test(body) && !/\b(const|let|var)\s+row\b/.test(cur)) pre += 'const row = input ? JSON.parse(input) : {};\n';
+  return pre + (pre && !pre.endsWith('\n\n') ? '\n' : '') + body;
+}
+
+// Chèn code các đoạn vừa dừng (exports có id > recLastExport)
 let recWaitWarned = false;
 function applyRecExports(list, header) {
   for (const e of list || []) {
@@ -2182,7 +2191,7 @@ function applyRecExports(list, header) {
     if (!activeTab) { if (!recWaitWarned) showToast('Có code vừa ghi -- mở 1 file để chèn vào', true); recWaitWarned = true; return; } // giữ lại, lần poll sau (đã mở file) mới chèn
     recWaitWarned = false;
     recLastExport = e.id;
-    insertSnippetAtCursor((editor.getValue().includes("require('./xlv1_actions')") ? '' : header || '') + e.body);
+    insertSnippetAtCursor(recPrelude(e.body, header));
     showToast(`Đã chèn ${e.count} bước vừa ghi`);
   }
 }
@@ -2209,10 +2218,10 @@ recModalOverlay.addEventListener('click', (e) => { if (e.target === recModalOver
 
 document.getElementById('recInsertBtn').addEventListener('click', async () => {
   if (!recProfileId) return;
-  const hasRequire = editor.getValue().includes("require('./xlv1_actions')"); // đã require rồi thì không chèn lại (khai báo const trùng = lỗi cú pháp)
-  const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?require=${hasRequire ? 0 : 1}`)).json();
+  const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?require=0`)).json();
   if (!st.steps || !st.steps.length) return showToast('Chưa ghi bước nào', true);
-  if (insertSnippetAtCursor(st.code)) showToast(`Đã chèn ${st.steps.length} bước`);
+  // recPrelude: đã require / khai báo row rồi thì không chèn lại (khai báo const trùng = lỗi cú pháp)
+  if (insertSnippetAtCursor(recPrelude(st.code, st.header))) showToast(`Đã chèn ${st.steps.length} bước`);
 });
 document.getElementById('recStopBtn').addEventListener('click', async () => {
   if (!recProfileId) return;

@@ -10,12 +10,16 @@
  *   của Playwright cũng là "thật", nên server.js tự tạm dừng ghi trong lúc Run script (pauseRecorder). Chỉ khung trang chính, không ghi iframe.
  * - Sau cú click: mở tab mới -> đổi thành page.goto (đọc href lúc chạy, hoặc URL cố định); tải file -> chờ download.
  *   Hộp thoại alert/confirm không cần ghi: Playwright tự đóng (dismiss) cả lúc ghi lẫn lúc chạy script.
+ * - Gõ chữ: so với dòng Excel / Google Sheet của profile đang ghi (snapshot đã import ở editor) -> gợi ý thay chữ cố định bằng
+ *   row.U / readGoogleSheetCell(row, 'D', 'TAB'); không khớp thì vẫn chọn tay được từ danh sách cột.
  * - Bước + trạng thái giữ ở server (recorders[id]) nên chuyển trang / reload không mất.
  * - Lưu ý: lúc đang ghi, trang có thêm window.__pmRec + 1 thẻ div (shadow DOM) -- trang web có thể thấy. Chỉ bật khi cần ghi.
  * -----------------------------------------------------------------------
  */
 
-const recorders = {}; // id profile -> { enabled, recording, steps, seq, segFrom, exports, exportSeq, tabSeq }
+const fs = require('fs');
+
+const recorders = {}; // id profile -> { enabled, recording, steps, seq, segFrom, exports, exportSeq, tabSeq, sources, undo }
 
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
 const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', getText: 'Lấy text', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
@@ -54,10 +58,52 @@ function buildCode(steps, withRequire = true) {
   return (withRequire ? HEADER : '') + body + '\n';
 }
 
+// ---------------- gợi ý lấy chữ gõ từ Excel / Google Sheet
+// Snapshot do editor ghi xuống đĩa (excel-snapshot.json: mảng dòng {A, B, ...}; google-sheet-snapshot.json: { tabs: {TÊN: {headers, rows}} }).
+// Dòng của profile = dòng Excel có cột "khớp tên" (editor đang chọn) == tên profile -- giống editor; Google Sheet dùng cùng số dòng.
+const readJson = (f) => { try { return f ? JSON.parse(fs.readFileSync(f, 'utf-8')) : null; } catch { return null; } };
+const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+const colIdx = (l) => l.split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+const colsOf = (rows, heads) => { const set = new Set(Object.keys(heads || {})); for (const x of rows.slice(0, 200)) Object.keys(x || {}).forEach((k) => set.add(k)); return [...set].filter((k) => /^[A-Z]{1,3}$/.test(k)).sort((a, b) => colIdx(a) - colIdx(b)); };
+function loadSources(o) {
+  if (!o) return [];
+  const out = [], excel = readJson(o.excelFile), gs = readJson(o.gsheetFile);
+  let rowNum = null;
+  if (Array.isArray(excel)) {
+    const name = norm(o.profileName).toLowerCase(), i = o.matchColumn && name ? excel.findIndex((x) => x && norm(x[o.matchColumn]).toLowerCase() === name) : -1;
+    if (i >= 0) rowNum = i + 2;
+    const heads = readJson(o.excelHeaderFile) || {};
+    out.push({ kind: 'excel', label: 'Excel', tab: '', rows: excel, row: i >= 0 ? excel[i] : null, heads, cols: colsOf(excel, heads) });
+  }
+  if (gs) {
+    const tabs = gs.tabs || { '': Array.isArray(gs) ? { headers: {}, rows: gs } : gs };
+    for (const [t, tab] of Object.entries(tabs)) {
+      const rows = (tab && tab.rows) || [];
+      out.push({ kind: 'gsheet', label: 'Sheet' + (t ? ' ' + t : ''), tab: t, rows, row: rowNum ? rows[rowNum - 2] || null : null, heads: (tab && tab.headers) || {}, cols: colsOf(rows, tab && tab.headers) });
+    }
+  }
+  return out;
+}
+const srcCode = (src, c) => (src.kind === 'excel' ? `row.${c}` : `readGoogleSheetCell(row, ${q(c)}${src.tab ? ', ' + q(src.tab) : ''})`);
+const srcLabel = (src, c) => `${src.label} cột ${c}${src.heads[c] ? ' · ' + norm(src.heads[c]).slice(0, 30) : ''}`;
+// Chữ vừa gõ trùng ô nào: ưu tiên dòng của profile; không có thì tìm ở mọi dòng (biết được CỘT -- lúc chạy mỗi profile lấy dòng của nó)
+function suggestFor(r, text) {
+  const t = norm(text);
+  if (!t || String(text).startsWith('=') || !r.sources) return [];
+  const mine = [], other = [];
+  for (const src of r.sources) for (const c of src.cols) if (src.row && norm(src.row[c]) === t) mine.push({ code: srcCode(src, c), label: srcLabel(src, c) });
+  if (mine.length) return mine.slice(0, 6);
+  for (const src of r.sources) for (const c of src.cols) if (src.rows.some((x) => x && norm(x[c]) === t)) other.push({ code: srcCode(src, c), label: srcLabel(src, c) + ' (dòng khác)' });
+  return other.slice(0, 6);
+}
+// Danh sách cột để chọn tay (kèm giá trị ở dòng của profile cho dễ nhận ra)
+const sourceList = (r) => (r.sources || []).map((src) => ({ label: src.label, opts: src.cols.map((c) => ({ code: srcCode(src, c), label: `${c}${src.heads[c] ? ' · ' + norm(src.heads[c]).slice(0, 30) : ''}${src.row && norm(src.row[c]) ? ' = ' + norm(src.row[c]).slice(0, 40) : ''}` })) }));
+
 function stateOf(id) {
   const r = recorders[id];
   if (!r) return { enabled: false, recording: false, steps: [], code: '' };
-  return { enabled: r.enabled, recording: r.recording, segFrom: r.segFrom, exportSeq: r.exportSeq, steps: r.steps.map((s) => ({ ...s, code: stepCode(s) })), actions: ACTIONS, code: buildCode(r.steps) };
+  for (const s of r.steps) if (s.text != null && s.sugFor !== s.text) { s.suggest = suggestFor(r, s.text); s.sugFor = s.text; } // chỉ tính lại khi chữ đổi
+  return { enabled: r.enabled, recording: r.recording, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, code: stepCode(s) })), actions: ACTIONS, code: buildCode(r.steps) };
 }
 
 // Dừng 1 đoạn -> code của các bước ghi trong đoạn đó (id >= segFrom) vào hàng đợi; editor hỏi /recorder?since=... rồi tự chèn
@@ -160,7 +206,8 @@ async function handle(id, page, msg) {
   let exported = null;
   if (msg.op === 'event' && r.recording) { const s = onEvent(r, msg.ev, page); if (s && msg.ev.perform) await perform(r, page, s); }
   else if (msg.op === 'toggle') { if (r.recording) { r.recording = false; exported = exportSeg(r); } else { r.recording = true; r.segFrom = r.seq + 1; } }
-  else if (msg.op === 'clear') r.steps = [];
+  else if (msg.op === 'clear') { if (r.steps.length) r.undo = r.steps; r.steps = []; } // giữ lại để Khôi phục
+  else if (msg.op === 'undoClear') { if (r.undo) r.steps = [...r.undo, ...r.steps]; r.undo = null; }
   else if (msg.op === 'delete') r.steps = r.steps.filter((s) => s.id !== msg.stepId);
   else if (msg.op === 'move') {
     const i = r.steps.findIndex((s) => s.id === msg.stepId), j = i + msg.dir;
@@ -208,9 +255,14 @@ function onNewTab(id, page) {
   }, 400);
 }
 
-async function startRecorder(id, context) {
+// data: { excelFile, excelHeaderFile, gsheetFile, matchColumn, profileName } -- để gợi ý row.X / readGoogleSheetCell (xem loadSources)
+async function startRecorder(id, context, data) {
   if (!recorders[id]) recorders[id] = { enabled: true, recording: false, steps: [], seq: 0, segFrom: 1, exports: [], exportSeq: 0, tabSeq: 0 };
   const r = recorders[id];
+  r.sources = loadSources(data); // đọc lại mỗi lần bấm Record (vừa import / sync lại thì có dữ liệu mới)
+  const ex = r.sources.find((x) => x.kind === 'excel');
+  r.rowNum = ex && ex.row ? ex.rows.indexOf(ex.row) + 2 : null;
+  for (const s of r.steps) s.sugFor = undefined;
   if (!r.recording) r.segFrom = r.seq + 1;
   r.enabled = true; r.recording = true;
   if (!context.__pmRecorder) {
@@ -524,6 +576,7 @@ function pageRecorder() {
       <div class="r"><select data-f="palt" class="grow"></select><button data-op="pedit" title="Tự sửa selector">✎</button></div>
       ${pick.editing ? `<div class="r"><input class="grow" data-f="pcustom" value="${esc(pick.custom || (pick.altObj || {}).code)}" title="Enter để lưu"></div>` : ''}
       <div class="r"><input class="grow" data-f="ptext" value="${esc(pick.text)}" placeholder="Chữ để gõ (cho Gõ) -- bắt đầu bằng = để dùng biểu thức JS"><label class="lv"><input type="checkbox" data-f="penter" ${pick.enter ? 'checked' : ''}> Enter</label></div>
+      ${srcSelect('psrc')}
       <div class="acts">${PICK_ACTS.map((a) => `<button data-act="${a}" ${a === 'click' ? 'class="pri"' : ''}>${esc(acts[a] || a)}</button>`).join('')}</div>
       <label class="lv"><input type="checkbox" data-f="pdo" ${pick.perform ? 'checked' : ''}> Làm luôn trên trang (Click / Gõ / Hover)</label></div>`;
     setHTML(p, html);
@@ -549,7 +602,8 @@ function pageRecorder() {
     const f = el.dataset && el.dataset.f;
     if (e.type === 'change') {
       if (f === 'palt' && el.value !== '' && pick.rows[pick.sel].alts[+el.value]) { pick.altObj = pick.rows[pick.sel].alts[+el.value]; pick.altTouched = true; pick.custom = null; }
-      else if (f === 'pcustom') { pick.custom = el.value.trim() || null; pick.editing = false; drawPick(); }
+      else if (f === 'pcustom') { pick.custom = el.value.trim() || null; drawAltSelect(); } // không vẽ lại cả bảng: change này có thể do blur lúc bấm nút hành động -> nút dời chỗ, bấm trượt
+      else if (f === 'psrc') { if (el.value) { pick.text = '= ' + el.value; drawPick(); } }
       else if (f === 'ptext') pick.text = el.value;
       else if (f === 'penter') pick.enter = el.checked;
       else if (f === 'pdo') pick.perform = el.checked;
@@ -565,7 +619,7 @@ function pageRecorder() {
   }
 
   // ---------------- giao diện (shadow DOM -- CSS trang web không lọt vào, CSS của mình không lọt ra)
-  let st = null, open = false, showCode = false, hl = null, ui = null, editing = null, clearArm = 0, toastT = 0;
+  let st = null, open = false, showCode = false, hl = null, ui = null, editing = null, toastT = 0;
   let tt = null; try { tt = window.trustedTypes && trustedTypes.createPolicy('pmrec', { createHTML: (x) => x }); } catch {} // trang bật Trusted Types (Google...) chặn innerHTML thường
   const setHTML = (el, html) => { el.innerHTML = tt ? tt.createHTML(html) : html; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -584,6 +638,7 @@ function pageRecorder() {
     select,input{background:#12141c;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:6px;padding:3px 5px;min-width:0}
     .grow{flex:1}.lv{opacity:.75;white-space:nowrap}.code{font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;word-break:break-all;margin-top:4px}
     pre{margin:0;padding:8px;max-height:30vh;overflow:auto;border-top:1px solid #2a2e3a;font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;white-space:pre-wrap}
+    .sug{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:4px;font-size:11px}.sug span{opacity:.7}.sug button{border-color:#3fb95066;color:#7ee2a8;font-size:11px;padding:2px 6px}
     .info{opacity:.7;font-size:11px;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.tag{color:#f5b455;font-size:11px;margin-top:3px}
     .pick{position:fixed;width:380px;max-height:80vh;overflow:auto;background:#12141c;color:#e8e9ed;border:1px solid #e8a33d;border-radius:10px;box-shadow:0 10px 40px #000a;padding:6px}
     .ph{display:flex;align-items:center;gap:6px;padding:2px 2px 6px}.ph b{flex:1;font-size:11px;opacity:.85}
@@ -619,7 +674,10 @@ function pageRecorder() {
 
   function uiEvent(e, el) {
     const t = e.type, inPick = !!el.closest('.pick');
-    if (t === 'mousedown') { if (!el.closest('input,select,textarea')) e.preventDefault(); dragStart(e, el); } // preventDefault: không đổi focus -> menu đang mở trên trang không bị đóng
+    if (t === 'mousedown') { // preventDefault: không đổi focus -> menu đang mở trên trang không bị đóng; ô của mình đang focus thì bỏ focus
+      if (!el.closest('input,select,textarea,option')) { e.preventDefault(); const a = root.activeElement; if (a && a.blur) a.blur(); } // không bỏ thì draw() tưởng đang gõ, không vẽ lại -> bấm nút như không ăn
+      dragStart(e, el);
+    }
     else if (t === 'mouseup') dragEnd();
     else if (t === 'mouseover') onOver(el);
     else if (t === 'keydown') { if (e.key === 'Escape') { if (pick) closePick(); else if (editing) { editing = null; draw(st); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur(); }
@@ -656,6 +714,9 @@ function pageRecorder() {
   function render(s) { if (!s) return; st = s; if (!s.enabled) return unmount(); if (ui) draw(s); }
   function refresh() { call({ op: 'state' }).then(render); }
   const ELACTS = ['click', 'type', 'hover', 'wait', 'waitGone', 'ifClick', 'ifType', 'getText', 'select', 'skip'];
+  // Lấy chữ gõ từ Excel / Google Sheet: danh sách cột (server gửi trong state.sources, kèm giá trị ở dòng của profile)
+  const srcSelect = (f) => (st && st.sources && st.sources.length ? `<div class="r"><select data-f="${f}" class="grow" title="Thay chữ cố định bằng giá trị ô Excel / Google Sheet ở dòng của profile đang chạy"><option value="">Lấy từ cột Excel / Sheet${st.rowNum ? ` (dòng ${st.rowNum} của profile này)` : ' (chưa khớp dòng của profile này)'}…</option>${st.sources.map((g) => `<optgroup label="${esc(g.label)}">${g.opts.map((o) => `<option value="${esc(o.code)}">${esc(o.label)}</option>`).join('')}</optgroup>`).join('')}</select></div>` : '');
+  const sugHTML = (x) => (x.suggest && x.suggest.length ? `<div class="sug"><span>Khớp ô:</span>${x.suggest.map((g) => `<button data-op="src" data-code="${esc(g.code)}" title="Dùng ${esc(g.code)}">${esc(g.label)}</button>`).join('')}</div>` : '');
   function stepHTML(x, i, acts) {
     const tools = `<span class="grow"></span><button data-op="up" title="Lên trên">↑</button><button data-op="down" title="Xuống dưới">↓</button><button data-op="del" title="Xoá bước">✕</button>`;
     if (!x.levels) return `<div class="st" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span>
@@ -672,7 +733,7 @@ function pageRecorder() {
       <div class="r"><select data-f="alt" class="grow">${lv.alts.map((a, k) => `<option value="${k}" ${k === x.alt && !x.custom ? 'selected' : ''}>${esc(altLabel(a))}</option>`).join('')}${x.custom ? `<option value="custom" selected>sửa tay: ${esc(x.custom)}</option>` : ''}</select>
       <button data-op="edit" title="Tự sửa selector">✎</button></div>
       ${editing === x.id ? `<div class="r"><input class="grow" data-f="custom" value="${esc(x.custom || (lv.alts[x.alt] || lv.alts[0] || {}).code)}" title="Enter để lưu, Esc để huỷ"></div>` : ''}
-      ${['type', 'ifType', 'select'].includes(x.action) ? `<div class="r"><input class="grow" data-f="text" value="${esc(x.text)}" title="Bắt đầu bằng = để dùng biểu thức JS, VD: = row.D">${x.action !== 'select' ? `<label class="lv"><input type="checkbox" data-f="enter" ${x.enter ? 'checked' : ''}> Enter</label>` : ''}</div>` : ''}
+      ${['type', 'ifType', 'select'].includes(x.action) ? `<div class="r"><input class="grow" data-f="text" value="${esc(x.text)}" title="Bắt đầu bằng = để dùng biểu thức JS, VD: = row.D">${x.action !== 'select' ? `<label class="lv"><input type="checkbox" data-f="enter" ${x.enter ? 'checked' : ''}> Enter</label>` : ''}</div>${sugHTML(x)}${srcSelect('src')}` : ''}
       <div class="code">${esc(x.code || '// (bỏ qua)')}</div></div>`;
   }
   function draw(s) {
@@ -686,7 +747,7 @@ function pageRecorder() {
     const cards = s.steps.map((x, i) => (s.recording && x.id >= s.segFrom && (i === 0 || s.steps[i - 1].id < s.segFrom) ? '<div class="seg">— đoạn đang ghi (bấm REC để dừng + xuất) —</div>' : '') + stepHTML(x, i, s.actions || {}));
     setHTML(ui.panel, `<div class="hd"><b>Các bước đã ghi</b>
         <button data-op="toggle">${s.recording ? '⏹ Dừng + xuất' : '⏺ Ghi đoạn mới'}</button><button data-op="code">${showCode ? 'Ẩn code' : 'Code'}</button>
-        <button data-op="copy" class="pri">Copy hết</button><button data-op="clear">${Date.now() - clearArm < 3000 ? 'Bấm lần nữa để xoá' : 'Xoá hết'}</button><button data-op="close" title="Thu nhỏ">—</button></div>
+        <button data-op="copy" class="pri">Copy hết</button>${!s.steps.length && s.canUndo ? '<button data-op="undo">↶ Khôi phục</button>' : '<button data-op="clear">Xoá hết</button>'}<button data-op="close" title="Thu nhỏ">—</button></div>
       <div class="list">${s.steps.length ? cards.join('') : '<div class="empty">Chưa có bước nào -- cứ thao tác trên trang, các bước sẽ hiện ở đây. Giữ Alt + rê chuột để chọn đúng phần tử.</div>'}</div>
       ${showCode ? `<pre>${esc(s.code)}</pre>` : ''}`);
     ui.panel.querySelector('.list').scrollTop = scroll;
@@ -705,6 +766,7 @@ function pageRecorder() {
       if (f === 'action') upd(stepId, { action: el.value });
       else if (f === 'alt') { if (el.value !== 'custom') upd(stepId, { alt: +el.value }); }
       else if (f === 'text') upd(stepId, { text: el.value });
+      else if (f === 'src') { if (el.value) upd(stepId, { text: '= ' + el.value }); }
       else if (f === 'custom') { editing = null; if (el.value.trim()) upd(stepId, { custom: el.value.trim() }); else draw(st); }
       else upd(stepId, { [f]: el.checked });
       el.blur();
@@ -716,8 +778,10 @@ function pageRecorder() {
     if (op === 'code') { showCode = !showCode; draw(st); return; }
     if (op === 'copy') { copyText(st.code); btn.textContent = 'Đã copy ✓'; setTimeout(() => draw(st), 1200); return; }
     if (op === 'toggle') { toggleRec(); return; }
-    if (op === 'clear') { if (Date.now() - clearArm < 3000) { clearArm = 0; call({ op: 'clear' }).then(render); } else { clearArm = Date.now(); draw(st); setTimeout(() => draw(st), 3100); } return; } // confirm() bị Playwright tự đóng -> bấm 2 lần
+    if (op === 'clear') { call({ op: 'clear' }).then(render); return; } // không hỏi lại (confirm() bị Playwright tự đóng) -- xoá nhầm thì bấm Khôi phục
+    if (op === 'undo') { call({ op: 'undoClear' }).then(render); return; }
     if (!step) return;
+    if (op === 'src') { upd(stepId, { text: '= ' + btn.dataset.code }); return; }
     if (op === 'del') call({ op: 'delete', stepId }).then(render);
     else if (op === 'up' || op === 'down') call({ op: 'move', stepId, dir: op === 'up' ? -1 : 1 }).then(render);
     else if (op === 'parent') upd(stepId, { level: step.level + 1 });
