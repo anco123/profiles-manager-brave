@@ -2118,13 +2118,14 @@ taskStateOverlay.addEventListener('click', (e) => { if (e.target === taskStateOv
 // -------------------------------------------------------------------
 // Record thao tác (recorder.js ở server): chọn profile -> nút ⏺ REC hiện trong trình duyệt của profile đó -> thao tác tay ->
 // "Chèn code" lấy code clickEl/typeEl... về chèn vào chỗ con trỏ. Chưa mở profile thì tự Launch trước.
+// Bấm REC trong trình duyệt để dừng 1 đoạn -> lần poll sau tự chèn code của đúng đoạn đó (recLastExport = id đoạn cuối đã chèn).
 // -------------------------------------------------------------------
 const recModalOverlay = document.getElementById('recModalOverlay');
 const recProfileList = document.getElementById('recProfileList');
 const recSearch = document.getElementById('recSearch');
 const recBar = document.getElementById('recBar');
 const recBarText = document.getElementById('recBarText');
-let recProfileId = null, recPollTimer = null;
+let recProfileId = null, recPollTimer = null, recLastExport = 0;
 
 function renderRecProfiles() {
   const term = recSearch.value.trim().toLowerCase();
@@ -2153,6 +2154,7 @@ async function startRecording(p) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error);
     recProfileId = p.id;
+    recLastExport = data.exportSeq || 0; // đoạn đã xuất từ lần record trước -- không chèn lại
     recBar.dataset.name = p.name;
     recModalOverlay.hidden = true;
     updateRecBar(data);
@@ -2171,9 +2173,23 @@ function updateRecBar(st) {
   recBarText.textContent = `${st.recording ? 'Đang ghi' : 'Tạm dừng'}: ${recBar.dataset.name} · ${st.steps.length} bước`;
 }
 
+// Chèn code các đoạn vừa dừng (exports có id > recLastExport); thiếu dòng require xlv1_actions thì thêm vào đầu đoạn
+function applyRecExports(list, header) {
+  for (const e of list || []) {
+    if (e.id <= recLastExport) continue;
+    recLastExport = e.id;
+    insertSnippetAtCursor((editor.getValue().includes("require('./xlv1_actions')") ? '' : header || '') + e.body);
+    showToast(`Đã chèn ${e.count} bước vừa ghi`);
+  }
+}
+
 async function pollRecorder() {
   if (!recProfileId) return;
-  try { updateRecBar(await (await fetch(`/api/profiles/${recProfileId}/recorder`)).json()); } catch {}
+  try {
+    const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?since=${recLastExport}`)).json();
+    applyRecExports(st.exports, st.header);
+    updateRecBar(st);
+  } catch {}
 }
 
 document.getElementById('openRecordBtn').addEventListener('click', async () => {
@@ -2197,7 +2213,8 @@ document.getElementById('recInsertBtn').addEventListener('click', async () => {
 });
 document.getElementById('recStopBtn').addEventListener('click', async () => {
   if (!recProfileId) return;
-  await fetch(`/api/profiles/${recProfileId}/recorder/stop`, { method: 'POST' }).catch(() => {});
+  const st = await fetch(`/api/profiles/${recProfileId}/recorder/stop`, { method: 'POST' }).then((r) => r.json()).catch(() => null);
+  if (st && st.exported) applyRecExports([st.exported], st.header); // đang ghi dở 1 đoạn -> chèn nốt đoạn đó
   updateRecBar(null);
   showToast('Đã dừng record');
 });

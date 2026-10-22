@@ -45,7 +45,7 @@ const { exec } = require('child_process');
 const { chromium } = require('playwright');
 const { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion } = require('./chrome-version-check');
-const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode } = require('./recorder');
+const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode, recorderExports, recorderHeader } = require('./recorder');
 
 const app = express();
 
@@ -1799,6 +1799,7 @@ app.post('/api/profiles/:id/launch', async (req, res) => {
 // -------------------------------------------------------------------
 // Record thao tác tay trên cửa sổ profile đang mở -> code clickEl/typeEl... (xem recorder.js).
 // Editor bấm "Record" -> start; nút ⏺ REC hiện trong trình duyệt của profile; "Chèn code" -> GET lấy code về.
+// Bấm REC trong trình duyệt để dừng 1 đoạn -> code đoạn đó vào hàng đợi; editor hỏi GET ?since=<id export cuối> rồi tự chèn (exports + header).
 // -------------------------------------------------------------------
 app.post('/api/profiles/:id/recorder/start', async (req, res) => {
   const running = runningContexts[req.params.id];
@@ -1811,10 +1812,10 @@ app.post('/api/profiles/:id/recorder/start', async (req, res) => {
 });
 app.post('/api/profiles/:id/recorder/stop', async (req, res) => {
   const running = runningContexts[req.params.id];
-  res.json(await stopRecorder(req.params.id, running && running.context));
+  res.json({ ...(await stopRecorder(req.params.id, running && running.context)), header: recorderHeader });
 });
 app.get('/api/profiles/:id/recorder', (req, res) => {
-  res.json({ ...recorderState(req.params.id), code: recorderCode(req.params.id, req.query.require !== '0') });
+  res.json({ ...recorderState(req.params.id), code: recorderCode(req.params.id, req.query.require !== '0'), exports: recorderExports(req.params.id, +req.query.since || 0), header: recorderHeader });
 });
 
 // -------------------------------------------------------------------
