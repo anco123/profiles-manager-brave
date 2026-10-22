@@ -412,7 +412,7 @@ function pageRecorder() {
   }
   // ưu tiên selector khớp đúng 1 phần tử, có nghĩa (testid/id/role/...) trước đường dẫn css (dễ gãy khi trang đổi bố cục); sort ổn định -> giữ thứ tự testid > id > role > ...
   // ô nhập: name="..." đứng trước getByRole(name: aria-label) -- aria-label đổi theo ngôn ngữ giao diện (VD Discord tiếng Việt), name thì không
-  const rank = (a) => (a.unique ? (a.kind === 'css' ? 1 : a.field && a.kind === 'name' ? -1 : 0) : 2);
+  const rank = (a) => (a.deep ? 3 : a.unique ? (a.field && a.kind === 'name' ? -1 : 0) : 2); // đường dẫn css nhiều tầng luôn xếp cuối
   const sortAlts = (alts) => alts.sort((a, b) => rank(a) - rank(b));
   // scope/pre: tìm TRONG 1 phần tử cha (scope) và viết code nối tiếp locator của cha đó (pre) -- dùng cho scopedAlts
   function altsFor(el, scope = document, pre = 'page') {
@@ -439,12 +439,39 @@ function pageRecorder() {
       const same = all(top ? 'body *' : '*').filter((n) => n === el || (n.childElementCount <= 5 && (n.textContent || '').length <= 300 && clean(n.innerText) === own && ![...n.children].some((c) => clean(c.innerText) === own) && isVis(n)));
       alts.push({ kind: 'text', ...withNth(`${pre}.getByText(${sq(own)}, { exact: true })`, same.includes(el) ? same : [el], el) });
     }
-    if (top) {
-      const cp = cssPath(el);
-      let cnt = 1; try { cnt = document.querySelectorAll(cp).length; } catch {}
-      alts.push({ kind: 'css', code: `page.locator(${sq(cp)})`, base: `page.locator(${sq(cp)})`, unique: cnt === 1 });
+    if (top) { // ghép móc của chính phần tử thành 1 selector ngắn (thay cho đường dẫn css nhiều tầng)
+      const { tag, out: hs } = hooks(el), sel = tag + hs.slice(0, 3).join('');
+      if (hs.length) alts.push({ kind: 'kết hợp', ...withNth(`page.locator(${sq(sel)})`, all(sel), el) });
     }
     return sortAlts(alts);
+  }
+  // "Móc" ổn định của 1 phần tử (mảnh selector css), mạnh trước yếu sau. Bỏ id tự sinh, class do công cụ build sinh ra
+  // (input__0ed4f, css-1x2y3z, sc-bdfBwQ, r-1abc...) và giá trị có dãy số dài (đếm like, id bài viết trong href...) -- những thứ đổi theo lần tải.
+  const HOOK_ATTRS = ['data-testid', 'name', 'aria-label', 'placeholder', 'role', 'type', 'title', 'alt', 'for', 'href'];
+  const goodClass = (c) => /^[a-zA-Z][a-zA-Z-]{2,30}$/.test(c) && !/^(css|sc|jsx|emotion|svelte|r)-/.test(c) && (c.match(/[A-Z]/g) || []).length < 3;
+  function hooks(el) {
+    const tag = el.tagName.toLowerCase(), out = [];
+    if (el.id && goodId(el.id)) out.push('#' + cssEsc(el.id));
+    for (const a of HOOK_ATTRS) {
+      const v = el.getAttribute(a);
+      if (!v || v.length > 60 || /\d{3,}/.test(v) || (a === 'type' && !['INPUT', 'BUTTON'].includes(el.tagName)) || (a === 'href' && /^(javascript:|#$)/.test(v))) continue;
+      out.push(`[${a}="${attrEsc(v)}"]`);
+    }
+    for (const c of el.classList) if (goodClass(c)) out.push('.' + cssEsc(c));
+    return { tag, out: out.slice(0, 8) };
+  }
+  // Selector ngắn GHÉP móc: của chính phần tử (1 hoặc 2 móc), chưa duy nhất thì thêm 1 cha gần nhất có móc mạnh (id / data-testid /
+  // aria-label / role / name) -- tối đa 2 tầng, VD [data-testid="cardB"] button[aria-label="Like"]. Không bao giờ đi đường dẫn nhiều tầng.
+  function comboAlts(el) {
+    const { tag, out: hs } = hooks(el), found = [];
+    const own = [...hs.map((h) => tag + h), ...hs.flatMap((h, i) => hs.slice(i + 1).map((k) => tag + h + k)), tag].slice(0, 30);
+    const uniq = (sel) => { try { const l = document.querySelectorAll(sel); return l.length === 1 && l[0] === el; } catch { return false; } };
+    for (const o of own) if (uniq(o)) found.push(o);
+    for (let n = el.parentElement, d = 0; n && n !== document.body && d < 10 && found.length < 3; n = n.parentElement, d++) {
+      const anchors = hooks(n).out.filter((h) => /^#|^\[(data-testid|aria-label|role|name)=/.test(h)).slice(0, 2);
+      for (const a of anchors) { const o = own.slice(0, 12).find((x) => uniq(`${a} ${x}`)); if (o) { found.push(`${a} ${o}`); break; } }
+    }
+    return [...new Set(found)].sort((a, b) => a.length - b.length).slice(0, 3).map((c) => ({ kind: 'kết hợp', code: `page.locator(${sq(c)})`, base: `page.locator(${sq(c)})`, unique: true }));
   }
   // Không có selector nào khớp đúng 1 -> tìm cha gần nhất "có tên" duy nhất (id, testid, aria-label, dialog...) rồi tìm TRONG cha đó:
   // page.getByRole('dialog').getByRole('button', { name: 'Đăng' }) thay vì page.getByRole('button', ...).nth(3)
@@ -467,7 +494,13 @@ function pageRecorder() {
     }
     return [];
   }
-  function bestAlts(el) { const alts = altsFor(el); return alts.some((a) => a.unique && a.kind !== 'css') ? alts : sortAlts([...alts, ...scopedAlts(el)]); }
+  // Cấp được chọn: thêm selector ghép quanh phần tử khi chưa có cái nào duy nhất; đường dẫn css nhiều tầng chỉ là đường cùng
+  function bestAlts(el) {
+    let alts = altsFor(el);
+    if (!alts.some((a) => a.unique)) alts = sortAlts([...alts, ...scopedAlts(el), ...comboAlts(el)]);
+    if (!alts.some((a) => a.unique)) { const cp = cssPath(el); alts.push({ kind: 'css (dài, đường cùng)', code: `page.locator(${sq(cp)})`, base: `page.locator(${sq(cp)})`, unique: true, deep: true }); }
+    return alts;
+  }
   const INTERACTIVE = 'a,button,input,select,textarea,label,summary,[role=button],[role=link],[role=menuitem],[role=tab],[role=checkbox],[role=option],[role=switch],[role=textbox],[contenteditable=true],[data-testid]';
   // opt.level: ép cấp chọn sẵn (không thì lấy phần tử tương tác được gần nhất); opt.alts0: selector đã tính sẵn cho cấp 0 (bảng chọn Alt)
   function chainFor(target, opt = {}) {
