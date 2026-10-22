@@ -904,6 +904,7 @@ const excelMatchSection = document.getElementById('excelMatchSection');
 const excelMatchColumnSelect = document.getElementById('excelMatchColumnSelect');
 const excelMatchSummary = document.getElementById('excelMatchSummary');
 const excelMatchPreview = document.getElementById('excelMatchPreview');
+const excelImportBadge = document.getElementById('excelImportBadge'); // số dòng đã import, hiện ngay trên tiêu đề (mục thu gọn vẫn thấy)
 
 let excelImportState = null; // { columnLetters: string[], headerLabels: object, rows: object[] } | null
 let excelMatchByProfileId = new Map(); // profile.id -> matched row object | null, see header comment
@@ -914,6 +915,7 @@ clearExcelBtn.addEventListener('click', () => {
   excelImportState = null;
   excelMatchByProfileId = new Map();
   excelFileName.hidden = true;
+  excelImportBadge.hidden = true;
   clearExcelBtn.hidden = true;
   excelMatchSection.hidden = true;
   // Doesn't touch runInputTextarea's current contents -- clearing the
@@ -993,6 +995,8 @@ excelFileInput.addEventListener('change', async () => {
       showToast('Imported OK, but could not save the full-sheet snapshot to disk (cross-row lookups in scripts will fail until you re-import)', true);
     });
 
+    excelImportBadge.hidden = false;
+    excelImportBadge.textContent = `· ${rows.length} dòng`;
     excelFileName.hidden = false;
     excelFileName.textContent = `"${file.name}": ${rows.length} row(s), columns: ` +
       columnLetters.map((l) => headerLabels[l] ? `${l} (${headerLabels[l]})` : l).join(', ');

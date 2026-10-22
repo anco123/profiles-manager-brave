@@ -68,7 +68,7 @@
       </div>
 
       <!-- Mẫu code: thu gọn mặc định, bấm tiêu đề mới hiện (mỗi nhóm bên trong cũng là 1 dropdown -- xem renderChipGroups() trong shared.js) -->
-      <details class="editor-sidebar-section chip-groups-box" id="chipGroupsBox">
+      <details class="editor-sidebar-section sidebar-fold" id="chipGroupsBox">
         <summary class="editor-sidebar-head">Mẫu code</summary>
         <div class="chip-groups" id="editorChipGroups"></div>
       </details>
@@ -83,10 +83,9 @@
            the sidebar, below the snippets -- up top it sat right over
            the snippet list and got in the way every time it expanded
            with a match preview. -->
-      <div class="editor-sidebar-section">
-        <div class="editor-sidebar-head">
-          <span>Import from Excel</span>
-        </div>
+      <!-- Thu gọn mặc định giống Mẫu code -- bấm tiêu đề mới hiện; đã import thì tiêu đề hiện số dòng (excelImportBadge) -->
+      <details class="editor-sidebar-section sidebar-fold" id="excelImportBox">
+        <summary class="editor-sidebar-head">Import from Excel <span class="sidebar-fold-badge" id="excelImportBadge" hidden></span></summary>
         <div class="excel-import-row">
           <button type="button" class="btn btn-ghost" id="importExcelBtn">Import&hellip;</button>
           <input type="file" id="excelFileInput" accept=".xlsx,.xls" hidden />
@@ -101,7 +100,7 @@
           <p class="field-note" id="excelMatchSummary"></p>
           <div class="proxy-target-list" id="excelMatchPreview"></div>
         </div>
-      </div>
+      </details>
 
       <!-- Nguồn THỨ HAI, hoàn toàn tách riêng khỏi Import from Excel ở
            trên -- không đụng tới nhau. Ghi snapshot riêng
