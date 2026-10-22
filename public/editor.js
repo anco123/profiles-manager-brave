@@ -2134,7 +2134,8 @@ let recProfileId = null, recPollTimer = null, recLastExport = 0;
 
 function renderRecProfiles() {
   const term = recSearch.value.trim().toLowerCase();
-  const list = lastProfiles.filter((p) => !term || p.name.toLowerCase().includes(term)).sort((a, b) => (b.running ? 1 : 0) - (a.running ? 1 : 0));
+  // xếp theo abc (số theo thứ tự tự nhiên: acc_2 trước acc_10); profile đang mở vẫn có chấm xanh để nhận ra
+  const list = lastProfiles.filter((p) => !term || p.name.toLowerCase().includes(term)).sort((a, b) => a.name.localeCompare(b.name, 'vi', { numeric: true, sensitivity: 'base' }));
   recProfileList.innerHTML = '';
   for (const p of list) {
     const btn = document.createElement('button');
