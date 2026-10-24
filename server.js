@@ -1810,7 +1810,8 @@ app.post('/api/profiles/:id/recorder/start', async (req, res) => {
     // dữ liệu để gợi ý "lấy chữ gõ từ Excel / Google Sheet": cột khớp tên profile do editor gửi lên (giống ô chọn cột ở thanh bên trái)
     const profile = readProfiles().find((p) => p.id === req.params.id);
     const matchColumn = /^[A-Z]{1,3}$/.test(String((req.body || {}).matchColumn || '')) ? req.body.matchColumn : '';
-    const data = { excelFile: EXCEL_SNAPSHOT_FILE, excelHeaderFile: path.join(DATA_DIR, 'excel-snapshot-header.json'), gsheetFile: path.join(DATA_DIR, 'google-sheet-snapshot.json'), matchColumn, profileName: profile ? profile.name : '' };
+    const data = { excelFile: EXCEL_SNAPSHOT_FILE, excelHeaderFile: path.join(DATA_DIR, 'excel-snapshot-header.json'), gsheetFile: path.join(DATA_DIR, 'google-sheet-snapshot.json'), matchColumn, profileName: profile ? profile.name : '',
+      run: (code, input) => runScriptOnProfile(req.params.id, code, input, null, 'record-test.js') }; // nút ▶ Chạy thử trong bảng ☰ -- chạy y như Run
     const st = await startRecorder(req.params.id, running.context, data);
     (running.context.pages()[0] || running.page).bringToFront().catch(() => {});
     res.json(st);
@@ -2160,6 +2161,7 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     }
   };
 
+  let traced = false;
   try {
     clearScriptsRequireCache();
     const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
@@ -2177,10 +2179,27 @@ async function runScriptOnProfile(id, code, input = '', onLog = null, scriptName
     running.page.__scriptDeadlineAt = deadlineAt || 0;
     running.page.__profileId = id; // xlv1_humanInput.js: mỗi profile 1 "kiểu tay" cố định (tốc độ chuột, nhịp gõ...) theo id
     const resumeRec = pauseRecorder(id); // đang Record thì tạm dừng ghi -- chuột/phím do script gửi cũng là sự kiện "thật", không thì bị ghi lẫn vào
+    // Playwright trace: ghi lại từng bước (ảnh, DOM, selector khớp gì, click vào đâu) -- CHỈ lưu file khi script lỗi (xem catch bên dưới),
+    // chạy xong không lỗi thì bỏ. Mở bằng: npx playwright show-trace "<file>". Tắt hẳn: PM_TRACE=0 trong .env.
+    // traced: CHÍNH lần chạy này bật trace (chạy lồng -- VD ▶ Chạy thử lúc script khác đang chạy -- thì trace đang bật, để lần ngoài tự lo)
+    traced = process.env.PM_TRACE !== '0' && !running.__tracing && (running.__tracing = await running.context.tracing.start({ screenshots: true, snapshots: true }).then(() => true, () => false));
     let result;
     try { result = await run(running.page, running.context, log, scopedRequire, input, proxyInfo, yellow); } finally { resumeRec(); }
+    if (traced) { running.__tracing = false; await running.context.tracing.stop().catch(() => {}); } // không lỗi -> bỏ trace
     return { logs, result: result === undefined ? null : result, resultStatus };
   } catch (err) {
+    if (traced) { // lỗi -> lưu trace, giữ 30 file mới nhất
+      running.__tracing = false;
+      try {
+        const traceDir = path.join(DATA_DIR, 'traces');
+        fs.mkdirSync(traceDir, { recursive: true });
+        const tracePath = path.join(traceDir, `trace-${scriptName || 'script'}-${id}-${Date.now()}.zip`.replace(/[/\\:*?"<>|]/g, '_'));
+        await running.context.tracing.stop({ path: tracePath });
+        log(`[trace] Đã lưu diễn biến lúc lỗi: ${tracePath} -- mở bằng: npx playwright show-trace "${tracePath}"`);
+        const old = fs.readdirSync(traceDir).filter((f) => f.endsWith('.zip')).map((f) => ({ f, t: fs.statSync(path.join(traceDir, f)).mtimeMs })).sort((a, b) => b.t - a.t).slice(30);
+        for (const o of old) fs.unlinkSync(path.join(traceDir, o.f));
+      } catch (traceErr) { log(`[trace] Không lưu được trace: ${traceErr.message}`); }
+    }
     // Chụp màn hình cho MỌI script khi lỗi -- tập trung ở đây thay vì
     // để từng script tự lo. Trước đây chỉ vài script LOGIN
     // (xlv3_loginX.js, loginTask.js, Logintaskon.js, xlv3_loginByCookie.js)

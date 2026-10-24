@@ -143,22 +143,20 @@ async function ensureActionable(page, locator, box) {
   const freshBox = await locator.boundingBox();
   if (!freshBox) throw new Error('ensureActionable: element has no bounding box after scrolling into view');
 
-  const cx = freshBox.x + freshBox.width / 2;
-  const cy = freshBox.y + freshBox.height / 2;
-
   // FIX (round 2): the first pass only checked that *some* element
   // existed at that point, which is true almost always -- it never
   // actually confirmed that element was the target (or inside it).
   // A real overlay/modal/tooltip sitting on top would have passed the
   // old check silently. Now we compare the topmost element at the
   // point against the target node itself.
-  const isTopMost = await locator.evaluate(
-    (el, { cx, cy }) => {
-      const topEl = document.elementFromPoint(cx, cy);
-      return !!topEl && (topEl === el || el.contains(topEl));
-    },
-    { cx, cy }
-  ).catch(() => true); // if the check itself fails (e.g. detached node), don't block the click on that
+  //
+  // Tâm lấy theo getBoundingClientRect() của CHÍNH phần tử (toạ độ của khung chứa nó) chứ không dùng tâm của boundingBox(): đó là toạ độ của cả trang
+  // (boundingBox), mà phần tử nằm trong iframe thì elementFromPoint của iframe tính từ góc iframe -> lệch, báo "bị đè" oan, không click
+  // được gì trong iframe. Ở khung chính 2 cách ra cùng 1 điểm.
+  const isTopMost = await locator.evaluate((el) => {
+    const r = el.getBoundingClientRect(), topEl = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return !!topEl && (topEl === el || el.contains(topEl));
+  }).catch(() => true); // if the check itself fails (e.g. detached node), don't block the click on that
 
   if (!isTopMost) throw new Error('ensureActionable: target is covered by another element');
   return freshBox;
