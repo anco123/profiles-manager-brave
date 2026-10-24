@@ -103,7 +103,7 @@ function stepCode(s, P = 'page') {
     case 'gotoLink': return `await ${P}.goto(new URL(await ${sel}.getAttribute('href'), ${P}.url()).href); // click mở tab mới -> mở thẳng link trong tab này`;
     case 'gotoUrl': return `await ${P}.goto(${q(s.tabUrl || s.href || '')}); // click mở tab mới -> mở thẳng URL trong tab này`;
     case 'press': return `await ${P}.keyboard.press(${q(s.key || 'Enter')});`;
-    case 'select': return `await ${sel}.selectOption(${txt});`;
+    case 'select': return `await hoverEl(${sel}); await ${sel}.selectOption(${txt});`; // đi chuột tới ô chọn trước (moveMouseVisibly của project)
     case 'nav': return s.auto ? `await ${P}.waitForLoadState('domcontentloaded'); // -> ${s.url}` : `await ${P}.goto(${q(s.url)});`;
     default: return '';
   }
@@ -329,20 +329,23 @@ async function countLocs(page, codes) {
   }));
 }
 
-// "Làm luôn trên trang" ở bảng chọn Alt: Playwright tự làm bằng đúng selector vừa chọn (tạm dừng ghi để không bị ghi lặp)
+// "Làm luôn trên trang" ở bảng chọn Alt: làm bằng ĐÚNG các hàm "người thật" của project (scripts/xlv1_actions.js: clickEl / hoverEl / typeEl
+// -> lăn chuột thật tới phần tử, đi chuột Fitts moveMouseVisibly, nhấn humanPressMouse, gõ humanType theo kiểu tay của profile) -- KHÔNG dùng
+// loc.click() / fill() của Playwright (con trỏ nhảy cóc tới phần tử, gõ tức thì = dấu vết bot ngay trên profile thật). Không làm được (không
+// thấy / bị lớp khác đè...) thì báo lỗi ở bước, không bấm "chay" bằng dispatchEvent. Tạm dừng ghi trong lúc làm để không bị ghi lặp.
 async function perform(r, page, s) {
-  const loc = locOf(page, selOf(s));
+  const loc = locOf(page, withP(selOf(s), 'page', s.frame));
   if (!loc) return;
+  const { clickEl, hoverEl, typeEl } = require('./scripts/xlv1_actions');
   r.recording = false;
   try {
-    if (['hover', 'ifHover'].includes(s.action)) await loc.hover({ timeout: 3000 });
-    else if (['click', 'ifClick'].includes(s.action)) {
-      // phần tử bị lớp khác đè (chọn "dưới lớp phủ" ở bảng Alt) -> Playwright click không tới, bấm thẳng vào phần tử để còn ghi tiếp
-      try { await loc.click({ timeout: 2500 }); } catch (err) { await loc.dispatchEvent('click', {}, { timeout: 1500 }); s.error = 'bị phần tử khác đè, đã bấm thẳng bằng dispatchEvent -- script thật có thể phải click lớp đè hoặc { force: true }'; return; }
-    } else if (['type', 'ifType'].includes(s.action) && !String(s.text ?? '').startsWith('=')) { await loc.fill(String(s.text ?? ''), { timeout: 3000 }); if (s.enter) await loc.press('Enter'); }
-    s.error = null;
+    let ok = true;
+    if (['hover', 'ifHover'].includes(s.action)) ok = await hoverEl(loc);
+    else if (['click', 'ifClick'].includes(s.action)) ok = await clickEl(loc, 5000);
+    else if (['type', 'ifType'].includes(s.action) && !String(s.text ?? '').startsWith('=')) ok = await typeEl(loc, String(s.text ?? ''), { enter: !!s.enter, timeout: 5000 });
+    s.error = ok ? null : 'làm trên trang không được (không thấy phần tử / bị lớp khác đè) -- xem lại selector hoặc chọn lớp khác';
   } catch (err) { s.error = 'làm trên trang lỗi: ' + String(err.message || err).split('\n')[0].slice(0, 120); } finally {
-    await new Promise((res) => setTimeout(res, 300)); // sự kiện click/gõ của Playwright về tới server sau 1 nhịp -- đợi rồi mới ghi tiếp
+    await new Promise((res) => setTimeout(res, 900)); // sự kiện click / chữ gõ (gửi chậm 0,5s) của chính lần làm này về tới server sau 1 nhịp -- đợi rồi mới ghi tiếp
     if (r.enabled) r.recording = true;
   }
 }
@@ -963,7 +966,7 @@ function pageRecorder() {
   }
 
   // ---------------- giao diện (shadow DOM -- CSS trang web không lọt vào, CSS của mình không lọt ra)
-  let st = null, open = false, view = 'code', expK = -1, hl = null, ui = null, editing = null, toastT = 0; // view: 'code' (mặc định) | 'cards'; expK: dòng code đang mở chỉnh
+  let st = null, open = false, view = 'code', expK = -1, testing = false, lastPanel = '', hl = null, ui = null, editing = null, toastT = 0; // view: 'code' (mặc định) | 'cards'; expK: dòng code đang mở chỉnh
   let tt = null; try { tt = window.trustedTypes && trustedTypes.createPolicy('pmrec', { createHTML: (x) => x }); } catch {} // trang bật Trusted Types (Google...) chặn innerHTML thường
   const setHTML = (el, html) => { el.innerHTML = tt ? tt.createHTML(html) : html; };
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -1182,11 +1185,14 @@ function pageRecorder() {
     const cards = () => s.steps.map((x, i) => (s.segOpen && x.id >= s.segFrom && (i === 0 || s.steps[i - 1].id < s.segFrom) ? `<div class="seg">— đoạn ${s.recording ? 'đang ghi' : 'tạm dừng'} (⏹ Xuất = xuất cả đoạn) —</div>` : '') + stepHTML(x, i, s.actions || {}) + ghosts(x)).join('');
     const blockBtns = !s.segOpen ? '' : s.openLoop ? '<button data-op="wend" title="Kết thúc vòng lặp">Đóng While</button>' : s.openBranch ? '<button data-op="bend" title="Kết thúc Nhánh">Đóng Nhánh</button>'
       : '<button data-op="wstart" title="Mở vòng lặp while -- bước ghi / chọn sau đó thành các If trong vòng lặp">⟳ While</button><button data-op="bstart" title="Chờ nhiều phần tử, cái nào hiện trước thì làm việc của nó (waitAny)">⑂ Nhánh</button>';
-    setHTML(ui.panel, `<div class="hd"><b>${view === 'code' ? 'Code' : 'Các bước'}</b>
+    const html = `<div class="hd"><b>${view === 'code' ? 'Code' : 'Các bước'}</b>
         <button data-op="rec">${s.recording ? '⏸ Tạm dừng' : s.segOpen ? '▶ Ghi tiếp' : '⏺ Ghi đoạn mới'}</button>${s.segOpen ? '<button data-op="export">⏹ Xuất</button>' : ''}${blockBtns}
-        ${s.canRun ? `<button data-op="test" title="Chạy ${s.segOpen ? 'đoạn đang ghi' : 'mọi bước'} trên chính trang này, báo bước nào hỏng" ${s.test && s.test.running ? 'disabled' : ''}>▶ Chạy thử</button>` : ''}
+        ${s.canRun ? `<button data-op="test" title="Chạy ${s.segOpen ? 'đoạn đang ghi' : 'mọi bước'} trên chính trang này, báo bước nào hỏng" ${testing || (s.test && s.test.running) ? 'disabled' : ''}>▶ Chạy thử</button>` : ''}
         <button data-op="copy" class="pri">Copy</button>${!s.steps.length && s.canUndo ? '<button data-op="undo">↶ Khôi phục</button>' : '<button data-op="clear">Xoá hết</button>'}<button data-op="view" title="${view === 'code' ? 'Xem dạng ô (mỗi bước 1 ô)' : 'Xem dạng code'}">${view === 'code' ? '▤' : '{ }'}</button><button data-op="close" title="Thu nhỏ">—</button></div>
-      ${testBar(s.test)}<div class="list">${s.steps.length ? (view === 'code' ? codeView(s) : cards()) : '<div class="empty">Chưa có bước nào -- cứ thao tác trên trang, code sẽ hiện ở đây. Giữ Alt + rê chuột để chọn đúng phần tử.</div>'}</div>`);
+      ${testBar(testing ? { running: true } : s.test)}<div class="list">${s.steps.length ? (view === 'code' ? codeView(s) : cards()) : '<div class="empty">Chưa có bước nào -- cứ thao tác trên trang, code sẽ hiện ở đây. Giữ Alt + rê chuột để chọn đúng phần tử.</div>'}</div>`;
+    if (html === lastPanel && ui.panel.firstChild) return; // làm mới định kỳ mà không có gì đổi -> không vẽ lại (đỡ giật, không mất chỗ đang rê / cuộn)
+    lastPanel = html;
+    setHTML(ui.panel, html);
     ui.panel.querySelector('.list').scrollTop = scroll;
   }
   const upd = (stepId, patch) => call({ op: 'update', stepId, patch }).then((s) => { render(s); const x = s && s.steps.find((y) => y.id === stepId); highlight(x && x.levels ? x.levels[x.level].css : null); });
@@ -1220,10 +1226,10 @@ function pageRecorder() {
     if (!op) return;
     if (op === 'close') { open = false; ui.panel.hidden = true; highlight(null); return; }
     if (op === 'view') { view = view === 'code' ? 'cards' : 'code'; expK = -1; draw(st); return; }
-    if (op === 'test') { st.test = { running: true }; draw(st); call({ op: 'testRun' }).then(render); return; }
+    if (op === 'test') { testing = true; draw(st); call({ op: 'testRun' }).then((s) => { testing = false; render(s); }); return; } // testing: đợt làm mới định kỳ về trước không đè lại kết quả cũ
     if (op === 'tclose') { call({ op: 'testClear' }).then(render); return; }
     if (op === 'bstart' || op === 'bend') { call({ op: op === 'bstart' ? 'branchStart' : 'branchEnd' }).then((s) => { render(s); toast(op === 'bstart' ? '⑂ Đã mở Nhánh -- chọn (giữ Alt) từng phần tử có thể hiện ra, mỗi cái 1 nhánh' : 'Đã đóng Nhánh'); }); return; }
-    if (op === 'copy') { copyText(st.code); btn.textContent = 'Đã copy ✓'; setTimeout(() => draw(st), 1200); return; }
+    if (op === 'copy') { copyText(st.code); btn.textContent = 'Đã copy ✓'; setTimeout(() => { lastPanel = ''; draw(st); }, 1200); return; }
     if (op === 'rec') { recToggle(); return; }
     if (op === 'export') { recExport(); return; }
     if (op === 'clear') { call({ op: 'clear' }).then(render); return; } // không hỏi lại (confirm() bị Playwright tự đóng) -- xoá nhầm thì bấm Khôi phục
