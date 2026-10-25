@@ -2237,3 +2237,98 @@ document.getElementById('recStopBtn').addEventListener('click', async () => {
   updateRecBar(null);
   showToast('Đã dừng record');
 });
+
+// ---- Gợi ý hàm khi gõ: danh sách ở public/fncatalog.js (gõ "c" ra clickEl, "i" ra if..., "w" ra while / waitEl -- không dấu cũng tìm
+// được). Tự hiện khi gõ chữ ở đầu câu lệnh (đầu dòng, sau await / ; / { / `) `), Ctrl+Space để gọi ở chỗ bất kỳ. Chọn -> chèn đoạn code đúng
+// thụt lề, thêm require còn thiếu lên đầu file, bôi đen sẵn 'SELECTOR' để dán selector vào.
+const FX_LIB_FILES = ['helpers.js', 'xlv1_actions.js', 'xlv1_humanInput.js']; // file định nghĩa chính các hàm người thật -- không gợi ý / biến đổi trong đó
+const fxBase = (n) => String(n || '').split(/[\\/]/).pop();
+function fnWordAt(cm) {
+  const cur = cm.getCursor(), line = cm.getLine(cur.line);
+  let s = cur.ch; while (s > 0 && /[\w$]/.test(line[s - 1])) s--;
+  return { from: CodeMirror.Pos(cur.line, s), to: cur, word: line.slice(s, cur.ch), before: line.slice(0, s) };
+}
+function fnInsert(cm, data, c) {
+  const f = c.fn, w = data.w, indent = (cm.getLine(w.from.line).match(/^\s*/) || [''])[0];
+  let code = /\bawait\s+$/.test(w.before) ? f.code.replace(/^await /, '') : f.code;
+  code = code.split('\n').join('\n' + indent);
+  const plan = window.FN_TRANSFORM ? window.FN_TRANSFORM.planRequires(cm.getValue(), f.req) : { edits: [], lines: [] }, req = plan.lines; // xét trên code TRƯỚC khi chèn (`const text = await getText(...)` không phải khai báo getText)
+  cm.operation(() => {
+    for (const e of plan.edits) if (e.line !== data.from.line) cm.replaceRange(e.text, CodeMirror.Pos(e.line, 0), CodeMirror.Pos(e.line, cm.getLine(e.line).length), '+fnhint'); // module đã require -> gộp tên mới vào dòng đó (chỉ đổi 1 dòng, không lệch vị trí chèn)
+    cm.replaceRange(code, data.from, data.to, '+fnhint');
+    let start = cm.indexFromPos(data.from), end = start + code.length;
+    if (plan.edits.length) showToast('Đã thêm: ' + plan.edits.map((e) => `${e.names.join(', ')} ← ${e.mod}`).join(' · '));
+    if (req.length) { // chèn sau khối require ở đầu file (giống FN_TRANSFORM.addRequires)
+      let at = 0; for (let i = 0; i < Math.min(cm.lineCount(), 60); i++) if (/require\(/.test(cm.getLine(i)) || /^\s*useLog\(/.test(cm.getLine(i))) at = i + 1;
+      const add = req.join('\n') + '\n', atIdx = cm.indexFromPos(CodeMirror.Pos(at, 0));
+      cm.replaceRange(add, CodeMirror.Pos(at, 0), undefined, '+fnhint');
+      if (atIdx <= start) { start += add.length; end += add.length; }
+      showToast('Đã thêm: ' + req.filter((l) => /require/.test(l)).map((l) => l.replace(/^const \{ (.*) \} = require\('(.*)'\);$/, '$1 ← $2')).join(' · '));
+    }
+    const m = /SELECTOR\w*|TEXT|VALUE|\bX\b|https:\/\//.exec(cm.getValue().slice(start, end));
+    if (m) cm.setSelection(cm.posFromIndex(start + m.index), cm.posFromIndex(start + m.index + m[0].length));
+    else { const nl = code.indexOf('\n' + indent + '  \n'); cm.setCursor(cm.posFromIndex(nl >= 0 ? start + nl + indent.length + 3 : end)); } // khối rỗng { } -> con trỏ vào trong
+  });
+}
+function fnHint(cm, opts) {
+  if (!window.FN_CATALOG || FX_LIB_FILES.includes(fxBase(activeTab))) return null;
+  const w = fnWordAt(cm);
+  if (!w.word && !opts.manual) return null;
+  const list = w.word ? window.FN_CATALOG.search(window.FN_CATALOG.CATALOG, w.word, 12) : window.FN_CATALOG.CATALOG;
+  if (!list.length) return null;
+  const data = { from: w.from, to: w.to, w, list: list.map((fn) => ({ text: fn.code, fn, hint: fnInsert, render: (el) => {
+    const b = document.createElement('b'); b.textContent = fn.name;
+    const d = document.createElement('span'); d.className = 'fn-hint-desc'; d.textContent = fn.desc || '';
+    const g = document.createElement('span'); g.className = 'fn-hint-group'; g.textContent = fn.group;
+    el.append(b, d, g);
+  } })) };
+  return data;
+}
+if (typeof CodeMirror !== 'undefined' && editor.showHint) {
+  const showFnHint = (cm, manual) => cm.showHint({ hint: fnHint, completeSingle: false, manual, closeCharacters: /[\s()\[\]{};:>,.'"`=]/ });
+  editor.addKeyMap({ 'Ctrl-Space': (cm) => showFnHint(cm, true) });
+  editor.on('inputRead', (cm, ch) => {
+    if (ch.origin !== '+input' || cm.state.completionActive || !/^[A-Za-z]$/.test(ch.text[0] || '')) return;
+    const tok = cm.getTokenAt(cm.getCursor());
+    if (/string|comment/.test(tok.type || '')) return;
+    const w = fnWordAt(cm);
+    if (w.word.length === 1 && /^(\s*|.*[;{}]\s*|.*\bawait\s+|.*\)\s+)$/.test(w.before)) showFnHint(cm, false); // chỉ ở đầu câu lệnh -- gõ tên biến giữa dòng không bị bật
+  });
+}
+
+// ---- Nút ⇄ Biến đổi: quét file đang mở, đổi lệnh Playwright thô (con trỏ nhảy cóc, gõ tức thì) sang hàm người thật của project
+// (public/fntransform.js): page.click / loc.click -> clickEl, fill -> typeEl, mouse.move -> moveMouseVisibly, waitForTimeout -> pause...
+// Xem trước từng chỗ, bỏ tick chỗ không muốn đổi; Áp dụng = 1 lần Ctrl+Z là hoàn tác.
+const fxOverlay = document.getElementById('fxOverlay'), fxList = document.getElementById('fxList'), fxAll = document.getElementById('fxAll');
+let fxSrc = '', fxChanges = [];
+function openTransform() {
+  if (needOpenFile()) return;
+  if (!window.FN_TRANSFORM) return showToast('Không tải được fntransform.js', true);
+  if (FX_LIB_FILES.includes(fxBase(activeTab))) return showToast(`${fxBase(activeTab)} là file định nghĩa chính các hàm người thật -- không biến đổi (sẽ tự gọi lại chính nó)`, true);
+  fxSrc = editor.getValue(); fxChanges = window.FN_TRANSFORM.findChanges(fxSrc);
+  if (!fxChanges.length) return showToast('Không có lệnh nào cần đổi -- file đã dùng hàm người thật');
+  const req = window.FN_TRANSFORM.requireLines(fxSrc, window.FN_TRANSFORM.mergeReq(fxChanges.map((c) => c.req)));
+  document.getElementById('fxSummary').innerHTML = `Tìm thấy <b>${fxChanges.length}</b> lệnh nhảy cóc / gõ tức thì trong <b>${escapeHtmlFx(fxBase(activeTab))}</b>.${req.length ? ` Sẽ thêm lên đầu file: <code>${req.map(escapeHtmlFx).join('</code> <code>')}</code>` : ''}`;
+  fxList.innerHTML = fxChanges.map((c, i) => `<label class="fx-row"><input type="checkbox" data-i="${i}" checked><span class="fx-line">${c.line}</span><span class="fx-code"><span class="fx-before">${escapeHtmlFx(c.before)}</span><span class="fx-after">${escapeHtmlFx(c.after)}</span></span></label>`).join('');
+  fxAll.checked = true;
+  fxOverlay.hidden = false;
+}
+const escapeHtmlFx = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+function applyTransform() {
+  const picked = [...fxList.querySelectorAll('input[data-i]:checked')].map((x) => fxChanges[+x.dataset.i]);
+  fxOverlay.hidden = true;
+  if (!picked.length) return;
+  if (editor.getValue() !== fxSrc) return showToast('File đã đổi trong lúc xem trước -- bấm ⇄ Biến đổi lại', true);
+  const out = window.FN_TRANSFORM.applyChanges(fxSrc, picked);
+  if (typeof editor.operation === 'function') { // thay cả file trong 1 lần sửa -> Ctrl+Z hoàn tác 1 phát, giữ vị trí cuộn
+    const scroll = editor.getScrollInfo(), cur = editor.getCursor();
+    editor.operation(() => { editor.replaceRange(out, CodeMirror.Pos(0, 0), CodeMirror.Pos(editor.lastLine()), '+fntransform'); editor.setCursor(cur); });
+    editor.scrollTo(scroll.left, scroll.top);
+  } else editor.setValue(out);
+  showToast(`Đã đổi ${picked.length} lệnh sang hàm người thật (Ctrl+Z để hoàn tác)`);
+}
+document.getElementById('transformBtn').addEventListener('click', openTransform);
+document.getElementById('fxApplyBtn').addEventListener('click', applyTransform);
+for (const id of ['fxCloseBtn', 'fxCancelBtn']) document.getElementById(id).addEventListener('click', () => { fxOverlay.hidden = true; });
+fxOverlay.addEventListener('click', (e) => { if (e.target === fxOverlay) fxOverlay.hidden = true; });
+fxAll.addEventListener('change', () => { for (const x of fxList.querySelectorAll('input[data-i]')) x.checked = fxAll.checked; });

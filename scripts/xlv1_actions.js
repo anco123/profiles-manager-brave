@@ -120,6 +120,32 @@ async function typeEl(el, text, opts = {}) {
   return true;
 }
 
+// Nhấp đúp / chuột phải: đi chuột thật tới phần tử (hoverEl -> moveMouseVisibly), dừng ngắm như người rồi mới nhấn TẠI CHỖ con trỏ đang
+// đứng (không nhảy cóc). Nhấp đúp: 2 lần nhấn sát nhau (humanPressMouse ngắm tới gần 1s -- quá ngưỡng nhấp đúp của trình duyệt).
+async function pressHere(page, button = 'left', clickCount = 1) { await page.mouse.down({ button, clickCount }); await page.waitForTimeout(45 + Math.random() * 70); await page.mouse.up({ button, clickCount }); } // lần nhấn thứ 2 clickCount 2 -> trình duyệt nổ dblclick
+async function dblClickEl(el, timeout = 15000) {
+  const t = first(el);
+  if (!(await waitEl(t, timeout)) || !(await hoverEl(t))) return false;
+  const page = t.page();
+  await page.waitForTimeout(150 + Math.random() * 250);
+  await pressHere(page); await page.waitForTimeout(60 + Math.random() * 80); await pressHere(page, 'left', 2);
+  return true;
+}
+async function rightClickEl(el, timeout = 15000) {
+  const t = first(el);
+  if (!(await waitEl(t, timeout)) || !(await hoverEl(t))) return false;
+  await t.page().waitForTimeout(150 + Math.random() * 250);
+  await pressHere(t.page(), 'right');
+  return true;
+}
+// Tick / bỏ tick checkbox, radio, switch: đang đúng trạng thái rồi thì thôi, không thì clickEl (đi chuột thật). on=false: bỏ tick.
+async function checkEl(el, on = true, timeout = 15000) {
+  const t = first(el);
+  if (!(await waitEl(t, timeout))) return false;
+  const cur = await t.isChecked().catch(() => null);
+  return cur === on ? true : clickEl(t, timeout);
+}
+
 // Lấy chữ của phần tử ('' nếu không có)
 async function getText(el) { return (await first(el).innerText({ timeout: 5000 }).catch(() => '')).trim(); }
 
@@ -204,4 +230,4 @@ async function closeOtherTabs(pageOrEl) {
   return main;
 }
 
-module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs };
+module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs, dblClickEl, rightClickEl, checkEl };

@@ -31,17 +31,21 @@
  */
 
 const fs = require('fs');
+const path = require('path');
+// Danh sách hàm dùng chung với editor (public/fncatalog.js) -- bảng Alt gõ tên hàm để chọn việc làm với phần tử
+const { CATALOG } = require(path.join(__dirname, 'public', 'fncatalog.js'));
+const PICK_FNS = CATALOG.filter((f) => f.act).map((f) => ({ act: f.act, name: f.name, desc: f.desc, keys: `${f.id} ${f.keys}` }));
 
 const recorders = {}; // id profile -> { enabled, recording, segOpen, steps, seq, segFrom, exports, exportSeq, tabSeq, sources, undo }
 // segOpen: đang có 1 đoạn chưa xuất (đang ghi HOẶC tạm dừng); recording: đang ghi thật -- tạm dừng = segOpen && !recording
 
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
-const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', ifHover: 'If hiện → Hover', loop: 'While', branch: 'Nhánh', forEach: 'Với từng item', getText: 'Lấy text', clickTab: 'Click → tab mới (if + đóng tab phụ)', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
+const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', ifHover: 'If hiện → Hover', loop: 'While', branch: 'Nhánh', forEach: 'Với từng item', getText: 'Lấy text', scroll: 'Cuộn tới', dblclick: 'Nhấp đúp', rightClick: 'Chuột phải', check: 'Tick chọn', uncheck: 'Bỏ tick', pressKey: 'Click + phím', upload: 'Tải file lên', getAttr: 'Lấy thuộc tính', count: 'Đếm', clickTab: 'Click → tab mới (if + đóng tab phụ)', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
 // Nhãn hành động cho bước nằm TRONG While -- trong vòng lặp mọi bước đều là "if đang hiện thì ..." (click / ifClick như nhau)
 const LOOP_ACTIONS = { click: 'If có → Click', type: 'If có → Gõ', hover: 'If có → Hover', loopBreak: 'If có → Break (thoát While)', loopFail: 'If có → Báo lỗi', skip: 'Bỏ qua' };
 // Nhãn hành động cho bước nằm trong Nhánh -- mỗi bước là 1 nhánh của waitAny: cái này hiện trước thì làm gì
 const BRANCH_ACTIONS = { click: 'Hiện trước → Click', type: 'Hiện trước → Gõ', hover: 'Hiện trước → Hover', wait: 'Hiện trước → Chỉ chờ', loopFail: 'Hiện trước → Báo lỗi', skip: 'Bỏ qua' };
-const HEADER = "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs } = require('./xlv1_actions');\nuseLog(log);\n\n";
+const HEADER = "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs, dblClickEl, rightClickEl, checkEl } = require('./xlv1_actions');\nuseLog(log);\n\n";
 
 // Selector dựa vào CHỮ hiện ra (tên nút, aria-label, placeholder...) -- mỗi profile 1 locale nên chữ có thể khác nhau giữa các profile
 const isLangCode = (code) => /getByRole\([^)]*name:|getByText\(|getByPlaceholder\(|getByLabel\(|getByTitle\(|getByAltText\(|\[(aria-label|placeholder|title|alt)=/.test(code || '');
@@ -95,6 +99,15 @@ function stepCode(s, P = 'page') {
     case 'loop': return +s.timeout > 0 ? `const end${s.id} = Date.now() + ${+s.timeout * 1000}; // While: lặp tới khi gặp break, tối đa ${+s.timeout} giây -- mỗi vòng xét lần lượt các if, gặp cái nào thì làm rồi quét lại từ đầu`
       : `while (true) { // While: lặp tới khi gặp break -- mỗi vòng xét lần lượt các if, gặp cái nào thì làm rồi quét lại từ đầu`;
     case 'getText': return `const text${s.id} = await getText(${sel}); log('text: ' + text${s.id});`;
+    case 'scroll': return `await scrollEl(${sel});`;
+    case 'dblclick': return `await dblClickEl(${sel});`;
+    case 'rightClick': return `await rightClickEl(${sel});`;
+    case 'check': return `await checkEl(${sel});`;
+    case 'uncheck': return `await checkEl(${sel}, false);`;
+    case 'pressKey': return `await clickEl(${sel}); await ${P}.keyboard.press(${q(s.text || 'Enter')});`;
+    case 'upload': return `await ${sel}.setInputFiles(${s.text ? txt : q('duong/dan/file')});`;
+    case 'getAttr': return `const attr${s.id} = await ${sel}.getAttribute(${q(s.text || 'href')}); log('attr: ' + attr${s.id});`;
+    case 'count': return `const n${s.id} = await ${sel}.count(); log('số phần tử: ' + n${s.id});`;
     case 'forEach': { // gộp từ các click lặp lại: với từng item trong danh sách, làm 1 việc trên phần tử bên trong item
       const L = withP(`page.locator(${q(s.list)})`, P, s.frame), list = +s.limit > 0 ? `(await ${L}.all()).slice(0, ${+s.limit})` : `await ${L}.all()`;
       return `for (const item${s.id} of ${list}) await ${s.innerAction === 'hover' ? 'hoverEl' : 'clickEl'}(item${s.id}.locator(${q(s.inner)})); // với từng item`;
@@ -138,7 +151,7 @@ function bodyLines(steps, opt = {}) {
   const vars = tabVars(steps), loops = loopIds(steps), brs = branchIds(steps), out = [];
   const parent = (x) => (loops.has(x.loop) ? 'L' + x.loop : brs.has(x.br) ? 'B' + x.br : vars[x.tab] ? 'T' + x.tab : '');
   const push = (t, id, more) => out.push({ t, id, ...more });
-  const okWrap = (c) => c.replace(/^await (clickEl|typeEl|hoverEl|waitEl|waitGone)\((.*)\);(\s*\/\/.*)?$/, '__pmOk(await $1($2));$3');
+  const okWrap = (c) => c.replace(/^await (clickEl|typeEl|hoverEl|waitEl|waitGone|scrollEl|dblClickEl|rightClickEl|checkEl)\((.*)\);(\s*\/\/.*)?$/, '__pmOk(await $1($2));$3');
   const emit = (key, ind) => {
     for (const s of steps.filter((x) => parent(x) === key)) {
       const P = vars[s.tab] || 'page';
@@ -226,7 +239,7 @@ function stateOf(id) {
   const extra = (s) => ({ ...loopInfo(s), code: codeOf(s), tabVar: vars[s.tab], inLoop: loops.has(s.loop), inBranch: brs.has(s.br), lang: !!s.levels && isLangCode(s.custom || ((s.levels[s.level] || {}).alts || [])[s.alt]?.code || ((s.levels[s.level] || {}).alts || [])[0]?.code), bkCode: backupOf({ ...s, backup: true })?.code, bkOn: !!backupOf(s),
     kids: s.action === 'branch' ? r.steps.filter((x) => x.br === s.id).length : undefined });
   return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, openLoop: loops.has(r.openLoop) ? r.openLoop : null, openBranch: brs.has(r.openBranch) ? r.openBranch : null, loopActions: LOOP_ACTIONS, branchActions: BRANCH_ACTIONS,
-    lines: bodyLines(r.steps, { view: true }), test: r.test || null, canRun: !!r.run, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), actions: ACTIONS, code: buildCode(r.steps) };
+    lines: bodyLines(r.steps, { view: true }), test: r.test || null, canRun: !!r.run, fns: PICK_FNS, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), actions: ACTIONS, code: buildCode(r.steps) };
 }
 
 // Dừng 1 đoạn -> code của các bước ghi trong đoạn đó (id >= segFrom) vào hàng đợi; editor hỏi /recorder?since=... rồi tự chèn
@@ -336,12 +349,17 @@ async function countLocs(page, codes) {
 async function perform(r, page, s) {
   const loc = locOf(page, withP(selOf(s), 'page', s.frame));
   if (!loc) return;
-  const { clickEl, hoverEl, typeEl } = require('./scripts/xlv1_actions');
+  const { clickEl, hoverEl, typeEl, scrollEl, dblClickEl, rightClickEl, checkEl } = require('./scripts/xlv1_actions');
   r.recording = false;
   try {
     let ok = true;
     if (['hover', 'ifHover'].includes(s.action)) ok = await hoverEl(loc);
     else if (['click', 'ifClick'].includes(s.action)) ok = await clickEl(loc, 5000);
+    else if (s.action === 'dblclick') ok = await dblClickEl(loc, 5000);
+    else if (s.action === 'rightClick') ok = await rightClickEl(loc, 5000);
+    else if (s.action === 'check' || s.action === 'uncheck') ok = await checkEl(loc, s.action === 'check', 5000);
+    else if (s.action === 'scroll') ok = await scrollEl(loc);
+    else if (s.action === 'pressKey') { ok = await clickEl(loc, 5000); if (ok) await page.keyboard.press(s.text || 'Enter'); }
     else if (['type', 'ifType'].includes(s.action) && !String(s.text ?? '').startsWith('=')) ok = await typeEl(loc, String(s.text ?? ''), { enter: !!s.enter, timeout: 5000 });
     s.error = ok ? null : 'làm trên trang không được (không thấy phần tử / bị lớp khác đè) -- xem lại selector hoặc chọn lớp khác';
   } catch (err) { s.error = 'làm trên trang lỗi: ' + String(err.message || err).split('\n')[0].slice(0, 120); } finally {
@@ -555,6 +573,10 @@ function pageRecorder() {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable) return clean(labelOf(el) || el.getAttribute('placeholder') || el.getAttribute('title')).slice(0, 60);
     return clean(el.innerText || el.textContent).slice(0, 60);
   }
+  // getByRole(name) chỉ khớp khi vai trò đó LẤY TÊN TỪ CHỮ BÊN TRONG (button, link, heading...) -- li / dialog / article... không (getByRole
+  // ('listitem', { name: '1' }) khớp 0 cái) trừ khi có aria-label; ô nhập / ảnh lấy tên từ label / placeholder / alt
+  const NAME_FROM_TEXT = new Set(['button', 'link', 'heading', 'checkbox', 'radio', 'switch', 'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'option', 'treeitem', 'cell', 'gridcell', 'columnheader', 'rowheader', 'row', 'tooltip']);
+  const roleName = (el, role) => (NAME_FROM_TEXT.has(role) || el.hasAttribute('aria-label') || el.hasAttribute('aria-labelledby') || ['INPUT', 'TEXTAREA', 'SELECT', 'IMG'].includes(el.tagName) || el.isContentEditable ? nameOf(el) : '');
   const isVis = (el) => { const b = el.getBoundingClientRect(); return b.width > 0 && b.height > 0 && getComputedStyle(el).visibility !== 'hidden'; };
   // Trùng nhiều cái: chỉ 1 cái đang hiện (bản ẩn của layout mobile/desktop, menu ẩn...) -> .filter({ visible: true }); không thì mới dùng vị trí .nth()
   function withNth(code, list, el) {
@@ -580,9 +602,9 @@ function pageRecorder() {
     const tid = el.getAttribute('data-testid');
     if (tid) alts.push({ kind: 'testid', ...withNth(`${pre}.getByTestId(${sq(tid)})`, all(`[data-testid="${cssEsc(tid)}"]`), el) });
     if (top && el.id && goodId(el.id)) alts.push({ kind: 'id', ...withNth(`${pre}.locator(${sq('#' + cssEsc(el.id))})`, all('#' + cssEsc(el.id)), el) }); // id trùng cũng có (trang viết ẩu) -> đếm như các selector khác
-    const role = roleOf(el), name = nameOf(el);
+    const role = roleOf(el), name = roleName(el, role);
     if (role && name && name.length <= 50) {
-      const same = all('*').filter((n) => n === el || (roleOf(n) === role && nameOf(n) === name && isVis(n)));
+      const same = all('*').filter((n) => n === el || (roleOf(n) === role && roleName(n, role) === name && isVis(n)));
       alts.push({ kind: 'role', ...withNth(`${pre}.getByRole(${sq(role)}, { name: ${sq(name)}, exact: true })`, same, el) });
     }
     for (const a of ['name', 'placeholder', 'aria-label', 'type', 'href']) {
@@ -878,11 +900,37 @@ function pageRecorder() {
     drawPick();
     if (css) call({ op: 'count', codes: [pick.custom] }).then((res) => { if (pick && res && res.counts && res.counts[0]) { pick.customCount = res.counts[0].all; drawAltSelect(); } });
   }
-  // Nhóm nút hành động ở bảng Alt. Đang mở While: mọi lựa chọn là "if đang hiện thì ..." trong vòng lặp (nhãn theo state.loopActions)
-  const PICK_GROUPS = [['Làm ngay', ['click', 'type', 'hover', 'getText']], ['Chờ', ['wait', 'waitGone']], ['If hiện (chờ tối đa 5s, không có thì bỏ qua)', ['ifClick', 'ifType', 'ifHover']]];
-  const LOOP_GROUPS = [['Trong While -- mỗi vòng xét lần lượt, gặp cái nào thì làm rồi quét lại', ['click', 'type', 'hover', 'loopBreak', 'loopFail']]];
-  const BRANCH_GROUPS = [['Nhánh -- chờ nhiều cái, cái nào hiện TRƯỚC thì làm việc của nó', ['click', 'type', 'hover', 'wait', 'loopFail']]];
-  const groupsNow = () => (st && st.openLoop ? LOOP_GROUPS : st && st.openBranch ? BRANCH_GROUPS : PICK_GROUPS);
+  // Bảng Alt KHÔNG còn nút hàm: gõ tên việc / hàm (c -> clickEl, i -> If hiện..., w -> While / waitEl, n -> Nhánh, đ / dong -> Đóng...)
+  // rồi ↑ ↓ Enter hoặc bấm chuột. Danh sách theo ngữ cảnh: thường = hàm có act trong public/fncatalog.js (server gửi state.fns) + mở
+  // While / Nhánh; trong While / Nhánh = các nhánh "If có → ..." / "Hiện trước → ..." + Đóng.
+  const foldVi = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\u0111/g, 'd').replace(/\u0110/g, 'D').toLowerCase();
+  function fnChoices() {
+    if (st && st.openLoop) return [...Object.entries(st.loopActions).filter(([a]) => a !== 'skip').map(([act, name]) => ({ act, name, keys: 'if co ' + act, desc: 'trong While' })), { cmd: 'wend', name: 'Đóng While', keys: 'dong end ket thuc while', desc: 'bước sau ghi như thường' }];
+    if (st && st.openBranch) return [...Object.entries(st.branchActions).filter(([a]) => a !== 'skip').map(([act, name]) => ({ act, name, keys: 'hien truoc ' + act, desc: 'nhánh của waitAny' })), { cmd: 'bend', name: 'Đóng Nhánh', keys: 'dong end ket thuc nhanh', desc: 'bước sau ghi như thường' }];
+    return [...((st && st.fns) || []), { cmd: 'wstart', name: '⟳ While -- lặp, bọc các If chọn sau', keys: 'while lap loop vong', desc: 'while (true), thoát bằng break' }, { cmd: 'bstart', name: '⑂ Nhánh -- cái nào hiện trước', keys: 'nhanh branch waitany', desc: 'waitAny([...]) + if / else if' }];
+  }
+  function fnSearch(q) {
+    const f = foldVi(q).trim();
+    if (!f) return [];
+    return fnChoices().map((it, i) => {
+      const words = foldVi(`${it.name} ${it.keys || ''}`).split(/[^a-z0-9]+/).filter(Boolean), head = words.slice(0, 2);
+      return { it, i, sc: head.some((w) => w.startsWith(f)) ? 3 : words.some((w) => w.startsWith(f)) ? 2 : words.join(' ').includes(f) ? 1 : 0 };
+    }).filter((x) => x.sc).sort((a, b) => b.sc - a.sc || a.i - b.i).slice(0, 10).map((x) => x.it);
+  }
+  const fnListHTML = () => {
+    pick.fnRes = fnSearch(pick.q);
+    if (!pick.q) return `<div class="fnh">Gõ tên việc / hàm: <b>c</b> click · <b>g</b> gõ · <b>i</b> if · <b>w</b> while / wait · <b>n</b> nhánh${st && (st.openLoop || st.openBranch) ? ' · <b>d</b> đóng' : ''} -- ↑ ↓ Enter để chọn</div>`;
+    if (!pick.fnRes.length) return '<div class="fnh">Không có hàm nào khớp</div>';
+    pick.qi = Math.min(pick.qi || 0, pick.fnRes.length - 1);
+    return pick.fnRes.map((x, i) => `<div class="fn${i === pick.qi ? ' on' : ''}" data-i="${i}" data-act="${x.act || x.cmd}"><b>${esc(x.name)}</b><span>${esc(x.desc || '')}</span></div>`).join('');
+  };
+  function runFn(x) {
+    if (!x) return;
+    if (x.act) return doPick(x.act);
+    const op = { wstart: 'loopStart', wend: 'loopEnd', bstart: 'branchStart', bend: 'branchEnd' }[x.cmd];
+    pick.q = ''; pick.qi = 0;
+    call({ op }).then((s) => { render(s); drawPick(); }); // bảng vẫn mở để chọn tiếp
+  }
   const labelsNow = () => (st && st.openLoop ? st.loopActions : st && st.openBranch ? st.branchActions : (st && st.actions) || {});
   const loopN = () => (st && st.openLoop ? st.steps.filter((x) => x.loop === st.openLoop).length : 0);
   const branchN = () => (st && st.openBranch ? st.steps.filter((x) => x.br === st.openBranch).length : 0);
@@ -891,7 +939,7 @@ function pageRecorder() {
     ? `<div class="wbar on"><b>⟳ Đang trong While</b><span>${loopN()} if</span>${live ? '' : '<button data-op="wend" title="Kết thúc vòng lặp -- bước sau ghi như thường">Đóng While</button>'}</div>`
     : st && st.openBranch
       ? `<div class="wbar on br"><b>⑂ Đang trong Nhánh</b><span>${branchN()} nhánh</span>${live ? '' : '<button data-op="bend" title="Kết thúc Nhánh -- bước sau ghi như thường">Đóng Nhánh</button>'}</div>`
-      : `<div class="wbar">${live ? '<span>⟳ While / ⑂ Nhánh: nhả Alt để mở</span>' : '<button data-op="wstart" title="Mở 1 vòng lặp while -- các If chọn sau đó nằm trong vòng lặp">⟳ Mở While</button><button data-op="bstart" title="Chờ nhiều phần tử, cái nào hiện trước thì làm việc của nó (waitAny)">⑂ Mở Nhánh</button>'}</div>`);
+      : '');
   // HTML đầy đủ của phần tử đang chọn (mọi thuộc tính, chữ bên trong, số con) -- để căn đúng phần tử; bảng đứng yên thì bấm thuộc tính
   // để thêm / bỏ vào 1 selector tự ghép (Playwright đếm số khớp ngay). Thuộc tính mờ = tự sinh / đổi theo lần tải, không nên dùng.
   function elBox(r) {
@@ -913,15 +961,19 @@ function pageRecorder() {
     if (!pick.live && r) html += `<div class="det">
       <div class="r"><select data-f="palt" class="grow"></select><button data-op="pedit" title="Tự sửa selector">✎</button></div>
       ${pick.editing ? `<div class="r"><input class="grow" data-f="pcustom" value="${esc(pick.custom || (pick.altObj || {}).code)}" title="Enter để lưu"></div>` : ''}
-      <div class="r"><input class="grow" data-f="ptext" value="${esc(pick.text)}" placeholder="Chữ để gõ (cho Gõ) -- bắt đầu bằng = để dùng biểu thức JS"><label class="lv"><input type="checkbox" data-f="penter" ${pick.enter ? 'checked' : ''}> Enter</label></div>
+      <div class="r"><input class="grow pq" data-f="pq" value="${esc(pick.q || '')}" placeholder="Gõ tên hàm: c → click, i → if, w → while..." autocomplete="off" spellcheck="false"></div>
+      <div class="fnl">${fnListHTML()}</div>
+      <div class="r"><input class="grow" data-f="ptext" value="${esc(pick.text)}" placeholder="Chữ / giá trị (Gõ, chọn option, tên phím, thuộc tính, file) -- = để dùng biểu thức JS"><label class="lv"><input type="checkbox" data-f="penter" ${pick.enter ? 'checked' : ''}> Enter</label></div>
       ${srcSelect('psrc')}
-      ${groupsNow().map(([g, list]) => `<div class="ag">${esc(g)}</div><div class="acts">${list.map((a) => `<button data-act="${a}" ${a === 'click' ? 'class="pri"' : ''}>${esc(labelsNow()[a] || a)}</button>`).join('')}</div>`).join('')}
       ${st && st.openLoop ? `<div class="r"><label class="lv" title="Làm xong (Click / Gõ / Hover) thì break -- thoát While"><input type="checkbox" data-f="pbreak" ${pick.thenBreak ? 'checked' : ''}> rồi Break</label>
         <label class="lv" title="Điều kiện if: có trong DOM (count() > 0, kể cả đang ẩn) thay vì phải đang hiện"><input type="checkbox" data-f="pdom" ${pick.dom ? 'checked' : ''}> có trong DOM (kể cả ẩn)</label></div>` : ''}
-      <label class="lv"><input type="checkbox" data-f="pdo" ${pick.perform ? 'checked' : ''}> Làm luôn trên trang (Click / Gõ / Hover)</label></div>`;
+      <label class="lv"><input type="checkbox" data-f="pdo" ${pick.perform ? 'checked' : ''}> Làm luôn trên trang (click, gõ, hover, nhấp đúp, tick...)</label></div>`;
+    const hadFocus = root.activeElement;
     setHTML(p, html);
     p.hidden = false;
     if (!pick.live && r) drawAltSelect();
+    const fi = p.querySelector(`[data-f=${(hadFocus && hadFocus.dataset && hadFocus.dataset.f) || 'pq'}]`) || p.querySelector('[data-f=pq]'); // bảng đứng yên: con trỏ ở sẵn ô gõ tên hàm (đang gõ ô khác thì giữ ô đó)
+    if (fi) { fi.focus(); if (fi.type === 'text' || fi.tagName === 'INPUT' && !fi.type.match(/checkbox/)) fi.setSelectionRange(fi.value.length, fi.value.length); }
     if (pick.live) { // bám theo con trỏ, lật sang bên kia nếu tràn màn hình
       const w = p.offsetWidth, h = p.offsetHeight;
       p.style.left = Math.max(4, mx + 18 + w > innerWidth ? mx - w - 18 : mx + 18) + 'px';
@@ -933,7 +985,7 @@ function pageRecorder() {
     const r = pick.rows[pick.sel];
     if (!r) return;
     const ch = chainFor(r.el, { level: 0, alts0: r.alts });
-    const perform = pick.perform && ['click', 'type', 'hover', 'ifClick', 'ifType', 'ifHover'].includes(action);
+    const perform = pick.perform && ['click', 'type', 'hover', 'ifClick', 'ifType', 'ifHover', 'dblclick', 'rightClick', 'check', 'uncheck', 'scroll', 'pressKey'].includes(action);
     const inLoop = !!(st && st.openLoop);
     send({ kind: 'pick', action, ...ch, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom, text: pick.text, enter: pick.enter, perform, thenBreak: inLoop && pick.thenBreak, cond: inLoop && pick.dom ? 'dom' : undefined });
     toast(`Đã ghi: ${labelsNow()[action] || action}${st && st.openLoop ? ' (trong While)' : st && st.openBranch ? ' (nhánh)' : ''}${perform ? ' (đang làm trên trang...)' : ''}`);
@@ -955,6 +1007,8 @@ function pageRecorder() {
     if (pick.live) return;
     const row = el.closest('.row'), btn = el.closest('button');
     if (row) { pick.attrs = null; pick.customCount = null; return selectRow(+row.dataset.i); }
+    const fn = el.closest('.fn');
+    if (fn) return runFn(pick.fnRes[+fn.dataset.i]);
     const at = el.closest('.at');
     if (at) return toggleFrag(at.dataset.frag);
     if (!btn) return;
@@ -1008,6 +1062,9 @@ function pageRecorder() {
     .elh{margin:6px 0 0;padding:6px;border:1px solid #2a2e3a;border-radius:8px;background:#0d0f15;font-family:Consolas,monospace;font-size:11px;max-height:30vh;overflow:auto}
     .elh .eh{color:#569cd6}.elh .at{color:#9cdcfe;padding:0 4px 0 14px;border-radius:4px;cursor:pointer;word-break:break-all}.elh .at:hover{background:#1a1d27}.elh .at.on{background:#e8a33d33;color:#f5b455}
     .elh .at.weak{opacity:.45}.elh .tx{color:#d4d4d4}.elh .kc{color:#6a9955}
+    .pq{font-size:13px;padding:6px 8px;border-color:#e8a33d}.fnl{margin:4px 0 6px;max-height:34vh;overflow:auto}.fnh{opacity:.6;font-size:11px;padding:3px 2px}
+    .fn{display:flex;gap:8px;align-items:baseline;padding:4px 6px;border-radius:6px;cursor:pointer}.fn b{white-space:nowrap;font-weight:600}.fn span{opacity:.6;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .fn:hover{background:#1a1d27}.fn.on{background:#e8a33d33;outline:1px solid #e8a33d}
     .det{border-top:1px solid #2a2e3a;margin-top:6px;padding-top:6px}.acts{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
     .toast{position:absolute;right:0;bottom:56px;background:#1a1d27;color:#e8e9ed;border:1px solid #e8a33d;border-radius:8px;padding:6px 10px;white-space:nowrap;box-shadow:0 4px 16px #0006}`;
 
@@ -1044,8 +1101,19 @@ function pageRecorder() {
     }
     else if (t === 'mouseup') dragEnd();
     else if (t === 'mouseover') onOver(el);
-    else if (t === 'keydown') { if (e.key === 'Escape') { if (pick) closePick(); else if (editing) { editing = null; draw(st); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur(); }
-    else if (t === 'input') { if (inPick && pick && el.dataset.f === 'ptext') pick.text = el.value; }
+    else if (t === 'keydown') {
+      if (inPick && pick && el.dataset.f === 'pq' && ['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) {
+        e.preventDefault();
+        if (e.key === 'Enter') return runFn((pick.fnRes || [])[pick.qi || 0]);
+        pick.qi = Math.max(0, Math.min((pick.fnRes || []).length - 1, (pick.qi || 0) + (e.key === 'ArrowDown' ? 1 : -1)));
+        setHTML(ui.pick.querySelector('.fnl'), fnListHTML()); return;
+      }
+      if (e.key === 'Escape') { if (pick) closePick(); else if (editing) { editing = null; draw(st); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur();
+    }
+    else if (t === 'input') {
+      if (inPick && pick && el.dataset.f === 'ptext') pick.text = el.value;
+      if (inPick && pick && el.dataset.f === 'pq') { pick.q = el.value; pick.qi = 0; setHTML(ui.pick.querySelector('.fnl'), fnListHTML()); }
+    }
     else if (t === 'click' || t === 'change') (inPick ? (pick && onPick(e, el)) : onPanel(e, el));
   }
   function onOver(el) {
@@ -1102,7 +1170,7 @@ function pageRecorder() {
   function unmount() { closePick(); if (host) host.remove(); if (hl) hl.remove(); window.__pmRecUI = null; ui = null; root = null; }
   function render(s) { if (!s) return; st = s; if (!s.enabled) return unmount(); if (ui) draw(s); }
   function refresh() { call({ op: 'state' }).then(render); }
-  const ELACTS = ['click', 'type', 'hover', 'wait', 'waitGone', 'ifClick', 'ifType', 'getText', 'select', 'skip'];
+  const ELACTS = ['click', 'type', 'hover', 'wait', 'waitGone', 'ifClick', 'ifType', 'ifHover', 'getText', 'select', 'dblclick', 'rightClick', 'check', 'uncheck', 'scroll', 'pressKey', 'upload', 'getAttr', 'count', 'skip'];
   // Tô màu code 1 dòng (chuỗi, từ khoá, chú thích, số) -- tách token trên chữ gốc rồi mới escape từng mảnh
   const hlJs = (t) => {
     const re = /('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|\/\/.*$|\/\^\(.*?\)\$\/|\b(?:await|const|let|if|else|while|for|of|break|continue|throw|new|true|false|null|try|catch)\b|\b\d+\b)/g;
@@ -1170,6 +1238,7 @@ function pageRecorder() {
       ${x.bkCode ? `<div class="r"><label class="lv" title="Ghép thêm 1 selector khác bằng .or(...) -- trang đổi 1 thuộc tính thì cái kia vẫn bắt được"><input type="checkbox" data-f="backup" ${x.bkOn ? 'checked' : ''}> dự phòng .or(${esc(x.bkCode.slice(0, 70))})</label></div>` : ''}
       ${editing === x.id ? `<div class="r"><input class="grow" data-f="custom" value="${esc(x.custom || (lv.alts[x.alt] || lv.alts[0] || {}).code)}" title="Enter để lưu, Esc để huỷ"></div>` : ''}
       ${['type', 'ifType', 'select'].includes(x.action) ? `<div class="r"><input class="grow" data-f="text" value="${esc(x.text)}" title="Bắt đầu bằng = để dùng biểu thức JS, VD: = row.D">${x.action !== 'select' ? `<label class="lv"><input type="checkbox" data-f="enter" ${x.enter ? 'checked' : ''}> Enter</label>` : ''}</div>${sugHTML(x)}${srcSelect('src')}` : ''}
+      ${['pressKey', 'upload', 'getAttr'].includes(x.action) ? `<div class="r"><span class="lv">${{ pressKey: 'phím', upload: 'file', getAttr: 'thuộc tính' }[x.action]}</span><input class="grow" data-f="text" value="${esc(x.text || '')}" placeholder="${{ pressKey: 'Enter / Escape / Tab / Control+A...', upload: 'đường dẫn file (= để dùng biểu thức JS)', getAttr: 'href' }[x.action]}"></div>` : ''}
       <div class="code">${esc(x.code || '// (bỏ qua)')}</div></div>`;
   }
   function draw(s) {
