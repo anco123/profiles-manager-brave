@@ -2180,13 +2180,14 @@ function updateRecBar(st) {
 }
 
 // Code record dùng tới mà file đang mở chưa có thì thêm vào đầu đoạn: require xlv1_actions, `row` (dòng Excel của profile), readGoogleSheetCell
-function recPrelude(body, header) {
+function recPrelude(body, header, req) {
   const cur = editor.getValue();
   let pre = cur.includes("require('./xlv1_actions')") ? '' : header || '';
-  const miss = ['clickNewTab', 'closeOtherTabs'].filter((f) => new RegExp(`\\b${f}\\(`).test(body) && !new RegExp(`\\b${f}\\b`).test(cur));
-  if (!pre && miss.length) pre += `const { ${miss.join(', ')} } = require('./xlv1_actions');\n`; // file require từ trước khi có 2 hàm này
-  if (/readGoogleSheetCell\(/.test(body) && !/require\(['"]\.\/readGoogleSheetCell['"]\)/.test(cur)) pre += "const { readGoogleSheetCell } = require('./readGoogleSheetCell');\n";
-  if (/\brow\.[A-Z]|readGoogleSheetCell\(row\b/.test(body) && !/\b(const|let|var)\s+row\b/.test(cur)) pre += 'const row = input ? JSON.parse(input) : {};\n';
+  const miss = ['clickNewTab', 'closeOtherTabs', 'dblClickEl', 'rightClickEl', 'checkEl'].filter((f) => new RegExp(`\\b${f}\\(`).test(body) && !new RegExp(`\\b${f}\\b`).test(cur));
+  if (!pre && miss.length) pre += `const { ${miss.join(', ')} } = require('./xlv1_actions');\n`; // file require từ trước khi có các hàm này
+  if (req && window.FN_TRANSFORM) { const r = { ...req }; delete r['./xlv1_actions']; for (const l of window.FN_TRANSFORM.requireLines(cur + '\n' + pre, r)) pre += l + '\n'; } // hàm gọi ở bảng ☰ của recorder: helpers, xlv1_humanInput, Excel...
+  if (/readGoogleSheetCell\(/.test(body) && !/require\(['"]\.\/readGoogleSheetCell['"]\)/.test(cur + pre)) pre += "const { readGoogleSheetCell } = require('./readGoogleSheetCell');\n";
+  if (/\brow\.[A-Z]|readGoogleSheetCell\(row\b/.test(body) && !/\b(const|let|var)\s+row\b/.test(cur + pre + body)) pre += 'const row = input ? JSON.parse(input) : {};\n';
   return pre + (pre && !pre.endsWith('\n\n') ? '\n' : '') + body;
 }
 
@@ -2198,7 +2199,7 @@ function applyRecExports(list, header) {
     if (!activeTab) { if (!recWaitWarned) showToast('Có code vừa ghi -- mở 1 file để chèn vào', true); recWaitWarned = true; return; } // giữ lại, lần poll sau (đã mở file) mới chèn
     recWaitWarned = false;
     recLastExport = e.id;
-    insertSnippetAtCursor(recPrelude(e.body, header));
+    insertSnippetAtCursor(recPrelude(e.body, header, e.req));
     showToast(`Đã chèn ${e.count} bước vừa ghi`);
   }
 }
@@ -2228,7 +2229,7 @@ document.getElementById('recInsertBtn').addEventListener('click', async () => {
   const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?require=0`)).json();
   if (!st.steps || !st.steps.length) return showToast('Chưa ghi bước nào', true);
   // recPrelude: đã require / khai báo row rồi thì không chèn lại (khai báo const trùng = lỗi cú pháp)
-  if (insertSnippetAtCursor(recPrelude(st.code, st.header))) showToast(`Đã chèn ${st.steps.length} bước`);
+  if (insertSnippetAtCursor(recPrelude(st.code, st.header, st.req))) showToast(`Đã chèn ${st.steps.length} bước`);
 });
 document.getElementById('recStopBtn').addEventListener('click', async () => {
   if (!recProfileId) return;
