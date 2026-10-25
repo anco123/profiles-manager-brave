@@ -27,6 +27,8 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/javascript/javascript.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/hint/show-hint.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/hint/show-hint.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link rel="stylesheet" href="style.css" />
 <link rel="stylesheet" href="editor.css" />
@@ -175,6 +177,7 @@
 
       <div class="editor-tabbar-row">
         <div class="editor-tabbar" id="tabBar"></div>
+        <button class="btn btn-ghost editor-save-btn" id="transformBtn" title="Đổi lệnh Playwright thô (page.click / fill / mouse.move / waitForTimeout...) sang hàm người thật của project (clickEl / typeEl / moveMouseVisibly / pause...) -- xem trước rồi mới áp dụng">⇄ Biến đổi</button>
         <button class="btn btn-ghost editor-save-btn" id="saveFileBtn" title="Save the active file (Ctrl/Cmd+S)">Save</button>
       </div>
 
@@ -350,12 +353,33 @@
   </div>
 </div>
 
+<!-- Nút ⇄ Biến đổi: xem trước các chỗ đổi sang hàm người thật, bỏ tick chỗ nào không muốn đổi -->
+<div class="snippet-modal-overlay" id="fxOverlay" hidden>
+  <div class="snippet-modal fx-modal">
+    <div class="snippet-modal-head">
+      <h2>⇄ Biến đổi sang hàm người thật</h2>
+      <button class="icon-btn" id="fxCloseBtn" aria-label="Close">&times;</button>
+    </div>
+    <div class="snippet-modal-body">
+      <p class="fx-summary" id="fxSummary"></p>
+      <div class="fx-list" id="fxList"></div>
+    </div>
+    <div class="snippet-modal-foot">
+      <label class="fx-all"><input type="checkbox" id="fxAll" checked /> Chọn hết</label>
+      <button class="btn btn-ghost" id="fxCancelBtn">Huỷ</button>
+      <button class="btn btn-primary" id="fxApplyBtn">Áp dụng</button>
+    </div>
+  </div>
+</div>
+
 <div class="selection-box" id="runSelectionBox" hidden></div>
 <div class="selection-box" id="logsSelectionBox" hidden></div>
 
 <div class="toast" id="toast" hidden></div>
 
 <script src="shared.js"></script>
+<script src="fncatalog.js"></script>
+<script src="fntransform.js"></script>
 <script src="editor.js"></script>
 </body>
 </html>

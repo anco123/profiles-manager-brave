@@ -278,7 +278,7 @@ function writeSnippets(snippets) {
 // Snippet thao tác mặc định (dùng scripts/xlv1_actions.js) -- nạp vào snippets.json 1 LẦN mỗi cái; id đã nạp ghi vào
 // snippets_seeded.json nên bạn xoá nút nào thì nó không tự hiện lại. Thêm snippet mới vào list này = lần chạy server sau tự có nút.
 const DEFAULT_SNIPPETS = [
-  ['act_require', 'Actions: require', "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs } = require('./xlv1_actions');\nuseLog(log);\n"],
+  ['act_require', 'Actions: require', "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs, dblClickEl, rightClickEl, checkEl } = require('./xlv1_actions');\nuseLog(log);\n"],
   ['act_click', 'Click', "await clickEl(page.locator('SELECTOR'));\n"],
   ['act_type', 'Input', "await typeEl(page.locator('SELECTOR'), 'TEXT');\n"],
   ['act_type_enter', 'Input + Enter', "await typeEl(page.locator('SELECTOR'), 'TEXT', { enter: true });\n"],
