@@ -2180,6 +2180,56 @@ function updateRecBar(st) {
 }
 
 // Code record dùng tới mà file đang mở chưa có thì thêm vào đầu đoạn: require xlv1_actions, `row` (dòng Excel của profile), readGoogleSheetCell
+// ---- ✨ Định dạng code bằng Prettier (tải từ CDN lần đầu dùng). Dòng dài tới 150 ký tự mới xuống dòng -- code gọn, ít xuống dòng.
+// Code script là THÂN 1 hàm async (có await / return ở ngoài cùng) -- parser babel của Prettier chấp nhận.
+const PRETTIER_CDN = 'https://cdn.jsdelivr.net/npm/prettier@3.3.3/';
+const PRETTIER_OPTS = { parser: 'babel', printWidth: 150, tabWidth: 2, singleQuote: true, semi: true, trailingComma: 'es5', arrowParens: 'always', bracketSpacing: true };
+let prettierLoading = null;
+function loadPrettier() {
+  if (window.prettier && window.prettierPlugins && window.prettierPlugins.babel && window.prettierPlugins.estree) return Promise.resolve();
+  const add = (f) => new Promise((ok, bad) => { const sc = document.createElement('script'); sc.src = PRETTIER_CDN + f; sc.onload = ok; sc.onerror = () => bad(new Error('không tải được ' + f)); document.head.appendChild(sc); });
+  if (!prettierLoading) prettierLoading = add('standalone.js').then(() => Promise.all([add('plugins/babel.js'), add('plugins/estree.js')])).catch((e) => { prettierLoading = null; throw e; });
+  return prettierLoading;
+}
+async function formatJs(code) {
+  await loadPrettier();
+  return window.prettier.format(code, { ...PRETTIER_OPTS, plugins: [window.prettierPlugins.babel, window.prettierPlugins.estree] });
+}
+// Lỗi cú pháp của Prettier -> 1 dòng dễ đọc (dòng mấy, lỗi gì)
+const fmtErr = (e) => String((e && e.message) || e).split('\n')[0].replace(/\s*\(\d+:\d+\)\s*$/, '') + (e && e.loc && e.loc.start ? ` (dòng ${e.loc.start.line})` : '');
+async function formatEditor() {
+  if (needOpenFile()) return;
+  const sel = typeof editor.somethingSelected === 'function' && editor.somethingSelected();
+  let a, b; // đoạn bôi đen -> lấy trọn các dòng của đoạn đó
+  if (sel) { const f = editor.getCursor('from'), t = editor.getCursor('to'), tl = t.ch === 0 && t.line > f.line ? t.line - 1 : t.line; a = CodeMirror.Pos(f.line, 0); b = CodeMirror.Pos(tl, editor.getLine(tl).length); }
+  const src = sel ? editor.getRange(a, b) : editor.getValue();
+  let out;
+  try { out = await formatJs(src); } catch (e) { return showToast('Không định dạng được: ' + fmtErr(e), true); }
+  if (sel) { // giữ thụt lề của dòng đầu đoạn cho cả đoạn
+    const ind = (src.match(/^[ \t]*/) || [''])[0];
+    out = out.replace(/\n$/, '').split('\n').map((l) => (l ? ind + l : l)).join('\n');
+    if (out !== src) editor.replaceRange(out, a, b, '+format');
+  } else if (out !== src) {
+    const cur = editor.getCursor(), scroll = editor.getScrollInfo();
+    editor.operation(() => { editor.replaceRange(out, CodeMirror.Pos(0, 0), CodeMirror.Pos(editor.lastLine()), '+format'); editor.setCursor(Math.min(cur.line, editor.lastLine()), 0); });
+    editor.scrollTo(scroll.left, scroll.top);
+  }
+  showToast(out === src ? 'Code đã gọn sẵn rồi' : '✨ Đã định dạng (Ctrl+Z để hoàn tác)');
+}
+document.getElementById('formatBtn').addEventListener('click', formatEditor);
+if (typeof editor.addKeyMap === 'function') editor.addKeyMap({ 'Shift-Alt-F': () => formatEditor() });
+// Code record chèn vào: định dạng trước (lỗi thì chèn nguyên văn), thụt lề theo chỗ con trỏ
+async function prettyInsert(code) {
+  let out = code;
+  try { out = (await formatJs(code)).replace(/\n$/, '') + '\n'; } catch {}
+  if (typeof editor.getCursor === 'function') {
+    const c = editor.getCursor(), line = editor.getLine(c.line), before = line.slice(0, c.ch);
+    if (/^\s+$/.test(before)) out = out.split('\n').map((l, i) => (i && l ? before + l : l)).join('\n');
+    if (!line.slice(c.ch).trim()) out = out.replace(/\n$/, ''); // phần còn lại của dòng trống -> không để thừa 1 dòng trống
+  }
+  return insertSnippetAtCursor(out);
+}
+
 function recPrelude(body, header, req) {
   const cur = editor.getValue();
   let pre = cur.includes("require('./xlv1_actions')") ? '' : header || '';
@@ -2199,7 +2249,7 @@ function applyRecExports(list, header) {
     if (!activeTab) { if (!recWaitWarned) showToast('Có code vừa ghi -- mở 1 file để chèn vào', true); recWaitWarned = true; return; } // giữ lại, lần poll sau (đã mở file) mới chèn
     recWaitWarned = false;
     recLastExport = e.id;
-    insertSnippetAtCursor(recPrelude(e.body, header, e.req));
+    prettyInsert(recPrelude(e.body, header, e.req));
     showToast(`Đã chèn ${e.count} bước vừa ghi`);
   }
 }
@@ -2229,7 +2279,7 @@ document.getElementById('recInsertBtn').addEventListener('click', async () => {
   const st = await (await fetch(`/api/profiles/${recProfileId}/recorder?require=0`)).json();
   if (!st.steps || !st.steps.length) return showToast('Chưa ghi bước nào', true);
   // recPrelude: đã require / khai báo row rồi thì không chèn lại (khai báo const trùng = lỗi cú pháp)
-  if (insertSnippetAtCursor(recPrelude(st.code, st.header, st.req))) showToast(`Đã chèn ${st.steps.length} bước`);
+  if (await prettyInsert(recPrelude(st.code, st.header, st.req))) showToast(`Đã chèn ${st.steps.length} bước`);
 });
 document.getElementById('recStopBtn').addEventListener('click', async () => {
   if (!recProfileId) return;
