@@ -286,12 +286,37 @@ createFileBtn.addEventListener('click', async () => {
   if (!/^[a-zA-Z0-9_-]+\.js$/.test(name)) {
     return showToast('Invalid name -- letters, numbers, - and _ only', true);
   }
-  await saveFile(name, `module.exports = {\n  // your function here\n};\n`);
+  const exist = await fetch('/api/scripts').then((r) => r.json()).catch(() => []);
+  if (exist.includes(name)) return showToast(`${name} đã có -- đặt tên khác (không ghi đè file cũ)`, true);
+  const code = newFileTemplate(name);
+  await saveFile(name, code);
   fileHomeFiles = null; // danh sách file có thêm file mới
-  await openFileTab(name, `module.exports = {\n  // your function here\n};\n`);
+  await openFileTab(name, code);
+  if (typeof editor.setCursor === 'function') { editor.setCursor({ line: 1, ch: 2 }); editor.focus(); } // con trỏ ở sẵn trong thân hàm
   fileMenu.hidden = true;
-  showToast(`Created ${name}`);
+  showToast(`Đã tạo ${name} -- code record sẽ vào trong hàm ${fileFnName(name)}()`);
 });
+
+// File mới = 1 hàm mang tên file (cùng tham số như script chạy: page, context, log, require, input) + module.exports + dòng require
+// (để sẵn dạng chú thích) để tự dán vào main.js. Code record chèn vào file này luôn nằm trong { } của hàm đó (xem recIntoFileFn).
+const fileFnName = (name) => { const n = name.replace(/\.js$/, '').replace(/[^\w$]/g, '_'); return /^\d/.test(n) ? '_' + n : n; };
+function newFileTemplate(name) {
+  const fn = fileFnName(name), mod = './' + name.replace(/\.js$/, '');
+  return `async function ${fn}(page, context, log, require, input) {\n  \n}\n\nmodule.exports = { ${fn} };\n// const { ${fn} } = require('${mod}'); // gửi vào main.js\n// await ${fn}(page, context, log, require, input); // gọi trong main.js\n`;
+}
+// File có hàm mang tên file (tạo bằng khung trên): con trỏ đang ở ngoài thân hàm -> đưa vào cuối thân hàm trước khi chèn code record
+function recIntoFileFn() {
+  if (!activeTab || typeof editor.indexFromPos !== 'function' || typeof topFunctions !== 'function') return;
+  const src = editor.getValue(), f = topFunctions(src).find((x) => x.name === fileFnName(activeTab));
+  if (!f) return;
+  const code = fnSource(src, f.start), open = src.indexOf('{', src.indexOf(')', f.start)) + 1, close = f.start + code.lastIndexOf('}');
+  const at = editor.indexFromPos(editor.getCursor());
+  if (open > 0 && at >= open && at <= close) return; // đang ở trong thân hàm rồi
+  const lineEnd = editor.posFromIndex(close), prev = lineEnd.line - 1;
+  if (prev >= 0 && editor.indexFromPos({ line: prev, ch: 0 }) >= open && !editor.getLine(prev).trim()) { if (!editor.getLine(prev)) editor.replaceRange('  ', { line: prev, ch: 0 }); editor.setCursor({ line: prev, ch: editor.getLine(prev).length }); return; } // dòng trống ngay trên } -> chèn ở đó
+  editor.replaceRange('\n  ', { line: prev, ch: editor.getLine(prev).length }); // chưa có dòng trống -> thêm 1 dòng ở cuối thân hàm (ngay trên })
+  editor.setCursor({ line: prev + 1, ch: 2 });
+}
 
 async function refreshFileMenu() {
   const res = await fetch('/api/scripts');
@@ -2220,6 +2245,7 @@ document.getElementById('formatBtn').addEventListener('click', formatEditor);
 if (typeof editor.addKeyMap === 'function') editor.addKeyMap({ 'Shift-Alt-F': () => formatEditor() });
 // Code record chèn vào: định dạng trước (lỗi thì chèn nguyên văn), thụt lề theo chỗ con trỏ
 async function prettyInsert(code) {
+  recIntoFileFn();
   let out = code;
   try { out = (await formatJs(code)).replace(/\n$/, '') + '\n'; } catch {}
   if (typeof editor.getCursor === 'function') {
