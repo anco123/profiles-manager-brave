@@ -2384,14 +2384,33 @@ for (const id of ['fxCloseBtn', 'fxCancelBtn']) document.getElementById(id).addE
 fxOverlay.addEventListener('click', (e) => { if (e.target === fxOverlay) fxOverlay.hidden = true; });
 fxAll.addEventListener('change', () => { for (const x of fxList.querySelectorAll('input[data-i]')) x.checked = fxAll.checked; });
 
-// ---- Nút 📤 Export hàm: các hàm khai báo ở ngoài cùng của file đang mở -> thêm vào module.exports của file đó (có rồi thì gộp) +
-// thêm `const { a, b } = require('./tên-file');` vào file chạy (mặc định main.js; đã require file này thì gộp tên vào dòng đó). Lưu cả 2 file.
-const xpOverlay = document.getElementById('xpOverlay'), xpList = document.getElementById('xpList'), xpTarget = document.getElementById('xpTarget');
+// ---- Nút 📤 Export hàm: các hàm khai báo ở ngoài cùng của file đang mở -> đưa vào 1 FILE CHỨA HÀM (chính file này, file có sẵn hoặc
+// file mới): chép code hàm sang (kèm các require nó dùng), thêm vào module.exports. Dòng `const { ... } = require('./file');` cho main.js
+// chỉ HIỆN RA để tự copy -- không bao giờ tự sửa main.js. File đang mở cũng không bị sửa khi đưa sang file khác (chỉ chép).
+const xpOverlay = document.getElementById('xpOverlay'), xpList = document.getElementById('xpList'), xpTarget = document.getElementById('xpTarget'), xpNewName = document.getElementById('xpNewName');
+const XP_SELF = '__self__', XP_NEW = '__new__';
 // Hàm ở ngoài cùng (đầu dòng, không thụt lề): function a() / async function a() / const a = (...) => / const a = async function...
+const TOP_FN_RE = /^(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(|^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/gm;
 function topFunctions(src) {
-  const out = [], re = /^(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(|^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/gm;
-  let m; while ((m = re.exec(src))) { const n = m[1] || m[2]; if (!out.includes(n)) out.push(n); }
+  const out = []; let m; TOP_FN_RE.lastIndex = 0;
+  while ((m = TOP_FN_RE.exec(src))) { const n = m[1] || m[2]; if (!out.some((x) => x.name === n)) out.push({ name: n, start: m.index }); }
   return out;
+}
+// Đoạn code của 1 hàm: từ dòng khai báo tới dấu } khớp của thân hàm (bỏ qua chuỗi / chú thích / template); arrow không có { } thì tới hết câu lệnh
+function fnSource(src, start) {
+  let i = start, depth = 0, opened = false;
+  const skipStr = (q) => { for (i++; i < src.length && src[i] !== q; i++) if (src[i] === '\\') i++; };
+  for (; i < src.length; i++) {
+    const c = src[i], n = src[i + 1];
+    if (c === '/' && n === '/') { while (i < src.length && src[i] !== '\n') i++; continue; }
+    if (c === '/' && n === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? src.length : e + 1; continue; }
+    if (c === "'" || c === '"' || c === '`') { skipStr(c); continue; }
+    if (c === '{') { depth++; opened = true; }
+    else if (c === '}') { depth--; if (opened && depth === 0) { i++; break; } }
+    else if (!opened && (c === ';' || c === '\n') && depth === 0 && /=>/.test(src.slice(start, i)) && !/=>\s*$/.test(src.slice(start, i))) break; // const f = (x) => x + 1;
+  }
+  if (src[i] === ';') i++;
+  return src.slice(start, i);
 }
 const EXPORTS_RE = /module\.exports\s*=\s*\{([\s\S]*?)\}\s*;?/;
 function exportedNames(src) {
@@ -2405,54 +2424,84 @@ function withExports(src, names) { // gộp tên vào module.exports = { ... } (
   const items = m[1].split(',').map((x) => x.trim()).filter(Boolean), have = items.map((x) => x.split(':')[0].trim());
   return src.slice(0, m.index) + `module.exports = { ${[...items, ...names.filter((n) => !have.includes(n))].join(', ')} };` + src.slice(m.index + m[0].length);
 }
+// require của file nguồn mà code các hàm chép sang có dùng tới -> { module: [tên] } để thêm vào file đích
+function usedRequires(src, code) {
+  const req = {};
+  for (const m of src.matchAll(/const\s*\{([^}]*)\}\s*=\s*require\(\s*['"]([^'"]+)['"]\s*\)/g)) {
+    const names = m[1].split(',').map((x) => x.trim().split(':').pop().trim()).filter((n) => n && new RegExp(`\\b${n}\\b`).test(code));
+    if (names.length) req[m[2]] = [...new Set([...(req[m[2]] || []), ...names])];
+  }
+  return req;
+}
 const xpModule = (name) => './' + name.replace(/\.js$/, '');
-async function xpRead(name) { // nội dung file: đang mở ở tab thì lấy bản trong editor (kể cả chưa lưu), không thì đọc từ đĩa
+const xpDest = () => (xpTarget.value === XP_SELF ? activeTab : xpTarget.value === XP_NEW ? (xpNewName.value.trim() ? xpNewName.value.trim().replace(/(\.js)?$/, '.js') : '') : xpTarget.value);
+async function xpRead(name) { // nội dung file: đang mở ở tab thì lấy bản trong editor (kể cả chưa lưu), không thì đọc từ đĩa ('' = chưa có)
   if (name === activeTab) return editor.getValue();
   if (openTabs.includes(name) && tabContents[name] != null) return tabContents[name];
-  const res = await fetch(`/api/scripts/${encodeURIComponent(name)}`);
-  return res.ok ? (await res.json()).code : '';
+  const res = await fetch(`/api/scripts/${encodeURIComponent(name)}`).catch(() => null);
+  return res && res.ok ? (await res.json()).code : '';
 }
-function xpPicked() { return [...xpList.querySelectorAll('input[data-n]:checked')].map((x) => x.dataset.n); }
-async function xpPreview() {
-  const names = xpPicked(), t = xpTarget.value, pre = document.getElementById('xpPreview');
-  if (!names.length || !t) { pre.textContent = '(chưa chọn hàm nào)'; return; }
-  const plan = window.FN_TRANSFORM.planRequires(await xpRead(t), { [xpModule(activeTab)]: names });
-  pre.textContent = plan.edits.length || plan.lines.length ? `${t}:\n${[...plan.edits.map((e) => e.text + '   // (gộp vào dòng có sẵn)'), ...plan.lines].join('\n')}` : `${t} đã require đủ các hàm này`;
+const xpPicked = () => [...xpList.querySelectorAll('input[data-n]:checked')].map((x) => x.dataset.n);
+const xpLine = () => { const names = xpPicked(), d = xpDest(); return names.length && d ? `const { ${names.join(', ')} } = require('${xpModule(d)}');` : ''; };
+function xpPreview() {
+  xpNewName.hidden = xpTarget.value !== XP_NEW;
+  document.getElementById('xpPreview').textContent = xpLine() || (xpPicked().length ? '(nhập tên file mới)' : '(chưa chọn hàm nào)');
 }
 async function openExportFns() {
   if (needOpenFile()) return;
   if (!window.FN_TRANSFORM) return showToast('Không tải được fntransform.js', true);
   const src = editor.getValue(), fns = topFunctions(src), done = exportedNames(src);
   if (!fns.length) return showToast('File này chưa có hàm nào khai báo ở ngoài cùng (function tên() / const tên = async () =>)', true);
-  document.getElementById('xpSummary').innerHTML = `<b>${escapeHtmlFx(activeTab)}</b> có <b>${fns.length}</b> hàm. Tick hàm cần dùng ở file khác -- sẽ thêm vào <code>module.exports</code> của file này và thêm dòng <code>require('${escapeHtmlFx(xpModule(activeTab))}')</code> vào file được chọn.`;
-  xpList.innerHTML = fns.map((n) => `<label class="fx-row xp-row"><input type="checkbox" data-n="${escapeHtmlFx(n)}" ${done.includes(n) ? 'checked' : ''}><span class="fx-code"><span class="fx-after xp-name">${escapeHtmlFx(n)}</span></span><span class="xp-tag">${done.includes(n) ? 'đã export' : ''}</span></label>`).join('');
-  const files = (await (await fetch('/api/scripts')).json().catch(() => [])).filter((f) => f !== activeTab).sort((a, b) => (a === 'main.js' ? -1 : b === 'main.js' ? 1 : a.localeCompare(b)));
-  xpTarget.innerHTML = files.map((f) => `<option value="${escapeHtmlFx(f)}">${escapeHtmlFx(f)}</option>`).join('');
-  document.getElementById('xpAll').checked = fns.every((n) => done.includes(n));
+  document.getElementById('xpSummary').innerHTML = `<b>${escapeHtmlFx(activeTab)}</b> có <b>${fns.length}</b> hàm. Tick hàm cần dùng, chọn file chứa hàm -- hàm được chép sang (kèm require nó dùng) và thêm vào <code>module.exports</code> của file đó. <b>main.js không bị đụng tới</b>: dòng require ở dưới bạn tự copy.`;
+  xpList.innerHTML = fns.map((f) => `<label class="fx-row xp-row"><input type="checkbox" data-n="${escapeHtmlFx(f.name)}"><span class="fx-code"><span class="fx-after xp-name">${escapeHtmlFx(f.name)}</span></span><span class="xp-tag">${done.includes(f.name) ? 'đã export ở file này' : ''}</span></label>`).join('');
+  const files = (await (await fetch('/api/scripts')).json().catch(() => [])).filter((f) => f !== activeTab && f !== 'main.js').sort((a, b) => a.localeCompare(b));
+  xpTarget.innerHTML = (activeTab !== 'main.js' ? `<option value="${XP_SELF}">chính file này (${escapeHtmlFx(activeTab)})</option>` : '') + files.map((f) => `<option value="${escapeHtmlFx(f)}">${escapeHtmlFx(f)}</option>`).join('') + `<option value="${XP_NEW}">+ File mới…</option>`;
+  if (activeTab === 'main.js') xpTarget.value = XP_NEW; // từ main.js: mặc định tạo file hàm mới (không sửa main.js)
+  xpNewName.value = '';
+  document.getElementById('xpAll').checked = false;
   xpOverlay.hidden = false;
   xpPreview();
 }
 async function applyExportFns() {
-  const names = xpPicked(), t = xpTarget.value;
+  const names = xpPicked(), dest = xpDest();
   if (!names.length) return showToast('Chưa chọn hàm nào', true);
-  if (!t) return showToast('Chưa có file nào để thêm require', true);
-  xpOverlay.hidden = true;
-  // 1) file đang mở: module.exports (sửa trong editor -> Ctrl+Z được) rồi lưu xuống đĩa để file kia require được ngay
-  const src = editor.getValue(), out = withExports(src, names);
-  if (out !== src) editor.replaceRange(out, CodeMirror.Pos(0, 0), CodeMirror.Pos(editor.lastLine()), '+export');
-  await saveActiveTab();
-  // 2) file chạy: thêm / gộp dòng require, lưu luôn
-  const tsrc = await xpRead(t), tout = window.FN_TRANSFORM.addRequires(tsrc, { [xpModule(activeTab)]: names });
-  if (tout !== tsrc) {
-    if (!(await saveFile(t, tout))) return;
-    if (openTabs.includes(t)) { tabContents[t] = tout; dirtyTabs.delete(t); renderTabBar(); }
+  if (!dest) return showToast('Nhập tên file mới', true);
+  if (dest === 'main.js') return showToast('Không đưa vào main.js -- chọn file chứa hàm khác', true);
+  if (!/^[\w.\- ]+\.js$/.test(dest)) return showToast('Tên file không hợp lệ', true);
+  const src = editor.getValue();
+  if (dest === activeTab) { // chính file này: chỉ thêm module.exports (sửa trong editor -> Ctrl+Z được), lưu
+    const out = withExports(src, names);
+    if (out !== src) editor.replaceRange(out, CodeMirror.Pos(0, 0), CodeMirror.Pos(editor.lastLine()), '+export');
+    await saveActiveTab();
+  } else { // file khác: chép code hàm còn thiếu sang + require nó dùng + module.exports; file đang mở giữ nguyên
+    let d = await xpRead(dest);
+    const have = topFunctions(d).map((f) => f.name), fns = topFunctions(src).filter((f) => names.includes(f.name) && !have.includes(f.name));
+    const code = fns.map((f) => fnSource(src, f.start).trim()).join('\n\n');
+    if (code) {
+      const m = EXPORTS_RE.exec(d), at = m ? m.index : d.length; // chèn TRƯỚC module.exports (nếu có)
+      d = d.slice(0, at).replace(/\s*$/, d.trim() ? '\n\n' : '') + code + '\n' + (m ? '\n' + d.slice(at) : '');
+      d = window.FN_TRANSFORM.addRequires(d, usedRequires(src, code));
+    }
+    d = withExports(d, names);
+    if (!(await saveFile(dest, d))) return;
+    if (openTabs.includes(dest)) { tabContents[dest] = d; dirtyTabs.delete(dest); renderTabBar(); }
+    refreshFileMenu && refreshFileMenu();
   }
-  showToast(`📤 Đã export ${names.length} hàm${tout !== tsrc ? ` + thêm require vào ${t}` : ` (${t} đã require đủ)`}`);
+  const line = xpLine();
+  copyToClipboardFx(line);
+  document.getElementById('xpPreview').textContent = line;
+  showToast(`📤 Đã đưa ${names.length} hàm vào ${dest} -- dòng require đã copy, tự dán vào main.js`);
+}
+function copyToClipboardFx(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).catch(() => {});
+  const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); } catch {} ta.remove();
 }
 document.getElementById('exportFnBtn').addEventListener('click', openExportFns);
 document.getElementById('xpApplyBtn').addEventListener('click', applyExportFns);
+document.getElementById('xpCopyBtn').addEventListener('click', () => { const l = xpLine(); if (!l) return showToast('Chưa có dòng nào để copy', true); copyToClipboardFx(l); showToast('📋 Đã copy -- dán vào main.js'); });
 for (const id of ['xpCloseBtn', 'xpCancelBtn']) document.getElementById(id).addEventListener('click', () => { xpOverlay.hidden = true; });
 xpOverlay.addEventListener('click', (e) => { if (e.target === xpOverlay) xpOverlay.hidden = true; });
 xpList.addEventListener('change', xpPreview);
 xpTarget.addEventListener('change', xpPreview);
+xpNewName.addEventListener('input', xpPreview);
 document.getElementById('xpAll').addEventListener('change', (e) => { for (const x of xpList.querySelectorAll('input[data-n]')) x.checked = e.target.checked; xpPreview(); });

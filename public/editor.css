@@ -667,3 +667,5 @@ li.CodeMirror-hint-active { background: #e8a33d33; color: var(--text); outline: 
 .xp-target { display: flex; gap: 8px; align-items: center; color: var(--text-muted); font-size: 0.85rem; }
 .xp-target select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font: inherit; }
 .xp-preview { margin: 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border-soft); border-radius: var(--radius); font-family: var(--font-mono); font-size: 0.78rem; color: var(--success-strong); white-space: pre-wrap; }
+.xp-target input { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-family: var(--font-mono); font-size: 0.8rem; }
+.xp-out-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-muted); font-size: 0.85rem; }
