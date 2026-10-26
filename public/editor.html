@@ -177,6 +177,7 @@
 
       <div class="editor-tabbar-row">
         <div class="editor-tabbar" id="tabBar"></div>
+        <button class="btn btn-ghost editor-save-btn" id="exportFnBtn" title="Chọn các hàm trong file này -> tự thêm vào module.exports + tự thêm dòng require vào main.js (hoặc file khác)">📤 Export hàm</button>
         <button class="btn btn-ghost editor-save-btn" id="formatBtn" title="Trình bày lại code cho gọn đẹp (thụt lề, khoảng trắng, dấu ;) -- có bôi đen thì chỉ định dạng đoạn đó. Phím tắt Shift+Alt+F">✨ Định dạng</button>
         <button class="btn btn-ghost editor-save-btn" id="transformBtn" title="Đổi lệnh Playwright thô (page.click / fill / mouse.move / waitForTimeout...) sang hàm người thật của project (clickEl / typeEl / moveMouseVisibly / pause...) -- xem trước rồi mới áp dụng">⇄ Biến đổi</button>
         <button class="btn btn-ghost editor-save-btn" id="saveFileBtn" title="Save the active file (Ctrl/Cmd+S)">Save</button>
@@ -369,6 +370,27 @@
       <label class="fx-all"><input type="checkbox" id="fxAll" checked /> Chọn hết</label>
       <button class="btn btn-ghost" id="fxCancelBtn">Huỷ</button>
       <button class="btn btn-primary" id="fxApplyBtn">Áp dụng</button>
+    </div>
+  </div>
+</div>
+
+<!-- Nút 📤 Export hàm: hàm của file đang mở -> module.exports + require vào file chạy (main.js) -->
+<div class="snippet-modal-overlay" id="xpOverlay" hidden>
+  <div class="snippet-modal fx-modal">
+    <div class="snippet-modal-head">
+      <h2>📤 Export hàm</h2>
+      <button class="icon-btn" id="xpCloseBtn" aria-label="Close">&times;</button>
+    </div>
+    <div class="snippet-modal-body">
+      <p class="fx-summary" id="xpSummary"></p>
+      <div class="fx-list" id="xpList"></div>
+      <label class="xp-target">Thêm require vào file <select id="xpTarget"></select></label>
+      <pre class="xp-preview" id="xpPreview"></pre>
+    </div>
+    <div class="snippet-modal-foot">
+      <label class="fx-all"><input type="checkbox" id="xpAll" /> Chọn hết</label>
+      <button class="btn btn-ghost" id="xpCancelBtn">Huỷ</button>
+      <button class="btn btn-primary" id="xpApplyBtn">Export + thêm require</button>
     </div>
   </div>
 </div>

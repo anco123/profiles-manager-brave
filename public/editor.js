@@ -2383,3 +2383,76 @@ document.getElementById('fxApplyBtn').addEventListener('click', applyTransform);
 for (const id of ['fxCloseBtn', 'fxCancelBtn']) document.getElementById(id).addEventListener('click', () => { fxOverlay.hidden = true; });
 fxOverlay.addEventListener('click', (e) => { if (e.target === fxOverlay) fxOverlay.hidden = true; });
 fxAll.addEventListener('change', () => { for (const x of fxList.querySelectorAll('input[data-i]')) x.checked = fxAll.checked; });
+
+// ---- Nút 📤 Export hàm: các hàm khai báo ở ngoài cùng của file đang mở -> thêm vào module.exports của file đó (có rồi thì gộp) +
+// thêm `const { a, b } = require('./tên-file');` vào file chạy (mặc định main.js; đã require file này thì gộp tên vào dòng đó). Lưu cả 2 file.
+const xpOverlay = document.getElementById('xpOverlay'), xpList = document.getElementById('xpList'), xpTarget = document.getElementById('xpTarget');
+// Hàm ở ngoài cùng (đầu dòng, không thụt lề): function a() / async function a() / const a = (...) => / const a = async function...
+function topFunctions(src) {
+  const out = [], re = /^(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(|^(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/gm;
+  let m; while ((m = re.exec(src))) { const n = m[1] || m[2]; if (!out.includes(n)) out.push(n); }
+  return out;
+}
+const EXPORTS_RE = /module\.exports\s*=\s*\{([\s\S]*?)\}\s*;?/;
+function exportedNames(src) {
+  const m = EXPORTS_RE.exec(src), names = m ? m[1].split(',').map((x) => x.trim().split(':')[0].trim()).filter(Boolean) : [];
+  for (const x of src.matchAll(/(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=/g)) names.push(x[1]);
+  return names;
+}
+function withExports(src, names) { // gộp tên vào module.exports = { ... } (giữ các mục cũ, kể cả dạng a: b); chưa có thì thêm cuối file
+  const m = EXPORTS_RE.exec(src);
+  if (!m) return src.replace(/\s*$/, '') + `\n\nmodule.exports = { ${names.join(', ')} };\n`;
+  const items = m[1].split(',').map((x) => x.trim()).filter(Boolean), have = items.map((x) => x.split(':')[0].trim());
+  return src.slice(0, m.index) + `module.exports = { ${[...items, ...names.filter((n) => !have.includes(n))].join(', ')} };` + src.slice(m.index + m[0].length);
+}
+const xpModule = (name) => './' + name.replace(/\.js$/, '');
+async function xpRead(name) { // nội dung file: đang mở ở tab thì lấy bản trong editor (kể cả chưa lưu), không thì đọc từ đĩa
+  if (name === activeTab) return editor.getValue();
+  if (openTabs.includes(name) && tabContents[name] != null) return tabContents[name];
+  const res = await fetch(`/api/scripts/${encodeURIComponent(name)}`);
+  return res.ok ? (await res.json()).code : '';
+}
+function xpPicked() { return [...xpList.querySelectorAll('input[data-n]:checked')].map((x) => x.dataset.n); }
+async function xpPreview() {
+  const names = xpPicked(), t = xpTarget.value, pre = document.getElementById('xpPreview');
+  if (!names.length || !t) { pre.textContent = '(chưa chọn hàm nào)'; return; }
+  const plan = window.FN_TRANSFORM.planRequires(await xpRead(t), { [xpModule(activeTab)]: names });
+  pre.textContent = plan.edits.length || plan.lines.length ? `${t}:\n${[...plan.edits.map((e) => e.text + '   // (gộp vào dòng có sẵn)'), ...plan.lines].join('\n')}` : `${t} đã require đủ các hàm này`;
+}
+async function openExportFns() {
+  if (needOpenFile()) return;
+  if (!window.FN_TRANSFORM) return showToast('Không tải được fntransform.js', true);
+  const src = editor.getValue(), fns = topFunctions(src), done = exportedNames(src);
+  if (!fns.length) return showToast('File này chưa có hàm nào khai báo ở ngoài cùng (function tên() / const tên = async () =>)', true);
+  document.getElementById('xpSummary').innerHTML = `<b>${escapeHtmlFx(activeTab)}</b> có <b>${fns.length}</b> hàm. Tick hàm cần dùng ở file khác -- sẽ thêm vào <code>module.exports</code> của file này và thêm dòng <code>require('${escapeHtmlFx(xpModule(activeTab))}')</code> vào file được chọn.`;
+  xpList.innerHTML = fns.map((n) => `<label class="fx-row xp-row"><input type="checkbox" data-n="${escapeHtmlFx(n)}" ${done.includes(n) ? 'checked' : ''}><span class="fx-code"><span class="fx-after xp-name">${escapeHtmlFx(n)}</span></span><span class="xp-tag">${done.includes(n) ? 'đã export' : ''}</span></label>`).join('');
+  const files = (await (await fetch('/api/scripts')).json().catch(() => [])).filter((f) => f !== activeTab).sort((a, b) => (a === 'main.js' ? -1 : b === 'main.js' ? 1 : a.localeCompare(b)));
+  xpTarget.innerHTML = files.map((f) => `<option value="${escapeHtmlFx(f)}">${escapeHtmlFx(f)}</option>`).join('');
+  document.getElementById('xpAll').checked = fns.every((n) => done.includes(n));
+  xpOverlay.hidden = false;
+  xpPreview();
+}
+async function applyExportFns() {
+  const names = xpPicked(), t = xpTarget.value;
+  if (!names.length) return showToast('Chưa chọn hàm nào', true);
+  if (!t) return showToast('Chưa có file nào để thêm require', true);
+  xpOverlay.hidden = true;
+  // 1) file đang mở: module.exports (sửa trong editor -> Ctrl+Z được) rồi lưu xuống đĩa để file kia require được ngay
+  const src = editor.getValue(), out = withExports(src, names);
+  if (out !== src) editor.replaceRange(out, CodeMirror.Pos(0, 0), CodeMirror.Pos(editor.lastLine()), '+export');
+  await saveActiveTab();
+  // 2) file chạy: thêm / gộp dòng require, lưu luôn
+  const tsrc = await xpRead(t), tout = window.FN_TRANSFORM.addRequires(tsrc, { [xpModule(activeTab)]: names });
+  if (tout !== tsrc) {
+    if (!(await saveFile(t, tout))) return;
+    if (openTabs.includes(t)) { tabContents[t] = tout; dirtyTabs.delete(t); renderTabBar(); }
+  }
+  showToast(`📤 Đã export ${names.length} hàm${tout !== tsrc ? ` + thêm require vào ${t}` : ` (${t} đã require đủ)`}`);
+}
+document.getElementById('exportFnBtn').addEventListener('click', openExportFns);
+document.getElementById('xpApplyBtn').addEventListener('click', applyExportFns);
+for (const id of ['xpCloseBtn', 'xpCancelBtn']) document.getElementById(id).addEventListener('click', () => { xpOverlay.hidden = true; });
+xpOverlay.addEventListener('click', (e) => { if (e.target === xpOverlay) xpOverlay.hidden = true; });
+xpList.addEventListener('change', xpPreview);
+xpTarget.addEventListener('change', xpPreview);
+document.getElementById('xpAll').addEventListener('change', (e) => { for (const x of xpList.querySelectorAll('input[data-n]')) x.checked = e.target.checked; xpPreview(); });
