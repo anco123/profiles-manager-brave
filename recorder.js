@@ -29,6 +29,9 @@
  *   pause, goto, tab mới, Excel...): hàm có ô element -> bấm 🎯 Pick, giữ Alt chọn element, nhả Alt bấm ✓ Chốt (Enter) -> selector vào hàm.
  * - Con trỏ chèn: ⤵ ở 1 dòng = bước mới chèn sau bước đó; hàm có khối { } -> con trỏ tự vào trong khối (dòng "▸ trống" bấm để vào);
  *   ✕ = lại nối vào cuối. ↑ ↓ đi vào / ra khối (While, Nhánh, hàm có khối).
+ * - Ghi theo TRƯỜNG HỢP (kiểu while + nhiều if): trong While giữ Alt lên element -> "Khi hiện / Khi KHÔNG hiện / Khi chữ là… → ghi khối",
+ *   thao tác trên trang như thường (mọi bước vào trong if đó), "VÀ ... hiện / không hiện" để ghép điều kiện, ✓ Xong TH ở thanh REC
+ *   -> continue (quét lại) / break (thoát While) / đi tiếp. While có giới hạn số vòng (quá thì báo lỗi) + thời gian nghỉ khi chưa khớp.
  * - Bước + trạng thái giữ ở server (recorders[id]) nên chuyển trang / reload không mất.
  * - Lưu ý: lúc đang ghi, trang có thêm window.__pmRec + 1 thẻ div (shadow DOM) -- trang web có thể thấy. Chỉ bật khi cần ghi.
  * -----------------------------------------------------------------------
@@ -39,6 +42,12 @@ const path = require('path');
 // Danh sách hàm dùng chung với editor (public/fncatalog.js) -- bảng Alt gõ tên hàm để chọn việc làm với phần tử
 const { CATALOG } = require(path.join(__dirname, 'public', 'fncatalog.js'));
 const PICK_FNS = CATALOG.filter((f) => f.act).map((f) => ({ act: f.act, name: f.name, desc: f.desc, keys: `${f.id} ${f.keys}` }));
+// "Trường hợp": if (điều kiện về element) { các bước ghi sau đó ... continue / break } -- record từng trạng thái của màn hình
+const CASE_FNS = [{ act: 'caseShow', name: 'Khi hiện → ghi khối', desc: 'if (đang hiện) { các bước ghi sau đó }', keys: 'khi hien if case truong hop khoi' },
+  { act: 'caseHide', name: 'Khi KHÔNG hiện → ghi khối', desc: 'if (!đang hiện) { ... }', keys: 'khi khong hien not if case truong hop' },
+  { act: 'caseText', name: 'Khi chữ là… → ghi khối', desc: 'if (chữ của element === ...) { ... } -- ô chữ = chữ cần so', keys: 'khi chu la text if case truong hop' }];
+const AND_FNS = [{ act: 'andShow', name: 'VÀ element này hiện', desc: 'thêm điều kiện vào trường hợp đang ghi', keys: 'va and them dieu kien hien' },
+  { act: 'andHide', name: 'VÀ element này KHÔNG hiện', desc: 'thêm điều kiện vào trường hợp đang ghi', keys: 'va and them dieu kien khong hien not' }];
 // Bảng ☰ "Gọi hàm": mọi hàm trong danh sách (While / Nhánh dùng lệnh ghi riêng của recorder thay cho whileTrue / waitAny). Mỗi hàm gọi ở ☰
 // thành 1 bước action 'fn': code mẫu (tpl -- sửa được) + các ô element (page.locator('SELECTOR...')) chọn bằng nút 🎯 Pick rồi giữ Alt
 const CAT = Object.fromEntries(CATALOG.map((f) => [f.id, f]));
@@ -53,7 +62,7 @@ const recorders = {}; // id profile -> { enabled, recording, segOpen, steps, seq
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
 const ACTIONS = { click: 'Click', type: 'Gõ', hover: 'Hover', wait: 'Wait hiện', waitGone: 'Wait mất', ifClick: 'If hiện → Click', ifType: 'If hiện → Gõ', ifHover: 'If hiện → Hover', loop: 'While', branch: 'Nhánh', forEach: 'Với từng item', getText: 'Lấy text', scroll: 'Cuộn tới', dblclick: 'Nhấp đúp', rightClick: 'Chuột phải', check: 'Tick chọn', uncheck: 'Bỏ tick', pressKey: 'Click + phím', upload: 'Tải file lên', getAttr: 'Lấy thuộc tính', count: 'Đếm', clickTab: 'Click → tab mới (if + đóng tab phụ)', gotoLink: 'Mở link (đọc href lúc chạy)', gotoUrl: 'Mở URL cố định', press: 'Phím', select: 'Chọn option', nav: 'Mở trang', skip: 'Bỏ qua' };
 // Nhãn hành động cho bước nằm TRONG While -- trong vòng lặp mọi bước đều là "if đang hiện thì ..." (click / ifClick như nhau)
-const LOOP_ACTIONS = { click: 'If có → Click', type: 'If có → Gõ', hover: 'If có → Hover', loopBreak: 'If có → Break (thoát While)', loopFail: 'If có → Báo lỗi', skip: 'Bỏ qua' };
+const LOOP_ACTIONS = { caseShow: 'Khi hiện → ghi khối', caseHide: 'Khi KHÔNG hiện → ghi khối', caseText: 'Khi chữ là… → ghi khối', click: 'If có → Click', type: 'If có → Gõ', hover: 'If có → Hover', loopBreak: 'If có → Break (thoát While)', loopFail: 'If có → Báo lỗi', skip: 'Bỏ qua' };
 // Nhãn hành động cho bước nằm trong Nhánh -- mỗi bước là 1 nhánh của waitAny: cái này hiện trước thì làm gì
 const BRANCH_ACTIONS = { click: 'Hiện trước → Click', type: 'Hiện trước → Gõ', hover: 'Hiện trước → Hover', wait: 'Hiện trước → Chỉ chờ', loopFail: 'Hiện trước → Báo lỗi', skip: 'Bỏ qua' };
 const HEADER = "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs, dblClickEl, rightClickEl, checkEl } = require('./xlv1_actions');\nuseLog(log);\n\n";
@@ -104,6 +113,12 @@ function fnCode(s, P = 'page') {
   }
   return t;
 }
+// Điều kiện của 1 trường hợp: element chính (hiện / không hiện / chữ là...) && các điều kiện ghép thêm (extra)
+function caseCond(s, P = 'page') {
+  const one = (c) => { const sel = withP(selOf(c), P, c.frame), b = c.cond === 'dom' ? `(await ${sel}.count()) > 0` : `await isShown(${sel})`; return c.neg ? `!(${b})` : b; };
+  const main = s.textEq != null && s.textEq !== '' ? `(await getText(${withP(selOf(s), P, s.frame)})) ${s.neg ? '!==' : '==='} ${q(s.textEq)}` : one(s);
+  return [main, ...(s.extra || []).map(one)].join(' && ');
+}
 // require cần thêm cho các bước 'fn' (hàm ngoài xlv1_actions: helpers, xlv1_humanInput, Excel / Sheet...) -- { module: [tên] }
 function reqOf(steps) {
   const r = {};
@@ -148,6 +163,7 @@ function stepCode(s, P = 'page') {
     case 'press': return `await ${P}.keyboard.press(${q(s.key || 'Enter')});`;
     case 'select': return `await hoverEl(${sel}); await ${sel}.selectOption(${txt});`; // đi chuột tới ô chọn trước (moveMouseVisibly của project)
     case 'fn': return fnCode(s, P);
+    case 'case': return `if (${caseCond(s, P)}) { ... }`;
     case 'nav': return s.auto ? `await ${P}.waitForLoadState('domcontentloaded'); // -> ${s.url}` : `await ${P}.goto(${q(s.url)});`;
     default: return '';
   }
@@ -171,10 +187,11 @@ const loopIds = (steps) => new Set(steps.filter((s) => s.action === 'loop').map(
 // Khối chứa 1 bước: 'F<id>:<k>' (lỗ thứ k -- khối { } -- của 1 hàm gọi ở ☰) > 'L<id>' While > 'B<id>' Nhánh > 'T<tab>' tab mới > '' ngoài cùng
 function parentKeyOf(steps) {
   const vars = tabVars(steps), loops = loopIds(steps), brs = branchIds(steps), fns = new Set(steps.filter((x) => x.action === 'fn').map((x) => x.id));
-  return (x) => (x.blk && fns.has(headOf(x.blk)) ? x.blk : loops.has(x.loop) ? 'L' + x.loop : brs.has(x.br) ? 'B' + x.br : vars[x.tab] ? 'T' + x.tab : '');
+  const cases = new Set(steps.filter((x) => x.action === 'case').map((x) => x.id));
+  return (x) => (x.blk && fns.has(headOf(x.blk)) ? x.blk : cases.has(x.cs) ? 'C' + x.cs : loops.has(x.loop) ? 'L' + x.loop : brs.has(x.br) ? 'B' + x.br : vars[x.tab] ? 'T' + x.tab : '');
 }
 const headOf = (key) => (key && key[0] !== 'T' ? +key.slice(1).split(':')[0] : 0); // bước mở khối (While / Nhánh / hàm)
-function setParent(s, key) { s.loop = key[0] === 'L' ? headOf(key) : undefined; s.br = key[0] === 'B' ? headOf(key) : undefined; s.blk = key[0] === 'F' ? key : undefined; }
+function setParent(s, key) { s.loop = key[0] === 'L' ? headOf(key) : undefined; s.br = key[0] === 'B' ? headOf(key) : undefined; s.blk = key[0] === 'F' ? key : undefined; s.cs = key[0] === 'C' ? headOf(key) : undefined; }
 const branchIds = (steps) => new Set(steps.filter((s) => s.action === 'branch').map((s) => s.id));
 // Việc của 1 nhánh (cái này hiện trước thì...) -- 1 câu lệnh, đứng sau `if (whichN === k)`
 function branchAct(s, P) {
@@ -208,6 +225,17 @@ function bodyLines(steps, opt = {}) {
       }
       return;
     }
+    if (s.action === 'case') { // trường hợp: if (điều kiện) { các bước con; continue / break }
+      if (opt.test) push(`${ind}__pmStep = ${s.id};`, s.id);
+      const lv = s.levels && s.levels[s.level], k = 'C' + s.id;
+      push(`${ind}if (${caseCond(s, P)}) { // trường hợp: ${s.textEq ? `chữ ${s.neg ? 'khác' : 'là'} "${s.textEq}"` : s.neg ? 'không hiện' : 'đang hiện'} ${(lv && (lv.label || lv.tag)) || ''}`.trimEnd(), s.id);
+      if (steps.some((x) => pk(x) === k) || (cur && cur.par === k)) emit(k, ind + '  ');
+      else if (opt.view) push(`${ind}  // ▸ trống -- bấm để ghi các bước vào đây`, s.id, { hole: k, dim: true });
+      if (s.end === 'continue' || s.end === 'break') push(`${ind}  ${s.end};${s.end === 'break' ? ' // xong -- thoát While' : ' // quét lại từ đầu'}`, s.id);
+      push(`${ind}}`, s.id);
+      return;
+    }
+    if (s.action === 'loop' && +s.maxN > 0) push(`${ind}let n${s.id} = 0;`, s.id);
     let code = key[0] === 'L' ? loopCode(s, P) : stepCode(s, P);
     if (!code) { if (opt.view) push(`${ind}// (bỏ qua) ${(s.levels && s.levels[s.level] && s.levels[s.level].label) || s.action}`, s.id, { dim: true }); return; }
     if (opt.test) { push(`${ind}__pmStep = ${s.id};`, s.id); if (!key) code = okWrap(code); }
@@ -223,8 +251,9 @@ function bodyLines(steps, opt = {}) {
     push(ind + code, s.id);
     if (s.action === 'loop') {
       if (+s.timeout > 0) push(`${ind}while (Date.now() < end${s.id}) {`, s.id); // không giới hạn giây thì dòng code ở trên đã là `while (true) {`
+      if (+s.maxN > 0) push(`${ind}  if (++n${s.id} > ${+s.maxN}) throw new Error('While: quá ${+s.maxN} vòng mà chưa xong');`, s.id);
       emit('L' + s.id, ind + '  ');
-      push(`${ind}  await ${P}.waitForTimeout(500); // chưa gặp cái nào -- nghỉ rồi quét lại`, s.id); push(`${ind}}`, s.id);
+      push(`${ind}  await ${P}.waitForTimeout(${+s.idle > 0 ? +s.idle : 500}); // chưa gặp cái nào -- nghỉ rồi quét lại`, s.id); push(`${ind}}`, s.id);
     }
     if (s.action !== 'clickTab' || !vars[s.opens]) return;
     push(`${ind}if (${vars[s.opens]}) {`, s.id);
@@ -289,12 +318,13 @@ function stateOf(id) {
   if (r.cur && r.cur.after && !r.steps.some((x) => x.id === r.cur.after)) r.cur = null; // bước con trỏ đứng sau đã bị xoá
   if (r.armed && !r.steps.some((x) => x.id === r.armed.stepId)) r.armed = null;
   const codeOf = (s) => (loops.has(s.loop) ? loopCode(s, vars[s.tab] || 'page') : brs.has(s.br) ? `if (...) ${branchAct(s, vars[s.tab] || 'page')}` : stepCode(s, vars[s.tab] || 'page'));
-  const loopInfo = (s) => (s.action === 'loop' ? { inner: r.steps.filter((x) => x.loop === s.id).length, hasBreak: r.steps.some((x) => x.loop === s.id && (x.action === 'loopBreak' || (x.thenBreak && x.action !== 'skip'))) } : {});
+  const loopInfo = (s) => (s.action === 'loop' ? { inner: r.steps.filter((x) => x.loop === s.id).length, hasBreak: r.steps.some((x) => x.loop === s.id && (x.action === 'loopBreak' || (x.thenBreak && x.action !== 'skip') || (x.action === 'case' && x.end === 'break'))) } : {});
   const extra = (s) => ({ ...loopInfo(s), code: codeOf(s), tabVar: vars[s.tab], inLoop: loops.has(s.loop), inBranch: brs.has(s.br), lang: !!s.levels && isLangCode(s.custom || ((s.levels[s.level] || {}).alts || [])[s.alt]?.code || ((s.levels[s.level] || {}).alts || [])[0]?.code), bkCode: backupOf({ ...s, backup: true })?.code, bkOn: !!backupOf(s),
     kids: s.action === 'branch' ? r.steps.filter((x) => x.br === s.id).length : undefined, inFn: pk(s)[0] === 'F',
+    caseInfo: s.action === 'case' ? { kids: r.steps.filter((x) => x.cs === s.id).length, extra: (s.extra || []).map((c) => ({ code: selOf(c), neg: !!c.neg })) } : undefined,
     slotInfo: s.action === 'fn' ? fnKeys(s.tpl).map((k) => ({ key: k, label: SLOT_LABEL(k), code: s.slots && s.slots[k] ? selOf(s.slots[k]) : null })) : undefined, holes: s.action === 'fn' ? holeN(s) : undefined });
   return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, openLoop: loops.has(r.openLoop) ? r.openLoop : null, openBranch: brs.has(r.openBranch) ? r.openBranch : null, loopActions: LOOP_ACTIONS, branchActions: BRANCH_ACTIONS,
-    lines: bodyLines(r.steps, { view: true, cur: r.cur }), cur: r.cur || null, armed: r.armed || null, callFns: CALL_FNS, req: reqOf(r.steps), test: r.test || null, canRun: !!r.run, fns: PICK_FNS, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), actions: ACTIONS, code: buildCode(r.steps) };
+    lines: bodyLines(r.steps, { view: true, cur: r.cur }), cur: r.cur || null, armed: r.armed || null, inCase: r.cur && r.cur.par[0] === 'C' ? headOf(r.cur.par) : null, caseFns: CASE_FNS, andFns: AND_FNS, callFns: CALL_FNS, req: reqOf(r.steps), test: r.test || null, canRun: !!r.run, fns: PICK_FNS, segFrom: r.segFrom, exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), actions: ACTIONS, code: buildCode(r.steps) };
 }
 
 // Dừng 1 đoạn -> code của các bước ghi trong đoạn đó (id >= segFrom) vào hàng đợi; editor hỏi /recorder?since=... rồi tự chèn
@@ -348,6 +378,16 @@ function onEvent(r, ev, page) {
       if (s.levels && ['click', 'ifClick'].includes(s.action) && !s.effect && !s.effectOff && !s.loop && !s.br && now - s.at < 6000) { s.effect = { levels: ev.levels, level: 0, label: ev.label, tag: ev.tag, frame: ev.frame }; break; }
     }
     return;
+  }
+  if (ev.kind === 'pick' && /^case(Show|Hide|Text)$/.test(ev.action)) { // mở 1 trường hợp: các bước ghi sau đó vào trong khối if này
+    const s = add({ ...base, action: 'case', alt: ev.alt || 0, custom: ev.custom || null, neg: ev.action === 'caseHide', textEq: ev.action === 'caseText' ? String(ev.text ?? '') : undefined, cond: ev.cond, end: r.openLoop ? 'continue' : 'none', extra: [] });
+    r.cur = { after: s.id, par: 'C' + s.id }; syncOpen(r);
+    return s;
+  }
+  if (ev.kind === 'pick' && /^and(Show|Hide)$/.test(ev.action)) { // ghép thêm điều kiện vào trường hợp đang ghi
+    const c = r.cur && r.cur.par[0] === 'C' && r.steps.find((x) => x.id === headOf(r.cur.par));
+    if (c) c.extra = [...(c.extra || []), { levels: ev.levels, level: ev.level ?? 0, alt: ev.alt || 0, custom: ev.custom || null, frame: ev.frame || undefined, neg: ev.action === 'andHide' }];
+    return null;
   }
   if (ev.kind === 'pick') return add({ ...base, action: ev.action, alt: ev.alt || 0, custom: ev.custom || null, text: ev.text, enter: !!ev.enter, thenBreak: !!ev.thenBreak, cond: ev.cond });
   if (ev.kind === 'click') {
@@ -491,7 +531,7 @@ function moveStep(r, id, dir) {
   const key = pk(s), sibs = S.filter((x) => pk(x) === key), nb = sibs[sibs.indexOf(s) + dir];
   const take = () => S.splice(S.indexOf(s), 1);
   if (nb) {
-    const holes = nb.action === 'loop' ? ['L' + nb.id] : nb.action === 'fn' ? Array.from({ length: holeN(nb) }, (_, k) => `F${nb.id}:${k}`) : nb.action === 'branch' && s.levels && s.action !== 'loop' ? ['B' + nb.id] : [];
+    const holes = nb.action === 'loop' ? ['L' + nb.id] : nb.action === 'case' ? ['C' + nb.id] : nb.action === 'fn' ? Array.from({ length: holeN(nb) }, (_, k) => `F${nb.id}:${k}`) : nb.action === 'branch' && s.levels && s.action !== 'loop' ? ['B' + nb.id] : [];
     if (holes.length && s.action !== 'branch') {
       const k = dir < 0 ? holes[holes.length - 1] : holes[0], kids = S.filter((x) => pk(x) === k);
       take(); setParent(s, k);
@@ -532,9 +572,14 @@ async function handle(id, page, msg, frame) {
       r.armed = next ? { stepId: st.id, key: next } : null;
     }
   }
+  else if (msg.op === 'caseEnd') { // ✓ Xong trường hợp: con trỏ ra ngay sau khối, về lại While (nếu có)
+    const c = r.cur && r.cur.par[0] === 'C' && r.steps.find((x) => x.id === headOf(r.cur.par));
+    if (c) { if (msg.end) c.end = msg.end; r.cur = { after: c.id, par: parentKeyOf(r.steps)(c) }; syncOpen(r); }
+  }
+  else if (msg.op === 'dropExtra') { const c = r.steps.find((x) => x.id === msg.stepId); if (c && c.extra) c.extra = c.extra.filter((_, i) => i !== msg.i); }
   else if (msg.op === 'arm') r.armed = msg.stepId ? { stepId: msg.stepId, key: msg.key } : null;
   else if (msg.op === 'cursor') { const x = r.steps.find((y) => y.id === msg.stepId); if (x) { r.cur = { after: x.id, par: parentKeyOf(r.steps)(x) }; syncOpen(r); } }
-  else if (msg.op === 'cursorHole' && /^[LBF]\d+(:\d+)?$/.test(msg.key || '')) { r.cur = { after: headOf(msg.key), par: msg.key }; syncOpen(r); }
+  else if (msg.op === 'cursorHole' && /^[LBFC]\d+(:\d+)?$/.test(msg.key || '')) { r.cur = { after: headOf(msg.key), par: msg.key }; syncOpen(r); }
   else if (msg.op === 'cursorOff') { r.cur = null; r.openLoop = null; r.openBranch = null; }
   else if (msg.op === 'effect') { // nhận / bỏ gợi ý "Chờ hiện" sau click
     const i = r.steps.findIndex((x) => x.id === msg.stepId), s = r.steps[i];
@@ -558,7 +603,7 @@ async function handle(id, page, msg, frame) {
   else if (msg.op === 'delete') { // xoá While / Nhánh / hàm có khối -> các bước bên trong ra ngoài, vào khối chứa bước bị xoá
     const pk = parentKeyOf(r.steps), d = r.steps.find((s) => s.id === msg.stepId);
     if (d) {
-      const out = pk(d), inside = (s) => s.loop === d.id || s.br === d.id || (s.blk && headOf(s.blk) === d.id);
+      const out = pk(d), inside = (s) => s.loop === d.id || s.br === d.id || s.cs === d.id || (s.blk && headOf(s.blk) === d.id);
       for (const s of r.steps) if (inside(s)) setParent(s, out);
       if (r.cur && (r.cur.after === d.id || headOf(r.cur.par) === d.id)) { const i = r.steps.indexOf(d); const prev = r.steps.slice(0, i).reverse().find((x) => pk(x) === out); r.cur = { after: prev ? prev.id : headOf(out), par: out }; }
       r.steps = r.steps.filter((s) => s !== d);
@@ -573,7 +618,7 @@ async function handle(id, page, msg, frame) {
       const p = msg.patch || {};
       if (p.level != null && s.levels && p.level >= 0 && p.level < s.levels.length) { s.level = p.level; s.alt = 0; s.custom = null; }
       if (p.alt != null) { s.alt = p.alt; s.custom = null; }
-      for (const k of ['action', 'text', 'enter', 'custom', 'url', 'key', 'auto', 'tabUrl', 'timeout', 'thenBreak', 'cond', 'langAlt', 'backup', 'list', 'inner', 'innerAction', 'limit', 'tpl']) if (p[k] !== undefined) s[k] = p[k];
+      for (const k of ['action', 'text', 'enter', 'custom', 'url', 'key', 'auto', 'tabUrl', 'timeout', 'thenBreak', 'cond', 'langAlt', 'backup', 'list', 'inner', 'innerAction', 'limit', 'tpl', 'neg', 'textEq', 'end', 'maxN', 'idle']) if (p[k] !== undefined) s[k] = p[k];
       if (p.action === 'gotoLink' && s.linkLevel >= 0 && s.linkLevel < s.levels.length) Object.assign(s, { level: s.linkLevel, alt: 0, custom: null }); // đọc href -> chọn đúng thẻ <a>
     }
   }
@@ -1030,7 +1075,7 @@ function pageRecorder() {
   function fnChoices() {
     if (st && st.openLoop) return Object.entries(st.loopActions).filter(([a]) => a !== 'skip').map(([act, name]) => ({ act, name, keys: 'if co ' + act, desc: 'trong While' }));
     if (st && st.openBranch) return Object.entries(st.branchActions).filter(([a]) => a !== 'skip').map(([act, name]) => ({ act, name, keys: 'hien truoc ' + act, desc: 'nhánh của waitAny' }));
-    return (st && st.fns) || [];
+    return [...(st && st.inCase ? st.andFns || [] : []), ...((st && st.fns) || []), ...((st && st.caseFns) || [])]; // đang ghi 1 trường hợp: ghép thêm điều kiện (VÀ ...)
   }
   function fnSearch(q, list = fnChoices(), max = 10) {
     const f = foldVi(q).trim();
@@ -1058,7 +1103,10 @@ function pageRecorder() {
   const loopN = () => (st && st.openLoop ? st.steps.filter((x) => x.loop === st.openLoop).length : 0);
   const branchN = () => (st && st.openBranch ? st.steps.filter((x) => x.br === st.openBranch).length : 0);
   // Thanh khối -- luôn ở ĐẦU bảng (chọn While / Nhánh trước rồi mới chọn các phần tử bên trong)
-  const whileBar = (live) => (st && st.openLoop
+  const caseN = () => (st && st.inCase ? st.steps.filter((x) => x.cs === st.inCase).length : 0);
+  const whileBar = (live) => (st && st.inCase
+    ? `<div class="wbar on cs"><b>◆ Đang ghi 1 trường hợp</b><span>${caseN()} bước</span>${live ? '' : '<button data-op="caseEnd" title="Xong trường hợp này -- bước sau ra ngoài khối (về lại While)">✓ Xong trường hợp</button>'}</div>`
+    : st && st.openLoop
     ? `<div class="wbar on"><b>⟳ Đang trong While</b><span>${loopN()} if</span>${live ? '' : '<button data-op="wend" title="Kết thúc vòng lặp -- bước sau ghi như thường">Đóng While</button>'}</div>`
     : st && st.openBranch
       ? `<div class="wbar on br"><b>⑂ Đang trong Nhánh</b><span>${branchN()} nhánh</span>${live ? '' : '<button data-op="bend" title="Kết thúc Nhánh -- bước sau ghi như thường">Đóng Nhánh</button>'}</div>`
@@ -1130,6 +1178,11 @@ function pageRecorder() {
     const ch = chainFor(r.el, { level: 0, alts0: r.alts });
     const perform = pick.perform && ['click', 'type', 'hover', 'ifClick', 'ifType', 'ifHover', 'dblclick', 'rightClick', 'check', 'uncheck', 'scroll', 'pressKey'].includes(action);
     const inLoop = !!(st && st.openLoop);
+    if (/^case/.test(action)) { // mở 1 trường hợp
+      send({ kind: 'pick', action, ...ch, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom, text: action === 'caseText' ? (pick.text || clean(r.el.innerText || r.el.value).slice(0, 80)) : '', cond: pick.dom ? 'dom' : undefined });
+      toast('◆ Đang ghi trường hợp -- thao tác trên trang, các bước vào trong khối; xong bấm ✓ Xong ở thanh REC');
+      return closePick();
+    }
     send({ kind: 'pick', action, ...ch, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom, text: pick.text, enter: pick.enter, perform, thenBreak: inLoop && pick.thenBreak, cond: inLoop && pick.dom ? 'dom' : undefined });
     toast(`Đã ghi: ${labelsNow()[action] || action}${st && st.openLoop ? ' (trong While)' : st && st.openBranch ? ' (nhánh)' : ''}${perform ? ' (đang làm trên trang...)' : ''}`);
     closePick();
@@ -1157,6 +1210,7 @@ function pageRecorder() {
     if (!btn) return;
     if (btn.dataset.op === 'pclose') return closePick();
     if (btn.dataset.op === 'pslot') return chotSlot();
+    if (btn.dataset.op === 'caseEnd') { call({ op: 'caseEnd' }).then((s) => { render(s); drawPick(); toast('✓ Xong trường hợp'); }); return; }
     if (btn.dataset.op === 'pagain') { closePick(); return toast('Giữ Alt + rê chuột chọn lại element'); }
     const blk = { wstart: 'loopStart', wend: 'loopEnd', bstart: 'branchStart', bend: 'branchEnd' }[btn.dataset.op];
     if (blk) { call({ op: blk }).then((s) => { render(s); drawPick(); }); return; } // bảng vẫn mở để chọn tiếp
@@ -1187,6 +1241,7 @@ function pageRecorder() {
     .fnl2{position:absolute;left:8px;right:8px;top:calc(100% - 2px);z-index:5;background:#12141c;border:1px solid #a78bfa;border-radius:8px;max-height:42vh;overflow:auto;padding:3px;box-shadow:0 10px 30px #000c}.fnl2[hidden]{display:none}
     .ln.cur{color:#7ee2a8;background:#3fb9501a;outline:1px dashed #3fb950;cursor:default}.ln.cur button{padding:0 5px;font-size:11px}.ln.hole code{color:#7ee2a8;opacity:.75}.ln.hole:hover code{opacity:1}
     .fnst{border-color:#e8a33d66}.fnst b{color:#f5b455}.slot{padding:2px 4px;border-radius:6px}.slot.on{outline:1px solid #e8a33d;background:#e8a33d14}.slot .sc{font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .st.case{border-color:#34d399;background:#34d39912}.st.case b{color:#6ee7b7}.wbar.on.cs{border-color:#34d399;background:#34d3991a}.wbar.on.cs b{color:#6ee7b7}
     .armbar{margin-bottom:4px;padding:5px 6px;border-radius:6px;background:#e8a33d1f;border:1px solid #e8a33d;font-size:12px}.pill.armed{border-color:#e8a33d;box-shadow:0 0 0 2px #e8a33d55,0 6px 20px #0008}
     select,input{background:#12141c;color:#e8e9ed;border:1px solid #2a2e3a;border-radius:6px;padding:3px 5px;min-width:0}
     .grow{flex:1}.lv{opacity:.75;white-space:nowrap}.code{font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;word-break:break-all;margin-top:4px}
@@ -1228,7 +1283,7 @@ function pageRecorder() {
     window.__pmRecUI = host;
     root = host.attachShadow({ mode: 'closed' });
     setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
-      <div class="pill" title="Bấm: ghi / tạm dừng / ghi tiếp (cùng 1 đoạn). ⏹: xuất code cả đoạn. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="export" title="Kết thúc đoạn + xuất code (editor + clipboard)" hidden>⏹ Xuất</button><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
+      <div class="pill" title="Bấm: ghi / tạm dừng / ghi tiếp (cùng 1 đoạn). ⏹: xuất code cả đoạn. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="caseEnd" title="Xong trường hợp đang ghi -- bước sau ra ngoài khối" hidden>✓ Xong TH</button><button data-op="export" title="Kết thúc đoạn + xuất code (editor + clipboard)" hidden>⏹ Xuất</button><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
     ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast') };
     document.documentElement.appendChild(host);
     for (const t of ['input', 'change']) root.addEventListener(t, (e) => uiEvent(e, e.composedPath()[0]));
@@ -1378,7 +1433,20 @@ function pageRecorder() {
       ${(x.slotInfo || []).map((sl) => { const on = st.armed && st.armed.stepId === x.id && st.armed.key === sl.key; return `<div class="r slot${on ? ' on' : ''}"><span class="lv">${esc(sl.label)}</span><span class="grow sc">${sl.code ? esc(sl.code) : '— chưa chọn —'}</span><button data-op="arm" data-key="${esc(sl.key)}"${sl.code || on ? '' : ' class="pri"'} title="Bấm rồi giữ Alt chọn element trên trang, nhả Alt bấm ✓ Chốt">${on ? '⏳ chờ Alt… (bấm để huỷ)' : sl.code ? '🎯 Chọn lại' : '🎯 Pick element'}</button></div>`; }).join('')}
       <textarea data-f="tpl" rows="${Math.min(9, String(x.tpl).split('\n').length + 1)}" spellcheck="false" title="Sửa code mẫu: 'SELECTOR' = ô element (chọn bằng 🎯), TEXT / VALUE... = giá trị; dòng trống trong { } = chỗ chèn bước con">${esc(x.tpl)}</textarea>
       ${x.holes ? '<div class="tag">Khối { }: bấm dòng "▸ trống" trong code (hoặc ↑ ↓ 1 bước sát hàm) để đưa bước vào trong khối</div>' : ''}</div>`;
+    if (x.action === 'case') {
+      const lv = x.levels[x.level], ci = x.caseInfo || { kids: 0, extra: [] };
+      return `<div class="st case" data-id="${x.id}" data-css="${esc(lv.css)}"><div class="r"><span class="n">${i + 1}</span><b>◆ Trường hợp</b><span class="lv">khi element</span><select data-f="neg"><option value="0">${x.textEq ? 'có chữ là' : 'đang hiện'}</option><option value="1" ${x.neg ? 'selected' : ''}>${x.textEq ? 'có chữ KHÁC' : 'KHÔNG hiện'}</option></select>${tools}</div>
+      <div class="info">&lt;${esc(lv.tag)}&gt; ${esc(lv.size)} ${esc(lv.label)}</div>
+      <div class="r"><select data-f="alt" class="grow">${lv.alts.map((a, k) => `<option value="${k}" ${k === x.alt && !x.custom ? 'selected' : ''}>${esc(altLabel(a))}</option>`).join('')}${x.custom ? `<option value="custom" selected>sửa tay: ${esc(x.custom)}</option>` : ''}</select><button data-op="edit" title="Tự sửa selector">✎</button></div>
+      ${editing === x.id ? `<div class="r"><input class="grow" data-f="custom" value="${esc(x.custom || (lv.alts[x.alt] || lv.alts[0] || {}).code)}" title="Enter để lưu, Esc để huỷ"></div>` : ''}
+      <div class="r"><span class="lv">chữ</span><input class="grow" data-f="textEq" value="${esc(x.textEq || '')}" placeholder="trống = chỉ xét hiện / không hiện; có chữ = so chữ của element"></div>
+      ${ci.extra.map((c, k) => `<div class="r"><span class="lv">VÀ ${c.neg ? 'không hiện' : 'hiện'}</span><span class="grow sc">${esc(c.code)}</span><button data-op="dropExtra" data-i="${k}" title="Bỏ điều kiện này">✕</button></div>`).join('')}
+      <div class="r"><span class="lv">làm xong thì</span><select data-f="end"><option value="continue" ${x.end === 'continue' ? 'selected' : ''}>quét lại từ đầu (continue)</option><option value="break" ${x.end === 'break' ? 'selected' : ''}>thoát While (break)</option><option value="none" ${!x.end || x.end === 'none' ? 'selected' : ''}>đi tiếp xuống dưới</option></select>
+        <label class="lv" title="count() > 0, kể cả đang ẩn"><input type="checkbox" data-f="cond" ${x.cond === 'dom' ? 'checked' : ''}> có trong DOM</label></div>
+      <div class="tag">${ci.kids} bước bên trong${st.inCase === x.id ? ' · đang ghi vào đây (✓ Xong ở thanh REC khi làm xong)' : ' · bấm dòng "▸ trống" / ⤵ để ghi thêm vào'} · giữ Alt → "VÀ ..." để ghép điều kiện</div></div>`;
+    }
     if (x.action === 'loop') return `<div class="st loop" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span><b>⟳ While${+x.timeout > 0 ? '' : ' (true)'}</b><span class="lv">giới hạn</span><input type="number" min="0" data-f="timeout" value="${+x.timeout || 0}" style="width:56px" title="0 = while (true), chỉ thoát khi gặp break"><span class="lv">giây (0 = không) · ${x.inner} if${st.openLoop === x.id ? ' · đang mở' : ''}</span>${tools}</div>
+      <div class="r"><span class="lv">tối đa</span><input type="number" min="0" data-f="maxN" value="${+x.maxN || 0}" style="width:56px" title="Quá số vòng này thì báo lỗi dừng script (0 = không giới hạn)"><span class="lv">vòng · chưa khớp trường hợp nào thì nghỉ</span><input type="number" min="0" step="100" data-f="idle" value="${+x.idle || 500}" style="width:64px"><span class="lv">ms</span></div>
       ${x.hasBreak ? '' : `<div class="tag">⚠ chưa có Break -- ${+x.timeout > 0 ? `vòng lặp chạy đủ ${+x.timeout} giây mới ra` : 'while (true) sẽ chạy mãi (tới khi hết giờ script)'}; thêm "If có → Break" hoặc tick "rồi Break" ở 1 If</div>`}<div class="code">${esc(x.code)}</div></div>`;
     if (x.action === 'branch') return `<div class="st br" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span><b>⑂ Nhánh</b><span class="lv">chờ tối đa</span><input type="number" min="1" data-f="timeout" value="${+x.timeout || 15}" style="width:56px"><span class="lv">giây · ${x.kids} nhánh${st.openBranch === x.id ? ' · đang mở' : ''}</span>${tools}</div><div class="tag">Chờ các phần tử bên dưới, cái nào hiện TRƯỚC thì làm việc của nó (waitAny)</div></div>`;
     if (x.action === 'forEach') return `<div class="st" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span><b>⟲ Với từng item</b>${tools}</div>
@@ -1390,7 +1458,7 @@ function pageRecorder() {
     if (!x.levels) return `<div class="st" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span>
       <select data-f="action"><option value="${x.action === 'skip' ? (x.url ? 'nav' : 'press') : x.action}">${esc(acts[x.url ? 'nav' : 'press'])}</option><option value="skip" ${x.action === 'skip' ? 'selected' : ''}>Bỏ qua</option></select>
       ${x.url ? `<label class="lv"><input type="checkbox" data-f="auto" ${x.auto ? 'checked' : ''}> tự chuyển (do click)</label>` : ''}${tools}</div><div class="code">${esc(x.code || '// (bỏ qua)')}</div></div>`;
-    const lv = x.levels[x.level], list = x.inLoop ? Object.keys(st.loopActions) : x.inBranch ? Object.keys(st.branchActions) : [...ELACTS, ...(x.opens ? ['clickTab'] : []), ...(x.href ? ['gotoLink'] : []), ...(x.href || x.tabUrl ? ['gotoUrl'] : [])];
+    const lv = x.levels[x.level], list = x.inLoop ? Object.keys(st.loopActions).filter((a) => !/^case/.test(a)) : x.inBranch ? Object.keys(st.branchActions) : [...ELACTS, ...(x.opens ? ['clickTab'] : []), ...(x.href ? ['gotoLink'] : []), ...(x.href || x.tabUrl ? ['gotoUrl'] : [])];
     const tags = `${x.frame ? `↳ trong iframe (${x.frame}) ` : ''}${x.inBranch ? '↳ 1 nhánh của Nhánh ' : ''}${x.tabVar ? `↳ ở tab mới (${x.tabVar}) ` : ''}${x.opens ? `↗ click mở tab mới${x.tabUrl ? ': ' + x.tabUrl : ''} ` : ''}${x.download ? '⬇ tải file ' : ''}${x.error ? '⚠ ' + x.error : ''}`;
     const cur = x.inLoop || x.inBranch ? ({ ifClick: 'click', ifType: 'type', ifHover: 'hover' }[x.action] || x.action) : x.action; // trong While / Nhánh click / ifClick như nhau
     return `<div class="st${x.inLoop ? ' inloop' : ''}${x.inBranch ? ' inbr' : ''}" data-id="${x.id}" data-css="${esc(lv.css)}"><div class="r"><span class="n">${i + 1}</span>
@@ -1417,12 +1485,13 @@ function pageRecorder() {
     ui.pill.classList.toggle('armed', !!arm);
     ui.pill.querySelector('.lbl').textContent = arm ? `🎯 Alt → ${arm.label}` : s.recording ? `REC · ${segN} bước` : s.segOpen ? `⏸ Tạm dừng · ${segN} bước` : 'Ghi';
     ui.pill.querySelector('[data-op=export]').hidden = !s.segOpen;
+    ui.pill.querySelector('[data-op=caseEnd]').hidden = !s.inCase;
     if (!open) return;
     const a = ui.root.activeElement;
     if (a && (a.tagName === 'INPUT' && a.type !== 'checkbox' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA')) return; // đang sửa 1 ô -- không vẽ lại kẻo mất con trỏ
     const list = ui.panel.querySelector('.list'), scroll = list ? list.scrollTop : 0;
     const cards = () => s.steps.map((x, i) => (s.segOpen && x.id >= s.segFrom && (i === 0 || s.steps[i - 1].id < s.segFrom) ? `<div class="seg">— đoạn ${s.recording ? 'đang ghi' : 'tạm dừng'} (⏹ Xuất = xuất cả đoạn) —</div>` : '') + stepHTML(x, i, s.actions || {}) + ghosts(x)).join('');
-    const blockBtns = !s.segOpen ? '' : s.openLoop ? '<button data-op="wend" title="Kết thúc vòng lặp">Đóng While</button>' : s.openBranch ? '<button data-op="bend" title="Kết thúc Nhánh">Đóng Nhánh</button>'
+    const blockBtns = s.inCase ? '<button data-op="caseEnd" title="Xong trường hợp đang ghi">✓ Xong trường hợp</button>' : !s.segOpen ? '' : s.openLoop ? '<button data-op="wend" title="Kết thúc vòng lặp">Đóng While</button>' : s.openBranch ? '<button data-op="bend" title="Kết thúc Nhánh">Đóng Nhánh</button>'
       : '<button data-op="wstart" title="Mở vòng lặp while -- bước ghi / chọn sau đó thành các If trong vòng lặp">⟳ While</button><button data-op="bstart" title="Chờ nhiều phần tử, cái nào hiện trước thì làm việc của nó (waitAny)">⑂ Nhánh</button>';
     const html = `<div class="hd"><b>${view === 'code' ? 'Code' : 'Các bước'}</b>
         <button data-op="rec">${s.recording ? '⏸ Tạm dừng' : s.segOpen ? '▶ Ghi tiếp' : '⏺ Ghi đoạn mới'}</button>${s.segOpen ? '<button data-op="export">⏹ Xuất</button>' : ''}${blockBtns}
@@ -1473,6 +1542,7 @@ function pageRecorder() {
       if (e.type !== 'click' || (drag && drag.moved)) return;
       if (el.closest('[data-op=menu]')) { open = !open; ui.panel.hidden = !open; ui.toast.hidden = true; if (!open) highlight(null); refresh(); }
       else if (el.closest('[data-op=export]')) recExport();
+      else if (el.closest('[data-op=caseEnd]')) call({ op: 'caseEnd' }).then((s) => { render(s); toast('✓ Xong trường hợp -- bước sau ra ngoài khối'); });
       else recToggle();
       return;
     }
@@ -1492,6 +1562,10 @@ function pageRecorder() {
       else if (f === 'limit') upd(stepId, { limit: Math.max(0, +el.value || 0) });
       else if (f === 'custom') { editing = null; if (el.value.trim()) upd(stepId, { custom: el.value.trim() }); else draw(st); }
       else if (f === 'tpl') upd(stepId, { tpl: el.value });
+      else if (f === 'neg') upd(stepId, { neg: el.value === '1' });
+      else if (f === 'textEq') upd(stepId, { textEq: el.value });
+      else if (f === 'end') upd(stepId, { end: el.value });
+      else if (f === 'maxN' || f === 'idle') upd(stepId, { [f]: Math.max(0, +el.value || 0) });
       else upd(stepId, { [f]: el.checked });
       el.blur();
       return;
@@ -1502,6 +1576,7 @@ function pageRecorder() {
     if (hole && !btn) { call({ op: 'cursorHole', key: hole.dataset.hole }).then((s) => { render(s); toast('▸ Bước mới sẽ ghi vào trong khối này'); }); return; }
     if (ln && !btn) { const k = +ln.dataset.k; expK = expK === k ? -1 : k; editing = null; draw(st); return; } // bấm 1 dòng code: mở / đóng chỉnh bước đó
     if (!op) return;
+    if (op === 'caseEnd') { call({ op: 'caseEnd' }).then((s) => { render(s); toast('✓ Xong trường hợp'); }); return; }
     if (op === 'curOff') { call({ op: 'cursorOff' }).then((s) => { render(s); toast('Bước mới lại nối vào cuối'); }); return; }
     if (op === 'close') { open = false; ui.panel.hidden = true; highlight(null); return; }
     if (op === 'view') { view = view === 'code' ? 'cards' : 'code'; expK = -1; draw(st); return; }
@@ -1518,6 +1593,7 @@ function pageRecorder() {
     if (op === 'src') { upd(stepId, { text: '= ' + btn.dataset.code }); return; }
     if (op === 'effOk' || op === 'effNo') { call({ op: 'effect', stepId, accept: op === 'effOk' }).then(render); return; }
     if (op === 'feOk') { call({ op: 'forEach', stepId }).then((s) => { render(s); toast('⟲ Đã gộp thành vòng với từng item'); }); return; }
+    if (op === 'dropExtra') { call({ op: 'dropExtra', stepId, i: +btn.dataset.i }).then(render); return; }
     if (op === 'here') { call({ op: 'cursor', stepId }).then((s) => { render(s); toast('▸ Bước mới sẽ chèn sau bước này'); }); return; }
     if (op === 'arm') { const on = st.armed && st.armed.stepId === stepId && st.armed.key === btn.dataset.key; call({ op: 'arm', stepId: on ? null : stepId, key: btn.dataset.key }).then((s) => { render(s); toast(on ? 'Đã huỷ chờ chọn element' : '🎯 Giữ Alt + rê chuột lên element, nhả Alt rồi bấm ✓ Chốt (Enter)'); }); return; }
     if (op === 'del') { expK = -1; call({ op: 'delete', stepId }).then(render); }
