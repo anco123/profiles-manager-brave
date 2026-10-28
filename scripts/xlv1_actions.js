@@ -23,9 +23,14 @@
  *   const newTab = await clickNewTab(page.locator('a.open'));                   // hoặc clickNewTab(el, { tries: 3 }): chưa ra tab thì tự click lại
  *   if (newTab) await clickEl(newTab.getByRole('button', { name: 'OK' }));
  *   await closeOtherTabs(page);
+ *   // While ghi theo trường hợp (recorder sinh ra): 20 vòng liền không khớp trường hợp nào / hết giờ = "màn hình lạ" -> chụp màn hình + log
+ *   const w5 = whileGuard(page, { name: 'While 5', miss: 20 });
+ *   while (await w5.next()) { if (await isShown(page.locator('#ok'))) { await clickEl(page.locator('#ok')); continue; } await w5.idle(500); }
  * -----------------------------------------------------------------------
  */
 
+const fs = require('fs');
+const path = require('path');
 const helpers = require('./helpers');
 const { clickPoint, humanType } = require('./xlv1_humanInput');
 const { scrollToElement } = require('./xlv1_scrollToElement');
@@ -192,6 +197,45 @@ async function whileHandle(rules, opts = {}) {
   return { ok: false, reason: 'timeout' };
 }
 
+// Chụp khung nhìn của tab -> DATA_DIR/screenshot/man-hinh-la/<tên>-<profile>-<giờ>.png; trả đường dẫn (null nếu không chụp được, không throw)
+async function shotScreen(page, name = 'man-hinh') {
+  try {
+    const { DATA_DIR } = require('./datapaths'), dir = path.join(DATA_DIR, 'screenshot', 'man-hinh-la');
+    const pid = page.__profileId || (page.context().pages().find((p) => p.__profileId) || {}).__profileId || 'profile';
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${name}-${pid}-${Date.now()}.png`.replace(/[<>:"/\\|?*\s]/g, '_'));
+    await page.screenshot({ path: file });
+    return file;
+  } catch (e) { log(`[shotScreen] Không chụp được màn hình: ${e.message}`); return null; }
+}
+
+/**
+ * Gác 1 vòng While ghi theo trường hợp (recorder sinh ra):  const w = whileGuard(page, opts);  while (await w.next()) { if (...) { ...; continue; } ...; await w.idle(500); }
+ *   next(): đầu mỗi vòng -- hết `timeout` giây: chụp màn hình + log "màn hình lạ" rồi trả false (thoát While); quá `maxN` vòng: chụp + log + throw
+ *   idle(ms): cuối vòng = không khớp trường hợp nào -> nghỉ ms. `miss` vòng LIỀN như vậy = màn hình lạ, chưa có trường hợp cho nó: chụp + log + throw
+ *   (vòng nào khớp 1 trường hợp -- continue, không tới idle -- thì đếm lại từ 0). opts: { name, miss = 20 (0 = tắt), maxN = 0, timeout = 0 giây }
+ */
+function whileGuard(page, opts = {}) {
+  const { name = 'While', miss = 20, maxN = 0, timeout = 0 } = opts, end = timeout > 0 ? Date.now() + timeout * 1000 : 0;
+  let n = 0, m = 0, idled = false;
+  const report = async (msg) => { const file = await shotScreen(page, name); msg = `[${name}] ${msg}${file ? ` -- ảnh: ${file}` : ''}`; log(msg); return msg; };
+  const strange = (why) => report(`Màn hình lạ, chưa có trường hợp cho nó (${why}) -- URL: ${page.url()}`);
+  return {
+    async next() {
+      if (!idled) m = 0;
+      idled = false;
+      if (end && Date.now() > end) { await strange(`hết ${timeout} giây chưa xong`); return false; }
+      if (maxN > 0 && ++n > maxN) throw new Error(await report(`Quá ${maxN} vòng mà chưa xong (kẹt ở 1 màn hình?)`));
+      return true;
+    },
+    async idle(ms = 500) {
+      idled = true;
+      if (miss > 0 && ++m >= miss) throw new Error(await strange(`${m} vòng liền không khớp trường hợp nào`));
+      await page.waitForTimeout(ms);
+    },
+  };
+}
+
 // Click rồi xem có tab mới mở ra không: có -> trả về tab mới (đã tải xong DOM), không -> null. Chờ tối đa `wait` ms tính từ SAU cú click
 // (clickEl lăn + đi chuột mất vài giây -- tính từ trước cú click thì dễ hết giờ oan). Click không được cũng trả null.
 // opts: số (= wait) hoặc { wait = 5000, tries = 1 }. tries > 1: chưa thấy tab thì tự click lại -- DÙNG CÁI NÀY thay vì tự bọc while:
@@ -230,4 +274,4 @@ async function closeOtherTabs(pageOrEl) {
   return main;
 }
 
-module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs, dblClickEl, rightClickEl, checkEl };
+module.exports = { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs, dblClickEl, rightClickEl, checkEl, whileGuard, shotScreen };
