@@ -2259,7 +2259,7 @@ async function prettyInsert(code) {
 function recPrelude(body, header, req) {
   const cur = editor.getValue();
   let pre = cur.includes("require('./xlv1_actions')") ? '' : header || '';
-  const miss = ['clickNewTab', 'closeOtherTabs', 'dblClickEl', 'rightClickEl', 'checkEl'].filter((f) => new RegExp(`\\b${f}\\(`).test(body) && !new RegExp(`\\b${f}\\b`).test(cur));
+  const miss = ['clickNewTab', 'closeOtherTabs', 'dblClickEl', 'rightClickEl', 'checkEl', 'whileGuard'].filter((f) => new RegExp(`\\b${f}\\(`).test(body) && !new RegExp(`\\b${f}\\b`).test(cur));
   if (!pre && miss.length) pre += `const { ${miss.join(', ')} } = require('./xlv1_actions');\n`; // file require từ trước khi có các hàm này
   if (req && window.FN_TRANSFORM) { const r = { ...req }; delete r['./xlv1_actions']; for (const l of window.FN_TRANSFORM.requireLines(cur + '\n' + pre, r)) pre += l + '\n'; } // hàm gọi ở bảng ☰ của recorder: helpers, xlv1_humanInput, Excel...
   if (/readGoogleSheetCell\(/.test(body) && !/require\(['"]\.\/readGoogleSheetCell['"]\)/.test(cur + pre)) pre += "const { readGoogleSheetCell } = require('./readGoogleSheetCell');\n";
@@ -2276,7 +2276,7 @@ function applyRecExports(list, header) {
     recWaitWarned = false;
     recLastExport = e.id;
     prettyInsert(recPrelude(e.body, header, e.req));
-    showToast(`Đã chèn ${e.count} bước vừa ghi`);
+    showToast(e.replaces && e.replaces.length ? `Đã chèn bản cập nhật của CẢ khối ${e.replaces.join(', ')} -- xoá khối cũ trong code` : `Đã chèn ${e.count} bước vừa ghi`);
   }
 }
 

@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check-chrome": "node update-chrome-portable.js"
+    "check-chrome": "node update-chrome-portable.js",
+    "test:recorder": "node test/recorder.test.js"
   },
   "license": "MIT",
   "dependencies": {
