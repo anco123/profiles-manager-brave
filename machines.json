@@ -1,5 +1,5 @@
 {
-  "_ghi_chu": "Cấu hình riêng từng máy theo TÊN MÁY (xem ở Settings -> 'Máy này', hoặc dòng 'Máy này: ...' khi npm start). Đường dẫn tương đối tính từ thư mục project. Máy có .env thì .env ưu tiên hơn.",
+  "_ghi_chu": "Cấu hình riêng từng máy theo TÊN MÁY (xem ở Settings -> 'Máy này', hoặc dòng 'Máy này: ...' khi npm start). Đường dẫn tương đối tính từ thư mục project. machines.json ưu tiên hơn .env (mục nào ghi ở đây thì .env không đè được).",
   "DESKTOP-VS5IA8O": { "DATA_DIR": "..\\chromeProfile" },
   "TEN-MAY-2": { "DATA_DIR": "D:\\Profiles", "CHROME_PATH": "..\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe" },
   "TEN-MAY-3": { "DATA_DIR": "E:\\PROJECT\\Profile" }

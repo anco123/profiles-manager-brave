@@ -1181,7 +1181,10 @@ async function openSettingsPanel() {
     const res = await fetch('/api/settings');
     const data = await res.json();
     settingsDataDirInput.value = data.dataDir || '';
-    document.getElementById('settingsMachine').innerHTML = `Máy này: <strong>${String(data.machine || '?').replace(/[&<>"]/g, '')}</strong> &mdash; ${data.machineConfig ? 'đang dùng cấu hình của máy này trong <code>machines.json</code>' : 'chưa có trong <code>machines.json</code> (thêm 1 mục tên này để pull về là tự đúng folder, không cần .env)'}`;
+    const mc = data.machineConfig || {}; // mục máy này ghi trong machines.json -> ô tương ứng khoá lại (sửa ở machines.json)
+    settingsDataDirInput.disabled = !!mc.DATA_DIR; settingsDataDirInput.title = mc.DATA_DIR ? `Theo machines.json (${mc.DATA_DIR}) -- sửa trong machines.json` : '';
+    settingsChromePathInput.disabled = !!mc.CHROME_PATH; settingsChromePathInput.title = mc.CHROME_PATH ? `Theo machines.json (${mc.CHROME_PATH}) -- sửa trong machines.json` : '';
+    document.getElementById('settingsMachine').innerHTML = `Máy này: <strong>${String(data.machine || '?').replace(/[&<>"]/g, '')}</strong> &mdash; ${data.machineConfig ? 'đang dùng cấu hình của máy này trong <code>machines.json</code> (ưu tiên hơn <code>.env</code>; ô bị khoá = sửa trong machines.json)' : 'chưa có trong <code>machines.json</code> (thêm 1 mục tên này để pull về là tự đúng folder, không cần .env)'}`;
     settingsChromePathInput.value = data.chromePath || '';
     settingsAutoClearCacheInput.checked = Boolean(data.autoClearCacheAfterRun);
   } catch (err) {
@@ -1209,9 +1212,9 @@ document.getElementById('saveSettingsBtn').addEventListener('click', async () =>
     const res = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        dataDir: settingsDataDirInput.value.trim(),
-        chromePath: settingsChromePathInput.value.trim(),
+      body: JSON.stringify({ // ô đang do machines.json quyết định (khoá lại) thì không ghi vào .env
+        ...(settingsDataDirInput.disabled ? {} : { dataDir: settingsDataDirInput.value.trim() }),
+        ...(settingsChromePathInput.disabled ? {} : { chromePath: settingsChromePathInput.value.trim() }),
         autoClearCacheAfterRun: settingsAutoClearCacheInput.checked,
       }),
     });

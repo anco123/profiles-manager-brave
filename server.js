@@ -88,7 +88,8 @@ if (fs.existsSync(ENV_FILE)) {
 
 // machines.json (CÓ trong git -- 3 máy dùng chung 1 repo, mỗi máy 1 folder profile): cấu hình riêng từng máy theo TÊN MÁY (os.hostname(),
 // không phân biệt hoa thường), VD { "PC-NHA": { "DATA_DIR": "..\\Profile", "CHROME_PATH": "..\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe" } }.
-// Pull về máy nào cũng tự lấy đúng cấu hình của máy đó, không phải tạo .env. Có .env (không vào git) thì .env ưu tiên hơn.
+// Pull về máy nào cũng tự lấy đúng cấu hình của máy đó. machines.json THẮNG .env với mục nó ghi (Settings / .env cũ hay còn sót DATA_DIR
+// trỏ về data\ -- không được để nó lấn cấu hình theo máy); mục machines.json không ghi thì vẫn lấy ở .env.
 const MACHINE = os.hostname();
 let MACHINE_CONFIG = null;
 try {
@@ -96,7 +97,7 @@ try {
   const mine = Object.entries(all || {}).find(([k]) => k.toLowerCase() === MACHINE.toLowerCase());
   if (mine && mine[1] && typeof mine[1] === 'object') {
     MACHINE_CONFIG = mine[1];
-    for (const [k, v] of Object.entries(mine[1])) if (!(k in process.env) && v != null && v !== '') process.env[k] = String(v);
+    for (const [k, v] of Object.entries(mine[1])) if (v != null && String(v).trim() !== '') process.env[k] = String(v).trim();
   }
 } catch (err) { if (err.code !== 'ENOENT') console.warn(`machines.json lỗi, bỏ qua: ${err.message}`); }
 console.log(`Máy này: ${MACHINE}${MACHINE_CONFIG ? ' -- dùng cấu hình trong machines.json' : ' (chưa có trong machines.json)'}`);
@@ -165,6 +166,7 @@ function autoDetectDataDir() {
   return fs.existsSync(path.join(sibling, 'profiles.json')) ? sibling : path.join(__dirname, 'data');
 }
 const DATA_DIR = process.env.DATA_DIR || autoDetectDataDir();
+console.log(`Folder profile: ${DATA_DIR} (${MACHINE_CONFIG && MACHINE_CONFIG.DATA_DIR ? 'machines.json' : process.env.DATA_DIR ? '.env' : 'mặc định'})`);
 const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
 const PROFILES_ROOT = path.join(DATA_DIR, 'profiles'); // one sub-folder per profile = one persistent browser profile
 const SCRIPTS_DIR = path.join(__dirname, 'scripts'); // your own helper .js files live here
