@@ -270,6 +270,9 @@ function buildCard(profile) {
   launchBtn.addEventListener('click', () => toggleLaunch(profile.id, profile.running));
   scriptBtn.addEventListener('click', () => window.open(`/editor?profile=${profile.id}`, '_blank'));
   fingerprintBtn.addEventListener('click', () => regenerateFingerprint(profile.id, profile.name, profile.running));
+  const folderBtn = card.querySelector('.btn-folder');
+  folderBtn.title = `Mở folder của profile: ${profile.dataPath || ''}`;
+  folderBtn.addEventListener('click', () => openProfileFolder(profile.id));
   card.querySelector('.btn-icon-danger').addEventListener('click', () => deleteProfile(profile.id, profile.name));
   card.querySelector('.card-select').addEventListener('change', () => toggleSelection(profile.id));
 
@@ -287,6 +290,19 @@ function applyRunningState(card, statusText, launchBtn, scriptBtn, running) {
 // -------------------------------------------------------------------
 // Actions
 // -------------------------------------------------------------------
+// 📁 Path: server mở folder profile bằng Explorer / Finder của máy (server chạy trên chính máy đó); kèm chép đường dẫn vào clipboard
+async function openProfileFolder(id) {
+  try {
+    const res = await fetch(`/api/profiles/${id}/open-folder`, { method: 'POST' });
+    const data = await res.json();
+    if (data.path && navigator.clipboard) navigator.clipboard.writeText(data.path).catch(() => {});
+    if (!res.ok) throw new Error(data.error || 'Không mở được folder');
+    showToast(`Đã mở folder (đường dẫn đã chép): ${data.path}`);
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
 async function toggleLaunch(id, isRunning) {
   const endpoint = isRunning ? 'close' : 'launch';
   try {
@@ -442,7 +458,7 @@ function autoScrollTick() {
 
 grid.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return; // left button only
-  if (e.target.closest('.card-actions') || e.target.classList.contains('card-select')) return; // let buttons/checkbox handle their own clicks
+  if (e.target.closest('.card-actions, .btn-folder') || e.target.classList.contains('card-select')) return; // let buttons/checkbox handle their own clicks
 
   if (!e.shiftKey) clearSelection(); // fresh drag replaces the old selection unless Shift extends it
 
@@ -1165,6 +1181,7 @@ async function openSettingsPanel() {
     const res = await fetch('/api/settings');
     const data = await res.json();
     settingsDataDirInput.value = data.dataDir || '';
+    document.getElementById('settingsMachine').innerHTML = `Máy này: <strong>${String(data.machine || '?').replace(/[&<>"]/g, '')}</strong> &mdash; ${data.machineConfig ? 'đang dùng cấu hình của máy này trong <code>machines.json</code>' : 'chưa có trong <code>machines.json</code> (thêm 1 mục tên này để pull về là tự đúng folder, không cần .env)'}`;
     settingsChromePathInput.value = data.chromePath || '';
     settingsAutoClearCacheInput.checked = Boolean(data.autoClearCacheAfterRun);
   } catch (err) {
