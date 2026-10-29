@@ -31,6 +31,7 @@ const call = (msg) => page.evaluate((m) => window.__pmRec(m), msg);
 // Bấm trong giao diện recorder (shadow DOM -- clickEl báo "bị đè" oan vì document.elementFromPoint ra thẻ host): đi chuột thật + nhấn theo toạ độ
 async function uiClick(loc) { await loc.waitFor({ state: 'visible', timeout: 8000 }); await helpers.clickVisibly(page, await loc.boundingBox()); await page.waitForTimeout(350); }
 const side = (sel) => page.locator('.side ' + sel);
+const add = () => uiClick(side('[data-op=sadd]')); // ＋ Thêm bước / ◆ Đặt làm điều kiện
 const elRow = (name) => page.locator('.side .elr').filter({ has: page.locator('b', { hasText: new RegExp(`^${name}$`) }) });
 const ok = (name) => { done++; console.log('  ✓ ' + name); };
 
@@ -66,25 +67,47 @@ const ok = (name) => { done++; console.log('  ✓ ' + name); };
     assert.ok(await side('[data-sact=cond].on').isVisible(), 'if chưa có điều kiện -> chọn sẵn "Làm điều kiện if"');
     assert.ok(!/isShown/.test(rec.recorderCode(ID, false)), 'if chưa có điều kiện thì chưa ra code');
 
-    // điều kiện = Next (từ kho), thêm Click Next
+    // điều kiện = Next (bấm dòng trong kho -> điền ô Element -> ◆ Đặt làm điều kiện), thêm Click Next
     await uiClick(elRow('Next'));
+    assert.strictEqual(await side('[data-f=sel]').inputValue(), "page.locator('#next')", 'bấm dòng kho -> điền ô Element');
+    assert.ok(!st().steps.find((x) => x.id === c1.id).levels, 'chỉ điền ô, chưa đặt điều kiện');
+    await add();
     assert.strictEqual(st().steps.find((x) => x.id === c1.id).elId, eNext.id, 'điều kiện if trỏ tới element Next trong kho');
-    assert.ok(await side('[data-sact=click].on').isVisible(), 'chọn xong điều kiện -> về thao tác Click');
-    await uiClick(elRow('Next'));
+    assert.ok(await side('[data-sact=click].on').isVisible() && !(await side('[data-f=sel]').inputValue()), 'đặt xong điều kiện -> về thao tác Click, ô Element trống');
+    await uiClick(elRow('Next')); await add();
     s = st();
     assert.deepStrictEqual(s.steps.filter((x) => x.cs === c1.id).map((x) => x.action), ['click']);
-    ok('▦ Khối: ＋ While -> if + else, bảng 2 ô mở; bấm element trong kho làm điều kiện / thêm bước Click');
+    ok('▦ Khối: ＋ While -> if + else, bảng 2 ô mở; ô Element chọn từ kho -> đặt điều kiện / ＋ Thêm bước Click');
 
-    // 🎯 Element mới (Đóng -- hiện sau khi bấm Next ở trên) với thao tác Chờ hiện -> vào kho + thêm bước luôn
+    // giữ Alt chọn Đóng (hiện sau khi bấm Next ở trên) -> bảng Alt chỉ có ✓ Thêm vào kho (không còn ô gõ hàm) -> điền ô Element -> Chờ hiện
     await uiClick(side('[data-sact=wait]'));
-    await uiClick(side('[data-op=libNew]'));
-    assert.ok(st().armed && st().armed.lib, 'đang chờ chọn element mới');
     await page.keyboard.down('Alt'); await A.hoverEl(page.locator('#close')); await page.waitForTimeout(150); await page.keyboard.up('Alt');
-    await uiClick(page.locator('.pick [data-op=pslot]'));
+    await page.locator('.pick [data-op=pslot]').waitFor();
+    assert.strictEqual(await page.locator('.pick [data-f=pq], .pick [data-f=ptext], .pick [data-f=pdo]').count(), 0, 'bảng Alt không còn ô gõ hàm / chữ / làm luôn');
+    await page.keyboard.press('Enter'); // Enter = ✓ Thêm vào kho
     const eClose = await until(() => (st().els || []).find((e) => e.code === "page.locator('#close')"), 5000, 'Đóng vào kho');
+    assert.ok(!st().steps.some((x) => x.elId === eClose.id), 'Alt chỉ thêm vào kho, chưa thêm bước');
+    await page.waitForTimeout(300);
+    assert.strictEqual(await side('[data-f=sel]').inputValue(), "page.locator('#close')", 'element vừa chọn điền sẵn vào ô Element');
+    await add();
     await until(() => st().steps.some((x) => x.cs === c1.id && x.action === 'wait' && x.elId === eClose.id), 5000, 'bước Chờ hiện Đóng');
-    assert.ok(!st().armed, 'thêm xong thì thôi chờ chọn');
-    ok('🎯 Element mới: giữ Alt chọn -> vào kho + thêm bước với thao tác đang chọn (Chờ hiện)');
+    ok('giữ Alt chọn -> ✓ Thêm vào kho (Enter), điền sẵn ô Element -> ＋ Thêm bước (Chờ hiện)');
+
+    // gõ tay ô Element: #id / //xpath -> đếm số khớp, Enter thêm bước (selector mới vào kho, trùng thì dùng lại)
+    await uiClick(side('[data-sact=hover]'));
+    await uiClick(side('[data-f=sel]')); await page.keyboard.type('//div[@data-testid="doneDialog"]', { delay: 10 });
+    for (let i = 0; i < 30 && (await side('.ef .xc').innerText()) !== '✓1'; i++) await page.waitForTimeout(150);
+    assert.strictEqual(await side('.ef .xc').innerText(), '✓1', 'đếm số khớp selector gõ tay');
+    await page.keyboard.press('Enter');
+    const eDlg = await until(() => (st().els || []).find((e) => e.code === `page.locator('xpath=//div[@data-testid="doneDialog"]')`), 5000, 'xpath gõ tay vào kho');
+    await until(() => st().steps.some((x) => x.cs === c1.id && x.action === 'hover' && x.elId === eDlg.id), 5000, 'bước Hover hộp thoại');
+    const nEls = st().els.length;
+    await uiClick(side('[data-sact=wait]'));
+    await uiClick(side('[data-f=sel]')); await page.keyboard.type('#close', { delay: 10 }); await page.keyboard.press('Enter');
+    await until(() => st().steps.filter((x) => x.cs === c1.id && x.action === 'wait' && x.elId === eClose.id).length === 2, 5000, 'gõ #close -> dùng lại element Đóng');
+    assert.strictEqual(st().els.length, nEls, 'selector trùng -> không thêm element mới vào kho');
+    for (const id of st().steps.filter((x) => x.cs === c1.id).slice(2).map((x) => x.id)) await call({ op: 'delete', stepId: id }); // bỏ 2 bước thử
+    ok('ô Element gõ tay (#id, //xpath): đếm số khớp, Enter thêm bước, trùng selector thì dùng lại element trong kho');
 
     // Xong -> như ✓ Xong TH; ＋ ở if 1 -> if 2 cùng cấp: điều kiện Đóng, Click Đóng, thoát While
     await uiClick(side('[data-op=spClose]'));
@@ -93,13 +116,13 @@ const ok = (name) => { done++; console.log('  ✓ ' + name); };
     await side('.sh').waitFor();
     const c2 = st().steps.find((x) => x.action === 'case' && x.id !== c1.id);
     assert.strictEqual(c2.loop, L.id, 'if 2 cùng cấp trong While');
-    await uiClick(elRow('Đóng'));
-    await uiClick(elRow('Đóng'));
+    await uiClick(elRow('Đóng')); await add();
+    await uiClick(elRow('Đóng')); await add();
     await side('[data-f=end]').selectOption('break'); await page.waitForTimeout(400);
     await uiClick(side('[data-op=spClose]'));
     // else: Nghỉ
     await uiClick(page.locator(`.bif.else[data-id="${L.id}"] [data-op=enter]`));
-    await uiClick(side('[data-sact=pause]'));
+    await uiClick(side('[data-sact=pause]')); await add();
     await uiClick(side('[data-op=spClose]'));
     const code = rec.recorderCode(ID, false), lp = `w${L.id}`;
     const want = new RegExp(`while \\(await ${lp}\\.next\\(\\)\\) \\{[^]*?if \\(await isShown\\(page\\.locator\\('#next'\\)\\)\\) \\{[^]*?await clickEl\\(page\\.locator\\('#next'\\)\\);\\n[^]*?await waitEl\\(page\\.locator\\('#close'\\), 15000\\);\\n\\s+continue;[^]*?if \\(await isShown\\(page\\.locator\\('#close'\\)\\)\\) \\{[^]*?await clickEl\\(page\\.locator\\('#close'\\)\\);\\n\\s+break;[^]*?await pause\\(page, 800, 2000\\);\\n\\s+await ${lp}\\.idle\\(500\\);`);
@@ -161,12 +184,11 @@ const ok = (name) => { done++; console.log('  ✓ ' + name); };
     const wantXp = '//article[@data-testid="card"]//button[@type="button" and contains(@class, "act")][.//span[text()[normalize-space()="Like"]]]';
     assert.strictEqual(await xcode(), wantXp); await cnt('✓1');
     ok('bảng chọn Alt: HTML gốc 2 cha / 2 con; bấm thuộc tính / cha / chữ của con / and-or / thẻ-* / ///  -> XPath, đếm số khớp, tô viền, cảnh báo');
-    // chọn việc Click -> bước dùng đúng XPath vừa ghép, vào kho element
-    await page.keyboard.type('c', { delay: 20 }); await page.keyboard.press('Enter');
+    // Enter = ✓ Thêm vào kho với đúng XPath vừa ghép
+    await page.keyboard.press('Enter');
     await until(() => (st().els || []).some((e) => e.code === `page.locator('xpath=${wantXp}')`), 6000, 'XPath vào kho');
-    assert.ok(rec.recorderCode(ID, false).includes(`await clickEl(page.locator('xpath=${wantXp}'));`));
     assert.strictEqual(await page.locator(`xpath=${wantXp}`).count(), 1);
-    ok('Click với XPath ghép tay -> bước + kho element dùng đúng XPath đó');
+    ok('XPath ghép tay -> Enter -> vào kho element đúng XPath đó');
 
     // ---- if chưa có điều kiện: dạng ô / dạng code không lỗi, không ra code
     await call({ op: 'blockWhile' });

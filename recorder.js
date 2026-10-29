@@ -6,13 +6,14 @@
  *   nút ⏹ Xuất = kết thúc đoạn + xuất code cả đoạn (editor đang mở tự chèn vào chỗ con trỏ, kèm copy clipboard).
  *   Nút ☰ cạnh đó -> bảng các bước đã ghi: đổi hành động, đổi selector, ⬆ cha / ⬇ con, sửa chữ gõ, xoá bước, xem code.
  * - Giữ Alt + rê chuột: bảng các lớp phần tử chồng nhau dưới con trỏ (elementsFromPoint -- cả lớp phủ trong suốt lẫn nút bị đè bên dưới),
- *   lăn chuột để đổi lớp, nhả Alt thì bảng đứng yên để chọn selector (đếm số khớp bằng chính Playwright) + hành động.
+ *   lăn chuột để đổi lớp, nhả Alt thì bảng đứng yên để chọn selector / ghép XPath rồi ✓ Thêm vào kho element (Enter). Bảng Alt CHỈ để
+ *   chọn element (không gõ hàm); thao tác với element làm ở bảng 2 ô của ▦ Khối hoặc thao tác thẳng trên trang.
  * - Trang ghi gì: click, gõ (gộp cả ô thành 1 bước), Enter, chọn <select>, chuyển trang. Chỉ sự kiện THẬT (isTrusted) -- nhưng chuột/phím
  *   của Playwright cũng là "thật", nên server.js tự tạm dừng ghi trong lúc Run script (pauseRecorder).
  * - Sau cú click: mở tab mới -> click + chờ tab mới (không chắc có mở nên bọc if), các bước ghi ở tab mới LỒNG vào trong if (chạy trên
  *   tab đó), sau if đóng hết tab chỉ giữ tab đầu tiên (closeOtherTabs); muốn thì đổi sang page.goto (đọc href lúc chạy / URL cố định).
  *   Tải file -> chờ download.
- * - While: mở While (đầu bảng Alt / bảng ☰) -> các bước chọn / ghi sau đó thành các `if (có element) {...; continue;}` trong
+ * - While (cách cũ, nút ⟳ While ở bảng ☰) -> các bước ghi sau đó thành các `if (có element) {...; continue;}` trong
  *   `while (true)` (quét lại từ đầu sau mỗi lần làm; giới hạn số giây là tuỳ chọn); thoát bằng "If có → Break" hoặc tick "rồi Break"
  *   ở 1 If; "có trong DOM" = điều kiện count() > 0 (kể cả đang ẩn) thay vì đang hiện. Đóng While -> ghi tiếp như thường.
  *   Hộp thoại alert/confirm không cần ghi: Playwright tự đóng (dismiss) cả lúc ghi lẫn lúc chạy script.
@@ -25,20 +26,19 @@
  *   trên nhiều item (VD Like nhiều bài) -> đề xuất gộp thành vòng `for (const item of ...all())`.
  * - Ghi được click / gõ trong iframe (page.frameLocator(...)); bảng chọn Alt chỉ ở khung chính.
  * - Bảng ☰ hiện CODE (bấm 1 dòng để chỉnh bước đó); ▶ Chạy thử chạy đoạn đang ghi trên chính trang đó, báo bước nào hỏng.
- * - Bảng Alt CHỈ để làm việc với element (gõ tên việc: click, gõ, if hiện, chờ...). Gọi hàm ở ô ƒ của bảng ☰ (While, Nhánh, if / else,
+ * - Gọi hàm ở ô ƒ của bảng ☰ (While, Nhánh, if / else,
  *   pause, goto, tab mới, Excel...): hàm có ô element -> bấm 🎯 Pick, giữ Alt chọn element, nhả Alt bấm ✓ Chốt (Enter) -> selector vào hàm.
  * - Con trỏ chèn: ⤵ ở 1 dòng = bước mới chèn sau bước đó; hàm có khối { } -> con trỏ tự vào trong khối (dòng "▸ trống" bấm để vào);
  *   ✕ = lại nối vào cuối. ↑ ↓ đi vào / ra khối (While, Nhánh, hàm có khối).
- * - Ghi theo TRƯỜNG HỢP (kiểu while + nhiều if): trong While giữ Alt lên element -> "Khi hiện / Khi KHÔNG hiện / Khi chữ là… → ghi khối",
- *   thao tác trên trang như thường (mọi bước vào trong if đó), "VÀ ... hiện / không hiện" để ghép điều kiện, ✓ Xong TH ở thanh REC
- *   -> continue (quét lại) / break (thoát While) / đi tiếp. While có giới hạn số vòng (quá thì báo lỗi) + thời gian nghỉ khi chưa khớp.
+ * - Ghi theo TRƯỜNG HỢP (kiểu while + nhiều if -- tạo ở ▦ Khối): ↵ vào 1 if, thao tác trên trang như thường (mọi bước vào trong if đó),
+ *   ✓ Xong TH ở thanh REC / Xong ở bảng 2 ô -> continue (quét lại) / break (thoát While) / đi tiếp. While có giới hạn số vòng (quá thì báo lỗi) + thời gian nghỉ khi chưa khớp.
  *   ✓ Xong TH mà trường hợp chưa kết thúc bằng 1 bước chờ -> gợi ý thêm "Chờ hiện" cho element vừa hiện ra sau bước cuối (xem caseSug).
  * - Mở lại While / trường hợp đã ghi (kể cả đã ⏹ Xuất): nút ＋ ở dòng While / trường hợp trong bảng ☰ -> ghi thêm trường hợp vào đó;
  *   lần xuất sau ra CẢ khối While đã cập nhật (không phải mỗi phần mới) -- xem segSteps.
  * - ▦ Dạng khối (bảng ☰): While = các if (trường hợp) + else. ＋ ở cuối if = if mới cùng cấp, ↵ = vào if / else -> bảng 2 ô bên phải: ô trên
- *   thao tác phổ biến (Click, Gõ, Chờ hiện...), ô dưới kho element; bấm thao tác rồi bấm element = thêm bước; "◆ Làm điều kiện if" + element =
- *   điều kiện của if. Xong / Esc = đóng bảng (như ✓ Xong TH). Thao tác thẳng trên trang lúc đang ở trong if cũng vào if đó.
- * - Kho element: mọi element add trong lần record này (bước ghi được, 🎯 Element mới) -- bước TRỎ tới element trong kho, sửa selector 1 lần
+ *   thao tác phổ biến (Click, Gõ, Chờ hiện...) + ô Element (bấm 1 dòng trong kho, giữ Alt chọn trên trang, hoặc gõ tay #id / .class /
+ *   //xpath / page.getBy... -- đếm số khớp) + ＋ Thêm bước (Enter); ô dưới kho element. "◆ Làm điều kiện if" + element = điều kiện của if. Xong / Esc = đóng bảng (như ✓ Xong TH). Thao tác thẳng trên trang lúc đang ở trong if cũng vào if đó.
+ * - Kho element: mọi element add trong lần record này (bước ghi được, chọn bằng Alt, gõ tay ở ô Element) -- bước TRỎ tới element trong kho, sửa selector 1 lần
  *   ở kho (hoặc ở 1 bước bất kỳ dùng nó) thì mọi bước dùng element đó đổi theo. Xem libOf.
  * - Bảng chọn Alt (nhả Alt): hiện HTML gốc quanh element -- 2 tầng cha, element, 2 tầng con; bấm thuộc tính / class / chữ / tên thẻ / dấu / //
  *   để ghép XPath (and / or), Playwright đếm số khớp, tô viền mọi chỗ khớp, cảnh báo selector dễ gãy. Không bấm gì = dùng selector gợi ý.
@@ -734,8 +734,9 @@ async function handle(id, page, msg, frame) {
     else if (key && e && ACTIONS[msg.action]) appendTo(r, key, { id: ++r.seq, at: Date.now(), action: msg.action, el: e, levels: e.levels, level: e.level, alt: e.alt, frame: e.frame, tab: e.tab, text: msg.text, enter: !!msg.enter });
     r.segOpen = true;
   }
-  else if (msg.op === 'libAdd' && Array.isArray(msg.levels)) { // 🎯 Element mới -> vào kho (đã có cùng selector thì dùng cái cũ)
-    const e = libOf(r, { levels: msg.levels, level: msg.level || 0, alt: msg.alt || 0, custom: msg.custom || null });
+  else if (msg.op === 'libAdd' && (Array.isArray(msg.levels) || /^page\./.test(msg.custom || ''))) { // Alt chọn / gõ tay ở ô Element -> vào kho (cùng selector thì dùng cái cũ)
+    const name = String(msg.name || msg.custom).slice(0, 40), levels = Array.isArray(msg.levels) ? msg.levels : [{ tag: '', label: name, size: '', css: '', alts: [{ kind: 'gõ tay', code: msg.custom, base: msg.custom, unique: true }] }];
+    const e = libOf(r, { levels, level: msg.level || 0, alt: msg.alt || 0, custom: msg.custom || null });
     r.armed = null;
     return { ...stateOf(id), libAdded: e && e.id };
   }
@@ -1125,32 +1126,26 @@ function pageRecorder() {
   // (shadow DOM đóng nên ở window không thấy phần tử thật bên trong -> tìm lại bằng root.elementFromPoint / root.activeElement)
   let root = null;
   for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'mouseover', 'keydown', 'keyup', 'keypress']) addEventListener(t, (e) => {
-    if (!root || !ours(e)) return;
+    if (!root || !ours(e) || (t.startsWith('key') && e.key === 'Alt')) return; // Alt: để bộ chọn element nhận cả khi đang gõ trong bảng
     e.stopImmediatePropagation();
     const el = t.startsWith('key') || (t === 'click' && e.detail === 0) ? root.activeElement : root.elementFromPoint(e.clientX, e.clientY);
     if (el && el.closest) uiEvent(e, el);
   }, true);
 
   // ---------------- giữ Alt + rê chuột: các lớp phần tử chồng nhau dưới con trỏ; lăn chuột đổi lớp; nhả Alt = bảng đứng yên để chọn
-  let mx = -1, my = -1, pick = null, raf = 0, altDown = false; // pick = { live, rows, sel, moved, t0, altObj, custom, editing, text, enter, perform }
+  let mx = -1, my = -1, pick = null, raf = 0; // pick = { live, rows, sel, moved, t0, altObj, custom, editing, tree, xs }
   addEventListener('mousemove', (e) => { mx = e.clientX; my = e.clientY; if (pick && pick.live) { pick.moved = true; if (!raf) raf = requestAnimationFrame(() => { raf = 0; updatePick(); }); } }, true);
   addEventListener('keydown', (e) => {
-    if (!e.isTrusted || ours(e)) return;
-    if (e.key === 'Alt') {
-      altDown = true;
-      if (pick && pick.live) e.preventDefault();
-      else if (st && (st.recording || st.armed) && ui && !e.repeat && !e.ctrlKey) { e.preventDefault(); startPick(); }
-      else if (st && ui && !e.repeat && !e.ctrlKey) call({ op: 'state' }).then((s) => { render(s); if (altDown && !pick && s && (s.recording || s.armed)) startPick(); }); // trạng thái trong trang chưa kịp làm mới (vừa chạy script xong...) -- hỏi lại server
-      return;
-    }
+    if (!e.isTrusted || (ours(e) && e.key !== 'Alt')) return;
+    if (e.key === 'Alt') { if (pick && pick.live) e.preventDefault(); else if (st && ui && !e.repeat && !e.ctrlKey) { e.preventDefault(); if (root.activeElement && root.activeElement.blur) root.activeElement.blur(); startPick(); } return; } // chọn element vào kho -- được cả lúc tạm dừng / chưa ghi
     if (pick && pick.live) closePick(); // Alt + phím khác (Alt+Tab, Alt+←...) là phím tắt, không phải chọn phần tử
     else if (pick && e.key === 'Escape') closePick();
-    else if (pick && e.key === 'Enter' && st && st.armed) { e.preventDefault(); e.stopImmediatePropagation(); chotSlot(); }
+    else if (pick && !pick.live && e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); chotSlot(); } // Enter = ✓ Thêm vào kho / ✓ Chốt
     else if (!pick && e.key === 'Escape' && sp && !(st && st.armed)) closeSide();
     else if (!pick && e.key === 'Escape' && expK >= 0 && !(st && st.armed)) { expK = -1; editing = null; draw(st); } // đóng khung chỉnh bước
     else if (!pick && e.key === 'Escape' && st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); }
   }, true);
-  addEventListener('keyup', (e) => { if (e.key === 'Alt') altDown = false; if (e.key !== 'Alt' || !pick || !pick.live) return; e.preventDefault(); if (!pick.moved && Date.now() - pick.t0 < 300) closePick(); else freezePick(); }, true); // preventDefault: Chrome Windows không nhảy focus lên menu ⋮
+  addEventListener('keyup', (e) => { if (e.key !== 'Alt' || !pick || !pick.live) return; e.preventDefault(); if (!pick.moved && Date.now() - pick.t0 < 300) closePick(); else freezePick(); }, true); // preventDefault: Chrome Windows không nhảy focus lên menu ⋮
   addEventListener('blur', () => { if (pick && pick.live) closePick(); });
   addEventListener('wheel', (e) => {
     if (!pick || !pick.live || !pick.rows.length) return;
@@ -1184,7 +1179,7 @@ function pageRecorder() {
   }
   function startPick() {
     if (ui) ui.side.classList.add('mini'); // bảng 2 ô mờ + không chặn chuột khi đang chọn element
-    pick = { live: true, rows: [], sel: 0, moved: false, t0: Date.now(), text: '', enter: false, perform: true };
+    pick = { live: true, rows: [], sel: 0, moved: false, t0: Date.now() };
     updatePick();
   }
   function updatePick() {
@@ -1313,17 +1308,8 @@ function pageRecorder() {
       document.documentElement.appendChild(d); xmarks.push(d);
     }
   }
-  // Bảng Alt KHÔNG còn nút hàm: gõ tên việc / hàm (c -> clickEl, i -> If hiện..., w -> While / waitEl, n -> Nhánh, đ / dong -> Đóng...)
-  // rồi ↑ ↓ Enter hoặc bấm chuột. Danh sách theo ngữ cảnh: thường = hàm có act trong public/fncatalog.js (server gửi state.fns) + mở
-  // While / Nhánh; trong While / Nhánh = các nhánh "If có → ..." / "Hiện trước → ..." + Đóng.
   const foldVi = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\u0111/g, 'd').replace(/\u0110/g, 'D').toLowerCase();
-  // Bảng Alt CHỈ để làm việc với element (click, gõ, if hiện, chờ...); gọi hàm / While / Nhánh ở bảng ☰
-  function fnChoices() {
-    if (st && st.openLoop) return Object.entries(st.loopActions).filter(([a]) => a !== 'skip').map(([act, name]) => ({ act, name, keys: 'if co ' + act, desc: 'trong While' }));
-    if (st && st.openBranch) return Object.entries(st.branchActions).filter(([a]) => a !== 'skip').map(([act, name]) => ({ act, name, keys: 'hien truoc ' + act, desc: 'nhánh của waitAny' }));
-    return [...(st && st.inCase ? st.andFns || [] : []), ...((st && st.fns) || []), ...((st && st.caseFns) || [])]; // đang ghi 1 trường hợp: ghép thêm điều kiện (VÀ ...)
-  }
-  function fnSearch(q, list = fnChoices(), max = 10) {
+  function fnSearch(q, list, max = 10) { // tìm hàm theo tên / từ khoá không dấu (ô ƒ Gọi hàm ở bảng ☰)
     const f = foldVi(q).trim();
     if (!f) return [];
     return list.map((it, i) => {
@@ -1331,21 +1317,6 @@ function pageRecorder() {
       return { it, i, sc: head.some((w) => w.startsWith(f)) ? 3 : words.some((w) => w.startsWith(f)) ? 2 : words.join(' ').includes(f) ? 1 : 0 };
     }).filter((x) => x.sc).sort((a, b) => b.sc - a.sc || a.i - b.i).slice(0, max).map((x) => x.it);
   }
-  const fnListHTML = () => {
-    pick.fnRes = fnSearch(pick.q);
-    if (!pick.q) return `<div class="fnh">Gõ việc làm với element: <b>c</b> click · <b>g</b> gõ · <b>i</b> if hiện · <b>w</b> chờ · <b>d</b> nhấp đúp -- ↑ ↓ Enter để chọn (gọi hàm / While / Nhánh: ô ƒ ở bảng ☰)</div>`;
-    if (!pick.fnRes.length) return '<div class="fnh">Không có hàm nào khớp</div>';
-    pick.qi = Math.min(pick.qi || 0, pick.fnRes.length - 1);
-    return pick.fnRes.map((x, i) => `<div class="fn${i === pick.qi ? ' on' : ''}" data-i="${i}" data-act="${x.act || x.cmd}"><b>${esc(x.name)}</b><span>${esc(x.desc || '')}</span></div>`).join('');
-  };
-  function runFn(x) {
-    if (!x) return;
-    if (x.act) return doPick(x.act);
-    const op = { wstart: 'loopStart', wend: 'loopEnd', bstart: 'branchStart', bend: 'branchEnd' }[x.cmd];
-    pick.q = ''; pick.qi = 0;
-    call({ op }).then((s) => { render(s); drawPick(); }); // bảng vẫn mở để chọn tiếp
-  }
-  const labelsNow = () => (st && st.openLoop ? st.loopActions : st && st.openBranch ? st.branchActions : (st && st.actions) || {});
   const loopN = () => (st && st.openLoop ? st.steps.filter((x) => x.loop === st.openLoop).length : 0);
   const branchN = () => (st && st.openBranch ? st.steps.filter((x) => x.br === st.openBranch).length : 0);
   // Thanh khối -- luôn ở ĐẦU bảng (chọn While / Nhánh trước rồi mới chọn các phần tử bên trong)
@@ -1381,20 +1352,15 @@ function pageRecorder() {
       ${pick.editing ? `<div class="r"><input class="grow" data-f="pcustom" value="${esc(pick.custom || (pick.altObj || {}).code)}" title="Enter để lưu"></div>` : ''}
       <div class="r"><button data-op="pslot" class="pri grow" title="Enter">${arm.lib ? '✓ Thêm vào kho' : '✓ Chốt element này'}</button><button data-op="pagain" title="Đóng bảng, giữ Alt chọn lại">↺ Chọn lại</button></div></div>`;
     else if (!pick.live && r) html += `<div class="det">
-      <div class="r"><select data-f="palt" class="grow"></select><button data-op="pedit" title="Tự sửa selector">✎</button></div>
+      <div class="r"><select data-f="palt" class="grow" title="Selector gợi ý -- hoặc bấm vào HTML ở trên để tự ghép XPath"></select><button data-op="pedit" title="Tự sửa selector">✎</button></div>
       ${pick.editing ? `<div class="r"><input class="grow" data-f="pcustom" value="${esc(pick.custom || (pick.altObj || {}).code)}" title="Enter để lưu"></div>` : ''}
-      <div class="r"><input class="grow pq" data-f="pq" value="${esc(pick.q || '')}" placeholder="Gõ tên hàm: c → click, i → if, w → while..." autocomplete="off" spellcheck="false"></div>
-      <div class="fnl">${fnListHTML()}</div>
-      <div class="r"><input class="grow" data-f="ptext" value="${esc(pick.text)}" placeholder="Chữ / giá trị (Gõ, chọn option, tên phím, thuộc tính, file) -- = để dùng biểu thức JS"><label class="lv"><input type="checkbox" data-f="penter" ${pick.enter ? 'checked' : ''}> Enter</label></div>
-      ${srcSelect('psrc')}
-      ${st && st.openLoop ? `<div class="r"><label class="lv" title="Làm xong (Click / Gõ / Hover) thì break -- thoát While"><input type="checkbox" data-f="pbreak" ${pick.thenBreak ? 'checked' : ''}> rồi Break</label>
-        <label class="lv" title="Điều kiện if: có trong DOM (count() > 0, kể cả đang ẩn) thay vì phải đang hiện"><input type="checkbox" data-f="pdom" ${pick.dom ? 'checked' : ''}> có trong DOM (kể cả ẩn)</label></div>` : ''}
-      <label class="lv"><input type="checkbox" data-f="pdo" ${pick.perform ? 'checked' : ''}> Làm luôn trên trang (click, gõ, hover, nhấp đúp, tick...)</label></div>`;
+      <div class="r"><button data-op="pslot" class="pri grow" title="Enter">✓ Thêm vào kho element</button><button data-op="pagain" title="Đóng bảng, giữ Alt chọn lại">↺ Chọn lại</button></div>
+      <div class="fnh">Element vào kho -- dùng ở bảng ▦ Khối (↵ vào if: chọn thao tác + element)${sp ? ' · đang mở bảng 2 ô: element điền sẵn vào ô Element' : ''}</div></div>`;
     const hadFocus = root.activeElement;
     setHTML(p, html);
     p.hidden = false; p.classList.toggle('wide', !pick.live);
     if (!pick.live && r) drawAltSelect();
-    const fi = p.querySelector(`[data-f=${(hadFocus && hadFocus.dataset && hadFocus.dataset.f) || 'pq'}]`) || p.querySelector('[data-f=pq]'); // bảng đứng yên: con trỏ ở sẵn ô gõ tên hàm (đang gõ ô khác thì giữ ô đó)
+    const fi = hadFocus && hadFocus.dataset && hadFocus.dataset.f ? p.querySelector(`[data-f=${hadFocus.dataset.f}]`) : null; // bảng đứng yên: con trỏ ở sẵn ô gõ tên hàm (đang gõ ô khác thì giữ ô đó)
     if (fi) { fi.focus(); if (fi.type === 'text' || fi.tagName === 'INPUT' && !fi.type.match(/checkbox/)) fi.setSelectionRange(fi.value.length, fi.value.length); }
     if (pick.live) { // bám theo con trỏ, lật sang bên kia nếu tràn màn hình
       const w = p.offsetWidth, h = p.offsetHeight;
@@ -1411,10 +1377,14 @@ function pageRecorder() {
   }
   function chotSlot() {
     const r = pick && pick.rows[pick.sel], a = st && st.armed;
-    if (!r || !a) return;
+    if (!r) return;
     const ch = chainFor(r.el, { level: 0, alts0: r.alts });
-    if (a.lib) { // 🎯 Element mới -> vào kho; bảng 2 ô đang chọn thao tác thì dùng luôn element đó
-      call({ op: 'libAdd', levels: ch.levels, level: 0, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom }).then((s) => { render(s); if (s && s.libAdded && sp) useEl(s.libAdded); else toast('Đã thêm vào kho element'); });
+    if (!a || a.lib) { // nhả Alt chọn element -> vào kho; bảng 2 ô đang mở thì điền luôn vào ô Element (bấm ＋ Thêm bước mới thêm)
+      call({ op: 'libAdd', levels: ch.levels, level: 0, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom }).then((s) => {
+        render(s); const e = s && (s.els || []).find((x) => x.id === s.libAdded);
+        if (e && sp) { sp.elId = e.id; sp.sel = e.code; drawSide(s, true); }
+        toast(e ? `Đã thêm vào kho: ${e.name}${sp ? ' -- đã điền vào ô Element, bấm ＋ Thêm bước' : ''}` : 'Đã thêm vào kho element');
+      });
       return closePick();
     }
     call({ op: 'fnSlot', stepId: a.stepId, key: a.key, levels: ch.levels, level: 0, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom }).then((s) => {
@@ -1423,40 +1393,17 @@ function pageRecorder() {
     });
     closePick();
   }
-  function doPick(action) {
-    const r = pick.rows[pick.sel];
-    if (!r) return;
-    const ch = chainFor(r.el, { level: 0, alts0: r.alts });
-    const perform = pick.perform && ['click', 'type', 'hover', 'ifClick', 'ifType', 'ifHover', 'dblclick', 'rightClick', 'check', 'uncheck', 'scroll', 'pressKey'].includes(action);
-    const inLoop = !!(st && st.openLoop);
-    if (/^case/.test(action)) { // mở 1 trường hợp
-      send({ kind: 'pick', action, ...ch, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom, text: action === 'caseText' ? (pick.text || clean(r.el.innerText || r.el.value).slice(0, 80)) : '', cond: pick.dom ? 'dom' : undefined });
-      toast('◆ Đang ghi trường hợp -- thao tác trên trang, các bước vào trong khối; xong bấm ✓ Xong ở thanh REC');
-      return closePick();
-    }
-    send({ kind: 'pick', action, ...ch, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom, text: pick.text, enter: pick.enter, perform, thenBreak: inLoop && pick.thenBreak, cond: inLoop && pick.dom ? 'dom' : undefined });
-    toast(`Đã ghi: ${labelsNow()[action] || action}${st && st.openLoop ? ' (trong While)' : st && st.openBranch ? ' (nhánh)' : ''}${perform ? ' (đang làm trên trang...)' : ''}`);
-    closePick();
-  }
   function onPick(e, el) {
     const f = el.dataset && el.dataset.f;
     if (e.type === 'change') {
       if (f === 'palt' && el.value !== '' && pick.rows[pick.sel].alts[+el.value]) { pick.altObj = pick.rows[pick.sel].alts[+el.value]; pick.altTouched = true; pick.custom = null; }
       else if (f === 'pcustom') { pick.custom = el.value.trim() || null; drawAltSelect(); } // không vẽ lại cả bảng: change này có thể do blur lúc bấm nút hành động -> nút dời chỗ, bấm trượt
-      else if (f === 'psrc') { if (el.value) { pick.text = '= ' + el.value; drawPick(); } }
-      else if (f === 'ptext') pick.text = el.value;
-      else if (f === 'penter') pick.enter = el.checked;
-      else if (f === 'pdo') pick.perform = el.checked;
-      else if (f === 'pbreak') pick.thenBreak = el.checked;
-      else if (f === 'pdom') pick.dom = el.checked;
       else if (f === 'xnth') { pick.xs.nth = Math.max(0, parseInt(el.value, 10) || 0); xApply(); }
       return;
     }
     if (pick.live) return;
     const row = el.closest('.row'), btn = el.closest('button');
     if (row) { pick.customCount = null; return selectRow(+row.dataset.i); }
-    const fn = el.closest('.fn');
-    if (fn) return runFn(pick.fnRes[+fn.dataset.i]);
     const xc = el.closest('[data-p]');
     if (xc && xc.dataset.x) return xToggle(xc.dataset.x, xc.dataset.p);
     if (!btn) return;
@@ -1467,7 +1414,6 @@ function pageRecorder() {
     const blk = { wstart: 'loopStart', wend: 'loopEnd', bstart: 'branchStart', bend: 'branchEnd' }[btn.dataset.op];
     if (blk) { call({ op: blk }).then((s) => { render(s); drawPick(); }); return; } // bảng vẫn mở để chọn tiếp
     if (btn.dataset.op === 'pedit') { pick.editing = true; drawPick(); const i = ui.pick.querySelector('[data-f=pcustom]'); if (i) i.focus(); return; }
-    if (btn.dataset.act) doPick(btn.dataset.act);
   }
 
   // ---------------- giao diện (shadow DOM -- CSS trang web không lọt vào, CSS của mình không lọt ra)
@@ -1532,6 +1478,7 @@ function pageRecorder() {
     .box{border:1px solid #2a2e3a;border-radius:10px;padding:8px;background:#1a1d27}.box.big{flex:1;display:flex;flex-direction:column;min-height:0}.bt{display:flex;gap:6px;align-items:center;font-weight:600;margin-bottom:6px;font-size:13px}
     .acts2{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px}.acts2 button{padding:9px 6px}.acts2 button.on{background:#e8a33d;color:#1a1206;border-color:#e8a33d}
     .els{overflow:auto;flex:1}.elr{display:grid;grid-template-columns:minmax(90px,30%) 1fr auto;gap:8px;align-items:center;padding:7px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent;font-size:13px}
+    .ef input{font-family:Consolas,monospace;font-size:12px;padding:6px 8px;border-color:#e8a33d88}.ef .xc{min-width:60px}
     .elr:hover{border-color:#e8a33d;background:#e8a33d14}.elr code{font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .sk{max-height:24vh;overflow:auto}.bk{display:flex;gap:6px;align-items:center;padding:3px 6px;border-radius:6px;font-size:12px}.bk:hover{background:#1a1d27}.bk span{flex:1}.bk button{padding:0 6px}
     .blk{border:1px solid #a78bfa;border-radius:10px;padding:6px;margin:6px 0;background:#a78bfa0f}.bh{display:flex;gap:6px;align-items:center;cursor:pointer;padding:2px 4px}.bh b{color:#c4b5fd}.bh span{opacity:.7}
@@ -1579,12 +1526,7 @@ function pageRecorder() {
     else if (t === 'mouseup') { held = false; dragEnd(); }
     else if (t === 'mouseover') onOver(el);
     else if (t === 'keydown') {
-      if (inPick && pick && el.dataset.f === 'pq' && ['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) {
-        e.preventDefault();
-        if (e.key === 'Enter') return runFn((pick.fnRes || [])[pick.qi || 0]);
-        pick.qi = Math.max(0, Math.min((pick.fnRes || []).length - 1, (pick.qi || 0) + (e.key === 'ArrowDown' ? 1 : -1)));
-        setHTML(ui.pick.querySelector('.fnl'), fnListHTML()); return;
-      }
+      if (sp && ['sel', 'stext'].includes(el.dataset.f) && e.key === 'Enter') { e.preventDefault(); return sideAdd(); }
       if (el.dataset.f === 'fq' && ['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) {
         e.preventDefault();
         if (e.key === 'Enter') return runCall(fqRes[fqi]);
@@ -1594,10 +1536,9 @@ function pageRecorder() {
       if (e.key === 'Escape') { if (pick) closePick(); else if (sp && !(st && st.armed)) closeSide(); else if (editing || expK >= 0) { if (editing) editing = null; else expK = -1; draw(st); } else if (st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur();
     }
     else if (t === 'input') {
-      if (inPick && pick && el.dataset.f === 'ptext') pick.text = el.value;
-      if (inPick && pick && el.dataset.f === 'pq') { pick.q = el.value; pick.qi = 0; setHTML(ui.pick.querySelector('.fnl'), fnListHTML()); }
       if (!inPick && el.dataset.f === 'fq') { fq = el.value; fqi = 0; drawCallList(); }
       if (sp && el.dataset.f === 'stext') sp.text = el.value;
+      if (sp && el.dataset.f === 'sel') { sp.sel = el.value; sp.cnt = null; const e = (st.els || []).find((x) => x.id === sp.elId); if (!e || e.code !== el.value) sp.elId = null; const x = ui.side.querySelector('.ef .xc'); if (x) x.textContent = selCount(); countSel(); }
       if (sp && el.dataset.f === 'sq') { sp.q = el.value; setHTML(ui.side.querySelector('.els'), elsHTML(st)); }
     }
     else if (t === 'click' || t === 'change') (inPick ? (pick && onPick(e, el)) : onPanel(e, el));
@@ -1777,7 +1718,7 @@ function pageRecorder() {
     const topLoop = (x) => { let t = null; for (let y = x, d = 0; y && d < 50; y = up(y), d++) if (y.action === 'loop') t = y; return t; };
     const loopBlock = (L) => {
       const idx = s.steps.indexOf(L), kids = s.steps.filter((x) => x.loop === L.id), els = s.steps.filter((x) => x.elsOf === L.id), miss = L.miss == null || L.miss === '' ? 20 : +L.miss;
-      const ifs = kids.map((c) => (c.action !== 'case' ? kidRow(c, s.loopActions) : `<div class="bif${c.levels ? '' : ' nocond'}" data-id="${c.id}"${c.levels && c.levels[c.level] ? ` data-css="${esc(c.levels[c.level].css)}"` : ''}><div class="bifh"><b>if</b><span class="bc">${condText(c)}</span><span class="be">→ ${{ continue: 'quét lại', break: 'thoát While', none: 'đi tiếp' }[c.end || 'none']}</span><span class="grow"></span><button data-op="caseAdd" title="Thêm if mới cùng cấp, ngay sau if này">＋</button><button data-op="enter" data-key="C${c.id}" class="pri" title="Vào if này: bảng thao tác + element">↵</button><button data-op="del" title="Xoá if (các bước bên trong ra ngoài)">✕</button></div>${s.steps.filter((x) => x.cs === c.id).map((k) => kidRow(k, acts)).join('')}</div>`)).join('');
+      const ifs = kids.map((c) => (c.action !== 'case' ? kidRow(c, s.loopActions) : `<div class="bif${c.levels ? '' : ' nocond'}" data-id="${c.id}"${c.levels && c.levels[c.level] ? ` data-css="${esc(c.levels[c.level].css)}"` : ''}><div class="bifh"><b>if</b><span class="bc">${condText(c)}</span><span class="be">→ ${{ continue: 'quét lại', break: 'thoát While', none: 'đi tiếp' }[c.end || 'none']}</span><span class="grow"></span><button data-op="caseAdd" title="Thêm if mới cùng cấp, ngay sau if này">＋</button><button data-op="enter" data-key="C${c.id}" class="pri" title="Vào if này: bảng thao tác + element">↵</button><button data-op="del" title="Xoá if (các bước bên trong ra ngoài)">✕</button></div>${s.steps.filter((x) => x.cs === c.id).map((k) => kidRow(k, acts)).join('')}${ghosts(c)}</div>`)).join('');
       return `<div class="blk"><div class="bh" data-id="${L.id}"><b>⟳ While ${L.id}</b><span>${kids.filter((x) => x.action === 'case').length} if · bấm để cài đặt</span></div>${bexp === L.id ? stepHTML(L, idx, acts) : ''}${ifs}
         <div class="bif else" data-id="${L.id}"><div class="bifh"><b>else</b><span class="bc">không khớp if nào → nghỉ ${+L.idle > 0 ? +L.idle : 500} ms${miss ? ` · ${miss} vòng liền = màn hình lạ (chụp ảnh)` : ''}</span><span class="grow"></span><button data-op="enter" data-key="E${L.id}" title="Thêm bước vào else">↵</button></div>${els.map((k) => kidRow(k, acts)).join('')}</div></div>`;
     };
@@ -1792,7 +1733,7 @@ function pageRecorder() {
     return html + '<button data-op="blockWhile" class="bnew" title="While mới: 1 if + else -- ↵ vào if để chọn điều kiện và thêm thao tác">＋ While (dạng khối)</button>';
   }
   const elsHTML = (s) => { const q = foldVi(sp.q || '').trim(), els = (s.els || []).filter((e) => !q || foldVi(`${e.name} ${e.code}`).includes(q));
-    return els.length ? els.map((e) => `<div class="elr" data-el="${e.id}"${e.css ? ` data-css="${esc(e.css)}"` : ''} title="Bấm: ${sp.act === 'cond' ? 'làm điều kiện if' : 'thêm bước với element này'}"><b>${esc(e.name)}</b><code>${esc(e.code)}</code><span class="lv">${e.lang ? '🌐 ' : ''}${e.uses} bước</span></div>`).join('')
+    return els.length ? els.map((e) => `<div class="elr" data-el="${e.id}"${e.css ? ` data-css="${esc(e.css)}"` : ''} ${sp.elId === e.id ? ' style="border-color:#e8a33d;background:#e8a33d22"' : ''} title="Bấm: điền vào ô Element"><b>${esc(e.name)}</b><code>${esc(e.code)}</code><span class="lv">${e.lang ? '🌐 ' : ''}${e.uses} bước</span></div>`).join('')
       : `<div class="fnh">${(s.els || []).length ? 'Không có element nào khớp' : 'Chưa có element -- thao tác trên trang (click, gõ...) hoặc bấm 🎯 Element mới'}</div>`; };
   function sideHTML(s) {
     const id = +sp.key.slice(1), isCase = sp.key[0] === 'C', h = s.steps.find((x) => x.id === id);
@@ -1802,7 +1743,9 @@ function pageRecorder() {
       ${isCase ? `<div class="cbar" data-id="${id}"><span class="lv">Điều kiện:</span><span class="grow">${condText(h)}</span><select data-f="neg"><option value="0">đang hiện</option><option value="1" ${h.neg ? 'selected' : ''}>KHÔNG hiện</option></select><select data-f="end"><option value="continue" ${h.end === 'continue' ? 'selected' : ''}>→ quét lại</option><option value="break" ${h.end === 'break' ? 'selected' : ''}>→ thoát While</option><option value="none" ${!h.end || h.end === 'none' ? 'selected' : ''}>→ đi tiếp</option></select></div>` : ''}
       <div class="sk"><div class="bt">Các bước trong ${isCase ? 'if' : 'else'} (${kids.length})</div>${kids.length ? kids.map((k) => kidRow(k, s.actions || {})).join('') : '<div class="fnh">Chưa có bước -- bấm thao tác rồi bấm element, hoặc thao tác thẳng trên trang</div>'}</div>
       <div class="box"><div class="bt">Thao tác</div><div class="acts2">${acts.map(([a, n]) => `<button data-sact="${a}" class="${sp.act === a ? 'on' : ''}">${n}</button>`).join('')}</div>
-        ${sp.act === 'type' ? `<div class="r"><input class="grow" data-f="stext" value="${esc(sp.text)}" placeholder="Chữ cần gõ (= để dùng biểu thức JS, VD: = row.D)"><label class="lv"><input type="checkbox" data-f="senter" ${sp.enter ? 'checked' : ''}> Enter</label></div>${srcSelect('ssrc')}` : ''}</div>
+        ${sp.act === 'pause' ? '' : `<div class="r ef"><span class="lv">${sp.act === 'cond' ? 'Điều kiện' : 'Element'}</span><input class="grow" data-f="sel" value="${esc(sp.sel)}" placeholder="bấm 1 dòng trong kho bên dưới, giữ Alt chọn trên trang, hoặc gõ: #id · .class · //xpath · page.getBy..." autocomplete="off" spellcheck="false"><span class="xc" title="Số chỗ khớp trên trang này">${selCount()}</span></div>`}
+        ${sp.act === 'type' ? `<div class="r"><span class="lv">Chữ</span><input class="grow" data-f="stext" value="${esc(sp.text)}" placeholder="Chữ cần gõ (= để dùng biểu thức JS, VD: = row.D)"><label class="lv"><input type="checkbox" data-f="senter" ${sp.enter ? 'checked' : ''}> Enter</label></div>${srcSelect('ssrc')}` : ''}
+        <div class="r"><button data-op="sadd" class="pri grow" title="Enter">${sp.act === 'cond' ? '◆ Đặt làm điều kiện if' : '＋ Thêm bước'}</button></div></div>
       <div class="box big"><div class="bt">Element đã add (${(s.els || []).length})<input data-f="sq" class="grow" value="${esc(sp.q)}" placeholder="tìm element..." autocomplete="off"><button data-op="libNew" class="${arm ? 'pri' : ''}" title="Giữ Alt chọn element trên trang -> vào kho">${arm ? '⏳ giữ Alt chọn… (bấm để huỷ)' : '🎯 Element mới'}</button></div><div class="els">${elsHTML(s)}</div></div>`;
   }
   function drawSide(s, force) {
@@ -1821,7 +1764,7 @@ function pageRecorder() {
   }
   function openSide(key) { // ↵: con trỏ vào cuối if / else (thao tác trên trang cũng vào đó), mở bảng 2 ô
     const h = st && st.steps.find((x) => x.id === +key.slice(1));
-    sp = { key, act: key[0] === 'C' && h && !h.levels ? 'cond' : 'click', text: '', enter: false, q: '' };
+    sp = { key, act: key[0] === 'C' && h && !h.levels ? 'cond' : 'click', text: '', enter: false, q: '', sel: '', elId: null, cnt: null };
     call({ op: 'enter', key }).then((s) => { render(s); drawSide(s, true); toast(key[0] === 'C' ? (sp && sp.act === 'cond' ? '◆ Chọn element làm điều kiện cho if này' : '◆ Bấm thao tác rồi bấm element -- thêm vào if') : 'Thêm bước vào else'); });
   }
   function closeSide() { // Xong: if -> như ✓ Xong TH (con trỏ ra sau if + gợi ý Chờ hiện); else -> con trỏ ra sau While
@@ -1829,15 +1772,41 @@ function pageRecorder() {
     if (!k) return;
     if (k[0] === 'C') caseEnd(); else call({ op: 'cursor', stepId: +k.slice(1) }).then(render);
   }
-  function useEl(elId) { // bấm 1 element trong kho: làm điều kiện if, hoặc thêm bước "thao tác + element"
+  // Ô Element: chọn từ kho (sp.elId) hoặc gõ tay -- #id / .class / css -> page.locator('...'), //xpath -> page.locator('xpath=...'), page.getBy... giữ nguyên
+  const normSel = (t) => { t = String(t || '').trim(); return !t ? '' : /^page\./.test(t) ? t : /^\(?\/\//.test(t) ? `page.locator(${sq('xpath=' + t)})` : `page.locator(${sq(t)})`; };
+  let selTimer = 0;
+  const selCount = () => (!sp || !sp.sel ? '' : sp.cnt == null ? '…' : sp.cnt === false ? '✗ không đọc được' : sp.cnt.all === 1 ? '✓1' : `⚠${sp.cnt.all}${sp.cnt.vis !== sp.cnt.all ? ` (hiện ${sp.cnt.vis})` : ''}`);
+  function countSel() { // đếm số chỗ khớp của ô Element bằng Playwright (gõ tay thì chờ ngừng gõ 300ms)
+    clearTimeout(selTimer);
+    const code = sp && normSel(sp.sel);
+    if (!code) return;
+    selTimer = setTimeout(() => call({ op: 'count', codes: [code] }).then((res) => {
+      if (!sp || normSel(sp.sel) !== code) return;
+      const c = res && res.counts && res.counts[0]; sp.cnt = c || false;
+      const x = ui.side.querySelector('.ef .xc'); if (x) x.textContent = selCount();
+    }), 300);
+  }
+  function pickEl(elId) { // bấm 1 dòng trong kho: điền vào ô Element
+    const e = (st.els || []).find((x) => x.id === elId);
+    if (!sp || !e) return;
+    sp.elId = e.id; sp.sel = e.code; sp.cnt = null; drawSide(st, true); countSel();
+  }
+  function sideAdd() { // ＋ Thêm bước / ◆ Đặt làm điều kiện: thao tác đang chọn + element trong ô (gõ tay thì thêm vào kho trước)
     if (!sp) return;
-    const e = (st.els || []).find((x) => x.id === elId), cond = sp.act === 'cond', name = e ? e.name : 'element';
-    if (!cond && sp.act === 'type' && !String(sp.text).trim()) return toast('Gõ chữ cần gõ vào ô trước, rồi mới bấm element');
-    call(cond ? { op: 'caseCond', stepId: +sp.key.slice(1), elId } : { op: 'libStep', key: sp.key, elId, action: sp.act, text: sp.text, enter: sp.enter }).then((s) => {
-      if (cond && sp) sp.act = 'click';
+    const cond = sp.act === 'cond', key = sp.key;
+    if (sp.act === 'pause') { call({ op: 'libStep', key, action: 'pause' }).then((s) => { render(s); drawSide(s, true); toast('+ Nghỉ ngẫu nhiên'); }); return; }
+    if (!String(sp.sel || '').trim()) return toast('Chọn element trước: bấm 1 dòng trong kho, giữ Alt chọn trên trang, hoặc gõ selector');
+    if (sp.act === 'type' && !String(sp.text).trim()) return toast('Gõ chữ cần gõ vào ô Chữ trước');
+    const act = sp.act, text = sp.text, enter = sp.enter;
+    const withEl = (elId) => call(cond ? { op: 'caseCond', stepId: +key.slice(1), elId } : { op: 'libStep', key, elId, action: act, text, enter }).then((s) => {
+      const e = (s.els || []).find((x) => x.id === elId), name = e ? e.name : 'element';
+      if (sp) { sp.elId = null; sp.sel = ''; sp.cnt = null; if (cond) sp.act = 'click'; }
       render(s); drawSide(s, true);
-      toast(cond ? `◆ Điều kiện: ${name} đang hiện -- giờ bấm thao tác + element để thêm bước` : `+ ${(s.actions || {})[sp ? sp.act : ''] || 'bước'} · ${name}`);
+      toast(cond ? `◆ Điều kiện: ${name} đang hiện -- giờ chọn thao tác + element để thêm bước` : `+ ${(s.actions || {})[act] || act} · ${name}`);
     });
+    const e = sp.elId && (st.els || []).find((x) => x.id === sp.elId && x.code === sp.sel);
+    if (e) return withEl(e.id);
+    call({ op: 'libAdd', custom: normSel(sp.sel), name: String(sp.sel).trim().slice(0, 40) }).then((s) => { render(s); if (s && s.libAdded) withEl(s.libAdded); else toast('Selector không hợp lệ'); });
   }
   function onSide(e, el) {
     const f = el.dataset && el.dataset.f;
@@ -1852,15 +1821,15 @@ function pageRecorder() {
     if (e.type !== 'click') return;
     const b = el.closest('button'), row = el.closest('.elr'), bk = el.closest('.bk');
     if (b && b.dataset.sact) {
-      if (b.dataset.sact === 'pause') { call({ op: 'libStep', key: sp.key, action: 'pause' }).then((s) => { render(s); drawSide(s, true); toast('+ Nghỉ ngẫu nhiên'); }); return; }
       sp.act = b.dataset.sact; drawSide(st, true);
-      if (sp.act === 'type') { const i = ui.side.querySelector('[data-f=stext]'); if (i) i.focus(); }
+      const i = ui.side.querySelector(sp.act === 'type' && sp.sel ? '[data-f=stext]' : '[data-f=sel]'); if (i) i.focus(); // chọn thao tác -> con trỏ vào ô Element (Gõ có element rồi thì vào ô Chữ)
       return;
     }
     if (b && b.dataset.op === 'spClose') return closeSide();
     if (b && b.dataset.op === 'libNew') { const on = st.armed && st.armed.lib; call({ op: 'arm', lib: !on }).then((s) => { render(s); drawSide(s, true); toast(on ? 'Đã huỷ chờ chọn element' : '🎯 Giữ Alt + rê chuột lên element, nhả Alt rồi bấm ✓ Thêm vào kho (Enter)'); }); return; }
     if (b && b.dataset.op === 'del' && bk) { call({ op: 'delete', stepId: +bk.dataset.id }).then((s) => { render(s); drawSide(s, true); }); return; }
-    if (row) useEl(+row.dataset.el);
+    if (b && b.dataset.op === 'sadd') return sideAdd();
+    if (row) pickEl(+row.dataset.el);
   }
   function draw(s) {
     const segN = s.steps.filter((x) => x.id >= s.segFrom).length;
