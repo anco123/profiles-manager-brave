@@ -6,6 +6,7 @@
  */
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
 const { chromium } = require('playwright');
+process.env.PM_NO_CLIPBOARD = '1'; // test không ghi đè clipboard của máy
 const rec = require('../recorder');
 const A = require('../scripts/xlv1_actions');
 const helpers = require('../scripts/helpers');
@@ -103,7 +104,21 @@ const ok = (name) => { done++; console.log('  ✓ ' + name); };
     const code = rec.recorderCode(ID, false), lp = `w${L.id}`;
     const want = new RegExp(`while \\(await ${lp}\\.next\\(\\)\\) \\{[^]*?if \\(await isShown\\(page\\.locator\\('#next'\\)\\)\\) \\{[^]*?await clickEl\\(page\\.locator\\('#next'\\)\\);\\n[^]*?await waitEl\\(page\\.locator\\('#close'\\), 15000\\);\\n\\s+continue;[^]*?if \\(await isShown\\(page\\.locator\\('#close'\\)\\)\\) \\{[^]*?await clickEl\\(page\\.locator\\('#close'\\)\\);\\n\\s+break;[^]*?await pause\\(page, 800, 2000\\);\\n\\s+await ${lp}\\.idle\\(500\\);`);
     assert.ok(want.test(code), 'code While sai:\n' + code);
-    ok('＋ thêm if cùng cấp, ↵ else thêm bước; code: if Next {click, chờ Đóng, continue} if Đóng {click, break} else {nghỉ}');
+    assert.ok(code.includes("  } else if (await isShown(page.locator('#close'))) {") && /\} else \{ \/\/ không khớp trường hợp nào\n\s+await pause/.test(code), 'code viết thành if / else if / else:\n' + code);
+    ok('＋ thêm if cùng cấp, ↵ else thêm bước; code: if Next {click, chờ Đóng, continue} else if Đóng {click, break} else {nghỉ}');
+
+    // ---- khung chỉnh bước (bấm 1 dòng code) nằm riêng bên trái bảng ☰, không chen vào giữa code
+    await uiClick(page.locator('.hd [data-op=vblocks]')); // về dạng code
+    const lines0 = await page.locator('.list .ln').count();
+    await uiClick(page.locator(`.list .ln[data-id="${c2.id}"]`).first());
+    await page.locator('.edp .st').waitFor({ timeout: 4000 });
+    const bp = await page.locator('.panel').boundingBox(), be = await page.locator('.edp').boundingBox();
+    assert.ok(be.x + be.width <= bp.x + 1, 'khung chỉnh ở bên trái bảng ☰');
+    assert.strictEqual(await page.locator('.list .st').count(), 0, 'không chen ô chỉnh vào giữa code');
+    assert.strictEqual(await page.locator('.list .ln').count(), lines0, 'số dòng code không đổi');
+    await page.keyboard.press('Escape'); await page.waitForTimeout(300);
+    assert.ok(await page.locator('.edp').isHidden(), 'Esc đóng khung chỉnh');
+    ok('bấm dòng code -> khung chỉnh hiện bên trái bảng ☰, code không nhảy; Esc đóng');
 
     // ---- kho element là tham chiếu: sửa selector Next 1 lần -> mọi bước dùng Next đổi theo
     await call({ op: 'libCustom', elId: eNext.id, custom: "page.locator('button#next')" });

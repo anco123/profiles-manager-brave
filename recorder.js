@@ -223,11 +223,15 @@ function bodyLines(steps, opt = {}) {
   const okWrap = (c) => c.replace(/^await (clickEl|typeEl|hoverEl|waitEl|waitGone|scrollEl|dblClickEl|rightClickEl|checkEl)\((.*)\);(\s*\/\/.*)?$/, '__pmOk(await $1($2));$3');
   // vạch "▸ chèn vào đây" (bảng ☰): con trỏ chèn đứng sau bước `after` trong khối `key` (after = bước mở khối -> đầu khối)
   const mark = (key, after, ind) => { if (cur && cur.par === key && cur.after === after) push(`${ind}▸ bước mới sẽ chèn vào đây`, after, { cursor: true }); };
+  // Trường hợp trong While làm xong luôn continue / break -> nối thành chuỗi if / else if, else = không khớp cái nào (xem bước 'loop')
+  const chain = (x) => !!x && x.action === 'case' && !!caseCond(x) && (x.end === 'continue' || x.end === 'break');
+  const live = (x) => x.action !== 'skip' && !(x.action === 'case' && !caseCond(x)); // bỏ qua / trường hợp chưa có điều kiện: không ra code, không làm đứt chuỗi
   const emit = (key, ind) => {
     mark(key, headOf(key), ind);
-    for (const s of steps.filter((x) => pk(x) === key)) { one(s, key, ind); mark(key, s.id, ind); }
+    const sibs = steps.filter((x) => pk(x) === key), lv = sibs.filter(live);
+    for (const s of sibs) { const i = lv.indexOf(s); one(s, key, ind, key[0] === 'L' && i > 0 ? lv[i - 1] : null, key[0] === 'L' && i >= 0 ? lv[i + 1] || 'else' : null); mark(key, s.id, ind); }
   };
-  const one = (s, key, ind) => {
+  const one = (s, key, ind, prev, next) => {
     const P = vars[s.tab] || 'page';
     if (s.action === 'fn') { // hàm gọi ở ☰: từng dòng code mẫu; dòng trống trong khối { } = chỗ chứa các bước con
       if (opt.test) push(`${ind}__pmStep = ${s.id};`, s.id);
@@ -242,13 +246,13 @@ function bodyLines(steps, opt = {}) {
     }
     if (s.action === 'case') { // trường hợp: if (điều kiện) { các bước con; continue / break }
       if (!caseCond(s, P)) { if (opt.view) push(`${ind}// ◆ trường hợp chưa chọn điều kiện -- ▦ dạng khối, ↵ để chọn (chưa xuất ra code)`, s.id, { dim: true }); return; }
-      if (opt.test) push(`${ind}__pmStep = ${s.id};`, s.id);
-      const lv = s.levels && s.levels[s.level], k = 'C' + s.id;
-      push(`${ind}if (${caseCond(s, P)}) { // trường hợp: ${s.textEq ? `chữ ${s.neg ? 'khác' : 'là'} "${s.textEq}"` : s.neg ? 'không hiện' : 'đang hiện'} ${(lv && (lv.label || lv.tag)) || ''}`.trimEnd(), s.id);
+      const lv = s.levels && s.levels[s.level], k = 'C' + s.id, elif = chain(s) && chain(prev), open = chain(s) && (next === 'else' || chain(next)); // open: chưa đóng } -- if sau / else nối tiếp
+      if (opt.test && !elif) push(`${ind}__pmStep = ${s.id};`, s.id);
+      push(`${ind}${elif ? '} else if' : 'if'} (${opt.test && elif ? `(__pmStep = ${s.id}) && ` : ''}${caseCond(s, P)}) { // trường hợp: ${s.textEq ? `chữ ${s.neg ? 'khác' : 'là'} "${s.textEq}"` : s.neg ? 'không hiện' : 'đang hiện'} ${(lv && (lv.label || lv.tag)) || ''}`.trimEnd(), s.id);
       if (steps.some((x) => pk(x) === k) || (cur && cur.par === k)) emit(k, ind + '  ');
       else if (opt.view) push(`${ind}  // ▸ trống -- bấm để ghi các bước vào đây`, s.id, { hole: k, dim: true });
       if (s.end === 'continue' || s.end === 'break') push(`${ind}  ${s.end};${s.end === 'break' ? ' // xong -- thoát While' : ' // quét lại từ đầu'}`, s.id);
-      push(`${ind}}`, s.id);
+      if (!open) push(`${ind}}`, s.id);
       return;
     }
     let code = key[0] === 'L' ? loopCode(s, P) : stepCode(s, P);
@@ -267,9 +271,13 @@ function bodyLines(steps, opt = {}) {
     if (s.action === 'loop') {
       push(`${ind}while (${opt.test ? `(__pmStep = ${s.id}) && ` : ''}await w${s.id}.next()) {`, s.id); // hết giờ -> next() chụp màn hình lạ rồi trả false
       emit('L' + s.id, ind + '  ');
-      emit('E' + s.id, ind + '  '); // else: không khớp trường hợp nào -- các bước ở đây chạy trước khi nghỉ rồi quét lại
-      if (opt.test) push(`${ind}  __pmStep = ${s.id};`, s.id);
-      push(`${ind}  await w${s.id}.idle(${+s.idle > 0 ? +s.idle : 500}); // chưa khớp trường hợp nào -- nghỉ rồi quét lại`, s.id); push(`${ind}}`, s.id);
+      const lv = steps.filter((x) => pk(x) === 'L' + s.id && live(x)), els = chain(lv[lv.length - 1]), ei = ind + (els ? '    ' : '  '); // trường hợp cuối còn mở -> else { }
+      if (els) push(`${ind}  } else { // không khớp trường hợp nào`, s.id);
+      emit('E' + s.id, ei); // else: các bước ở đây chạy trước khi nghỉ rồi quét lại
+      if (opt.test) push(`${ei}__pmStep = ${s.id};`, s.id);
+      push(`${ei}await w${s.id}.idle(${+s.idle > 0 ? +s.idle : 500}); // nghỉ rồi quét lại${missOf(s) ? ` -- ${missOf(s)} vòng liền thế này = màn hình lạ` : ''}`, s.id);
+      if (els) push(`${ind}  }`, s.id);
+      push(`${ind}}`, s.id);
     }
     if (s.action !== 'clickTab' || !vars[s.opens]) return;
     push(`${ind}if (${vars[s.opens]}) {`, s.id);
@@ -359,6 +367,28 @@ function segSteps(r) {
 }
 const blockName = (h) => (h.action === 'loop' ? `While ${h.id}` : h.action === 'case' ? `trường hợp ${h.id}` : h.action === 'clickTab' ? `tab mới (bước ${h.id})` : `khối ${h.id}`);
 
+// Code xuất ra để dán vào VS Code: thêm chú thích các require / row cần có ở đầu file (chú thích -- dán vào file đã có require thì không bị khai báo trùng)
+const ACT_FNS = HEADER.match(/\{ ([^}]+) \}/)[1].split(', ').filter((f) => f !== 'useLog');
+function clipText(body, req) {
+  const used = ACT_FNS.filter((f) => new RegExp(`\\b${f}\\(`).test(body)), need = [];
+  if (used.length) need.push(`const { useLog, ${used.join(', ')} } = require('./xlv1_actions'); useLog(log);`);
+  need.push(...reqLines(req).split('\n').filter(Boolean));
+  if (/readGoogleSheetCell\(/.test(body) && !req['./readGoogleSheetCell']) need.push("const { readGoogleSheetCell } = require('./readGoogleSheetCell');");
+  if (/\brow\.[A-Z_]|readGoogleSheetCell\(row\b/.test(body)) need.push('const row = input ? JSON.parse(input) : {};');
+  return (need.length ? `// Cần có ở đầu file (chưa có thì bỏ // ở dòng dưới):\n${need.map((l) => '// ' + l).join('\n')}\n` : '') + body;
+}
+// Chép vào clipboard của MÁY (server chạy trên chính máy đó) -- không phụ thuộc trang web có cho chép không. Windows: PowerShell Set-Clipboard
+// (đọc stdin UTF-8 -> giữ được tiếng Việt), macOS: pbcopy, Linux: wl-copy / xclip. Không có công cụ nào thì thôi (trang vẫn tự chép thử).
+function toClipboard(text) {
+  if (process.env.PM_NO_CLIPBOARD === '1') return;
+  const [cmd, args] = process.platform === 'win32' ? ['powershell', ['-NoProfile', '-NonInteractive', '-Command', '[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())']]
+    : process.platform === 'darwin' ? ['pbcopy', []] : ['sh', ['-c', 'wl-copy 2>/dev/null || xclip -selection clipboard 2>/dev/null']];
+  try {
+    const p = require('child_process').spawn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'], windowsHide: true });
+    p.on('error', () => {}); p.stdin.on('error', () => {}); p.stdin.end(text, 'utf8');
+  } catch {}
+}
+
 // Dừng 1 đoạn -> code của các bước ghi trong đoạn đó (segSteps) vào hàng đợi; editor hỏi /recorder?since=... rồi tự chèn
 function exportSeg(r) {
   const { steps: seg, roots } = segSteps(r);
@@ -366,6 +396,8 @@ function exportSeg(r) {
   if (!seg.some((s) => stepCode(s))) return null;
   const note = roots.map((h) => `// ⟳ Bản cập nhật của CẢ khối ${blockName(h)} đã xuất trước đó -- xoá khối cũ, dùng khối này\n`).join('');
   const e = { id: ++r.exportSeq, count: seg.length, body: note + buildCode(seg, false), req: reqOf(seg), replaces: roots.map(blockName) };
+  e.clip = clipText(e.body, e.req);
+  toClipboard(e.clip);
   r.exports.push(e);
   if (r.exports.length > 20) r.exports.shift();
   return e;
@@ -1115,6 +1147,7 @@ function pageRecorder() {
     else if (pick && e.key === 'Escape') closePick();
     else if (pick && e.key === 'Enter' && st && st.armed) { e.preventDefault(); e.stopImmediatePropagation(); chotSlot(); }
     else if (!pick && e.key === 'Escape' && sp && !(st && st.armed)) closeSide();
+    else if (!pick && e.key === 'Escape' && expK >= 0 && !(st && st.armed)) { expK = -1; editing = null; draw(st); } // đóng khung chỉnh bước
     else if (!pick && e.key === 'Escape' && st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); }
   }, true);
   addEventListener('keyup', (e) => { if (e.key === 'Alt') altDown = false; if (e.key !== 'Alt' || !pick || !pick.live) return; e.preventDefault(); if (!pick.moved && Date.now() - pick.t0 < 300) closePick(); else freezePick(); }, true); // preventDefault: Chrome Windows không nhảy focus lên menu ⋮
@@ -1481,7 +1514,8 @@ function pageRecorder() {
     .ln .lt{display:none;gap:2px;flex:none}.ln:hover .lt{display:flex}.ln .lt button{padding:0 5px;font-size:11px}.ln.lang .no::after{content:'🌐';font-size:9px;margin-left:2px}
     .codev i{font-style:normal}.codev .k{color:#c586c0}.codev .s{color:#ce9178}.codev .c{color:#6a9955}.codev .n{color:#b5cea8}
     .ghost{margin:1px 0 3px 30px;font-size:11px;color:#7ee2a8;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.ghost button{font-size:11px;padding:1px 6px;border-color:#3fb95066;color:#7ee2a8}.ghost.err{color:#fca5a5}
-    .edit{margin:2px 0 6px 30px}
+    .edp{position:absolute;bottom:56px;right:min(652px,calc(100vw - 452px));width:420px;max-width:calc(100vw - 32px);max-height:72vh;overflow:auto;background:#12141c;color:#e8e9ed;border:1px solid #e8a33d;border-radius:12px;box-shadow:0 10px 40px #000a;padding:8px}
+    .edp[hidden]{display:none}.eph{display:flex;align-items:center;gap:6px;margin-bottom:6px}.eph b{color:#f5b455}
     .tbar{margin:6px 6px 0;padding:6px 8px;border-radius:8px;font-size:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.tbar.run{background:#3b82f61f;border:1px solid #3b82f6}
     .tbar.ok{background:#22c55e1f;border:1px solid #22c55e}.tbar.bad{background:#ef44441f;border:1px solid #ef4444}.tbar details{width:100%}.tbar pre{max-height:20vh;border:0;padding:4px}
     .wbar.on.br{border-color:#38bdf8;background:#38bdf81a}.wbar.on.br b{color:#7dd3fc}.wbar button[data-op=bstart]{border-color:#38bdf8;color:#7dd3fc}.st.br{border-color:#38bdf8;background:#38bdf814}.st.br b{color:#7dd3fc}.st.inbr{margin-left:14px;border-left:3px solid #38bdf8}
@@ -1518,9 +1552,9 @@ function pageRecorder() {
     host.style.cssText = 'all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647';
     window.__pmRecUI = host;
     root = host.attachShadow({ mode: 'closed' });
-    setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="side" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
+    setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="edp" hidden></div><div class="side" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
       <div class="pill" title="Bấm: ghi / tạm dừng / ghi tiếp (cùng 1 đoạn). ⏹: xuất code cả đoạn. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="caseEnd" title="Xong trường hợp đang ghi -- bước sau ra ngoài khối" hidden>✓ Xong TH</button><button data-op="export" title="Kết thúc đoạn + xuất code (editor + clipboard)" hidden>⏹ Xuất</button><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
-    ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast'), side: root.querySelector('.side') };
+    ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast'), side: root.querySelector('.side'), edp: root.querySelector('.edp') };
     document.documentElement.appendChild(host);
     for (const t of ['input', 'change']) root.addEventListener(t, (e) => uiEvent(e, e.composedPath()[0]));
     for (const t of ['input', 'change']) host.addEventListener(t, (e) => e.stopPropagation()); // trang web không nhận sự kiện của panel
@@ -1557,7 +1591,7 @@ function pageRecorder() {
         if (e.key === 'Escape') { fq = ''; el.value = ''; return drawCallList(); }
         fqi = Math.max(0, Math.min(fqRes.length - 1, fqi + (e.key === 'ArrowDown' ? 1 : -1))); return drawCallList();
       }
-      if (e.key === 'Escape') { if (pick) closePick(); else if (sp && !(st && st.armed)) closeSide(); else if (editing) { editing = null; draw(st); } else if (st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur();
+      if (e.key === 'Escape') { if (pick) closePick(); else if (sp && !(st && st.armed)) closeSide(); else if (editing || expK >= 0) { if (editing) editing = null; else expK = -1; draw(st); } else if (st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur();
     }
     else if (t === 'input') {
       if (inPick && pick && el.dataset.f === 'ptext') pick.text = el.value;
@@ -1625,7 +1659,7 @@ function pageRecorder() {
     call({ op: 'export' }).then((s) => {
       if (!s) return;
       render(s);
-      if (s.exported) { copyText(s.exported.body); toast(`Đã xuất ${s.exported.count} bước${s.exported.replaces && s.exported.replaces.length ? ` -- CẢ khối ${s.exported.replaces.join(', ')} đã cập nhật (xoá khối cũ)` : ''} → editor + clipboard`); }
+      if (s.exported) { copyText(s.exported.clip || s.exported.body); toast(`Đã xuất ${s.exported.count} bước${s.exported.replaces && s.exported.replaces.length ? ` -- CẢ khối ${s.exported.replaces.join(', ')} đã cập nhật (xoá khối cũ)` : ''} → clipboard (Ctrl+V vào VS Code)`); }
       else toast('Đoạn này chưa có bước nào -- không có gì để xuất');
     });
   }
@@ -1667,7 +1701,6 @@ function pageRecorder() {
       html += `<div class="ln${ln.dim ? ' dim' : ''}${bad ? ' bad' : ''}${expK === k ? ' on' : ''}${x && x.lang && !x.langAlt ? ' lang' : ''}" data-id="${ln.id}" data-k="${k}"${x && x.levels ? ` data-css="${esc(x.levels[x.level].css)}"` : ''}><span class="no">${no}</span><code>${hlJs(ln.t)}</code><span class="lt">${re}<button data-op="here" title="Bước mới chèn vào SAU bước này">⤵</button><button data-op="up" title="Lên trên (sát While / hàm có khối thì đi vào trong, ở đầu / cuối khối thì ra ngoài)">↑</button><button data-op="down" title="Xuống dưới">↓</button><button data-op="del" title="Xoá bước">✕</button></span></div>`;
       const lastOfStep2 = lastOfStep || (next && (next.cursor || next.hole) && !s.lines.slice(k + 1).some((l) => l.id === ln.id && !l.cursor && !l.hole));
       if (bad && lastOfStep2) html += `<div class="ghost err">✗ ${esc(s.test.error)}</div>`;
-      if (expK === k && x) html += `<div class="edit">${stepHTML(x, i, s.actions || {})}</div>`;
       if (x && lastOfStep) html += ghosts(x);
     });
     return `<div class="codev">${html}</div>`;
@@ -1839,7 +1872,7 @@ function pageRecorder() {
     ui.pill.querySelector('[data-op=export]').hidden = !s.segOpen;
     ui.pill.querySelector('[data-op=caseEnd]').hidden = !s.inCase;
     drawSide(s);
-    if (!open || sp) return;
+    if (!open || sp) { ui.edp.hidden = true; return; }
     const a = ui.root.activeElement;
     if (held || (a && (a.tagName === 'INPUT' && a.type !== 'checkbox' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA'))) return; // đang sửa 1 ô / đang nhấn chuột -- không vẽ lại
     const list = ui.panel.querySelector('.list'), scroll = list ? list.scrollTop : 0;
@@ -1853,10 +1886,15 @@ function pageRecorder() {
         <button data-op="copy" class="pri">Copy</button>${!s.steps.length && s.canUndo ? '<button data-op="undo">↶ Khôi phục</button>' : '<button data-op="clear">Xoá hết</button>'}<button data-op="view" title="${view === 'code' ? 'Xem dạng ô (mỗi bước 1 ô)' : 'Xem dạng code'}">${view === 'code' ? '▤' : '{ }'}</button><button data-op="close" title="Thu nhỏ">—</button></div>
       <div class="fbar"><input data-f="fq" value="${esc(fq)}" placeholder="ƒ Gọi hàm: gõ tên -- if, while, nhánh, pause, goto, tab mới, excel..." autocomplete="off" spellcheck="false"><div class="fnl2"${fq ? '' : ' hidden'}>${fq ? callListHTML() : ''}</div></div>
       ${testBar(testing ? { running: true } : s.test)}<div class="list">${view === 'blocks' ? blocksView(s) : s.steps.length ? (view === 'code' ? codeView(s) : cards()) : '<div class="empty">Chưa có bước nào -- cứ thao tác trên trang, code sẽ hiện ở đây. Giữ Alt + rê chuột để chọn đúng phần tử.</div>'}</div>`;
-    if (html === lastPanel && ui.panel.firstChild) return; // làm mới định kỳ mà không có gì đổi -> không vẽ lại (đỡ giật, không mất chỗ đang rê / cuộn)
-    lastPanel = html;
+    // khung chỉnh bước (bấm 1 dòng code): đứng riêng BÊN TRÁI bảng ☰ -- không chen vào giữa code làm các dòng nhảy xuống
+    const ek = view === 'code' && expK >= 0 && s.lines[expK], ex = ek && s.steps.find((y) => y.id === ek.id);
+    const ed = ex ? `<div class="eph"><b>Chỉnh bước #${ex.id}</b><span class="lv">${esc(String(ek.t).trim().slice(0, 50))}</span><span class="grow"></span><button data-op="edClose" title="Đóng (Esc)">✕</button></div>${stepHTML(ex, s.steps.indexOf(ex), s.actions || {})}${ghosts(ex)}` : '';
+    if (html + ed === lastPanel && ui.panel.firstChild) return; // làm mới định kỳ mà không có gì đổi -> không vẽ lại (đỡ giật, không mất chỗ đang rê / cuộn)
+    lastPanel = html + ed;
     setHTML(ui.panel, html);
     ui.panel.querySelector('.list').scrollTop = scroll;
+    ui.edp.hidden = !ed;
+    if (ed) setHTML(ui.edp, ed);
   }
   // Ô ƒ Gọi hàm (bảng ☰): While / Nhánh (lệnh ghi của recorder) + mọi hàm trong danh sách. Chọn -> thêm vào code ở con trỏ chèn;
   // hàm có ô element -> bấm 🎯 Pick rồi giữ Alt chọn; hàm có khối { } -> con trỏ tự vào trong khối
@@ -1935,7 +1973,8 @@ function pageRecorder() {
     if (!op) return;
     if (op === 'caseEnd') { caseEnd(); return; }
     if (op === 'curOff') { call({ op: 'cursorOff' }).then((s) => { render(s); toast('Bước mới lại nối vào cuối'); }); return; }
-    if (op === 'close') { open = false; ui.panel.hidden = true; highlight(null); return; }
+    if (op === 'close') { open = false; ui.panel.hidden = true; ui.edp.hidden = true; highlight(null); return; }
+    if (op === 'edClose') { expK = -1; editing = null; draw(st); return; }
     if (op === 'view') { view = view === 'code' ? 'cards' : 'code'; expK = -1; draw(st); return; }
     if (op === 'vblocks') { view = view === 'blocks' ? 'code' : 'blocks'; expK = -1; draw(st); return; }
     if (op === 'blockWhile') { call({ op: 'blockWhile' }).then((s) => { render(s); if (s && s.added) openSide('C' + s.added); }); return; }

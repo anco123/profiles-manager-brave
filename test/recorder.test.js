@@ -6,6 +6,7 @@
  */
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
 const { chromium } = require('playwright');
+process.env.PM_NO_CLIPBOARD = '1'; // test không ghi đè clipboard của máy
 const rec = require('../recorder');
 const A = require('../scripts/xlv1_actions');
 const helpers = require('../scripts/helpers');
@@ -96,6 +97,7 @@ async function testGuardUnit() { // whileGuard: vòng khớp trường hợp th�
     const ex1 = await until(() => rec.recorderExports(ID, 0)[0], 5000, 'xuất lần 1');
     assert.ok(ex1.body.includes(`whileGuard(page, { name: 'While ${loopId}', miss: 20 })`) && ex1.body.includes(`while (await w${loopId}.next()) {`) && ex1.body.includes(`await w${loopId}.idle(500);`), ex1.body);
     assert.ok(!ex1.replaces.length && !/Bản cập nhật/.test(ex1.body));
+    assert.ok(ex1.clip.startsWith('// Cần có ở đầu file') && /\/\/ const \{ useLog, [^}]*whileGuard[^}]*\} = require\('\.\/xlv1_actions'\); useLog\(log\);/.test(ex1.clip) && ex1.clip.endsWith(ex1.body), 'clipboard: chú thích require + code:\n' + ex1.clip.slice(0, 300));
     new AsyncFunction('page', 'log', rec.recorderHeader + ex1.body); // cú pháp hợp lệ
     assert.ok(!st().segOpen && !st().recording, 'xuất xong: đoạn đã đóng');
 
