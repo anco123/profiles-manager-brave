@@ -35,6 +35,13 @@
  *   ✓ Xong TH mà trường hợp chưa kết thúc bằng 1 bước chờ -> gợi ý thêm "Chờ hiện" cho element vừa hiện ra sau bước cuối (xem caseSug).
  * - Mở lại While / trường hợp đã ghi (kể cả đã ⏹ Xuất): nút ＋ ở dòng While / trường hợp trong bảng ☰ -> ghi thêm trường hợp vào đó;
  *   lần xuất sau ra CẢ khối While đã cập nhật (không phải mỗi phần mới) -- xem segSteps.
+ * - ▦ Dạng khối (bảng ☰): While = các if (trường hợp) + else. ＋ ở cuối if = if mới cùng cấp, ↵ = vào if / else -> bảng 2 ô bên phải: ô trên
+ *   thao tác phổ biến (Click, Gõ, Chờ hiện...), ô dưới kho element; bấm thao tác rồi bấm element = thêm bước; "◆ Làm điều kiện if" + element =
+ *   điều kiện của if. Xong / Esc = đóng bảng (như ✓ Xong TH). Thao tác thẳng trên trang lúc đang ở trong if cũng vào if đó.
+ * - Kho element: mọi element add trong lần record này (bước ghi được, 🎯 Element mới) -- bước TRỎ tới element trong kho, sửa selector 1 lần
+ *   ở kho (hoặc ở 1 bước bất kỳ dùng nó) thì mọi bước dùng element đó đổi theo. Xem libOf.
+ * - Bảng chọn Alt (nhả Alt): hiện HTML gốc quanh element -- 2 tầng cha, element, 2 tầng con; bấm thuộc tính / class / chữ / tên thẻ / dấu / //
+ *   để ghép XPath (and / or), Playwright đếm số khớp, tô viền mọi chỗ khớp, cảnh báo selector dễ gãy. Không bấm gì = dùng selector gợi ý.
  * - Màn hình lạ: While sinh ra dùng whileGuard (scripts/xlv1_actions.js) -- N vòng liền không khớp trường hợp nào / hết giờ -> chụp màn hình
  *   + log "màn hình lạ, chưa có trường hợp cho nó" (▶ Chạy thử lẫn code xuất ra chạy thật đều vậy).
  * - Bước + trạng thái giữ ở server (recorders[id]) nên chuyển trang / reload không mất.
@@ -73,7 +80,7 @@ const BRANCH_ACTIONS = { click: 'Hiện trước → Click', type: 'Hiện trư�
 const HEADER = "const { useLog, isShown, waitEl, waitGone, waitAny, scrollEl, hoverEl, clickEl, typeEl, getText, pause, whileHandle, clickNewTab, closeOtherTabs, dblClickEl, rightClickEl, checkEl, whileGuard } = require('./xlv1_actions');\nuseLog(log);\n\n";
 
 // Selector dựa vào CHỮ hiện ra (tên nút, aria-label, placeholder...) -- mỗi profile 1 locale nên chữ có thể khác nhau giữa các profile
-const isLangCode = (code) => /getByRole\([^)]*name:|getByText\(|getByPlaceholder\(|getByLabel\(|getByTitle\(|getByAltText\(|\[(aria-label|placeholder|title|alt)=/.test(code || '');
+const isLangCode = (code) => /getByRole\([^)]*name:|getByText\(|getByPlaceholder\(|getByLabel\(|getByTitle\(|getByAltText\(|\[(aria-label|placeholder|title|alt)=|@(aria-label|placeholder|title|alt)=|normalize-space\(\)=|contains\(\.,/.test(code || '');
 const reEsc = (t) => String(t).replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 // Thêm chữ của ngôn ngữ khác (step.langAlt = "Thích|Me gusta"): name: 'Like', exact: true -> name: /^(Like|Thích|Me gusta)$/,
 // getByText('Like', { exact: true }) -> getByText(/^(...)$/), [aria-label="Like"] -> :is([aria-label="Like"],[aria-label="Thích"])
@@ -98,6 +105,7 @@ function backupOf(step) {
   return lv.alts.find((a) => a !== main && a.unique && !a.deep && !a.nth && a.code !== main.code && a.kind !== main.kind && !(key && a.code.includes(key)) && (!mainLang || !isLangCode(a.code))) || null;
 }
 function selOf(step) {
+  if (step.el) step = step.el; // bước trỏ tới element trong kho (xem libOf) -- sửa selector ở kho thì mọi bước dùng nó đổi theo
   const lv = step.levels?.[step.level];
   if (!lv) return null;
   if (step.custom) return applyLang(step.custom, step.langAlt);
@@ -120,6 +128,7 @@ function fnCode(s, P = 'page') {
 }
 // Điều kiện của 1 trường hợp: element chính (hiện / không hiện / chữ là...) && các điều kiện ghép thêm (extra)
 function caseCond(s, P = 'page') {
+  if (!s.levels && !s.el) return null; // trường hợp tạo ở dạng khối, chưa chọn element điều kiện
   const one = (c) => { const sel = withP(selOf(c), P, c.frame), b = c.cond === 'dom' ? `(await ${sel}.count()) > 0` : `await isShown(${sel})`; return c.neg ? `!(${b})` : b; };
   const main = s.textEq != null && s.textEq !== '' ? `(await getText(${withP(selOf(s), P, s.frame)})) ${s.neg ? '!==' : '==='} ${q(s.textEq)}` : one(s);
   return [main, ...(s.extra || []).map(one)].join(' && ');
@@ -168,7 +177,7 @@ function stepCode(s, P = 'page') {
     case 'press': return `await ${P}.keyboard.press(${q(s.key || 'Enter')});`;
     case 'select': return `await hoverEl(${sel}); await ${sel}.selectOption(${txt});`; // đi chuột tới ô chọn trước (moveMouseVisibly của project)
     case 'fn': return fnCode(s, P);
-    case 'case': return `if (${caseCond(s, P)}) { ... }`;
+    case 'case': return caseCond(s, P) ? `if (${caseCond(s, P)}) { ... }` : '';
     case 'nav': return s.auto ? `await ${P}.waitForLoadState('domcontentloaded'); // -> ${s.url}` : `await ${P}.goto(${q(s.url)});`;
     default: return '';
   }
@@ -189,14 +198,15 @@ function loopCode(s, P = 'page') {
   return act ? `if (${cond}) { ${act} ${next} }${s.thenBreak ? ' // xong -- thoát While' : ''}` : stepCode(s, P); // bước khác (Wait, Lấy text...) để nguyên; chú thích để SAU dấu } (để trong thì nuốt mất dấu })
 }
 const loopIds = (steps) => new Set(steps.filter((s) => s.action === 'loop').map((s) => s.id));
-// Khối chứa 1 bước: 'F<id>:<k>' (lỗ thứ k -- khối { } -- của 1 hàm gọi ở ☰) > 'L<id>' While > 'B<id>' Nhánh > 'T<tab>' tab mới > '' ngoài cùng
+// Khối chứa 1 bước: 'F<id>:<k>' (lỗ thứ k -- khối { } -- của 1 hàm gọi ở ☰) > 'C<id>' trường hợp > 'L<id>' While > 'E<id>' else của While
+// > 'B<id>' Nhánh > 'T<tab>' tab mới > '' ngoài cùng
 function parentKeyOf(steps) {
   const vars = tabVars(steps), loops = loopIds(steps), brs = branchIds(steps), fns = new Set(steps.filter((x) => x.action === 'fn').map((x) => x.id));
   const cases = new Set(steps.filter((x) => x.action === 'case').map((x) => x.id));
-  return (x) => (x.blk && fns.has(headOf(x.blk)) ? x.blk : cases.has(x.cs) ? 'C' + x.cs : loops.has(x.loop) ? 'L' + x.loop : brs.has(x.br) ? 'B' + x.br : vars[x.tab] ? 'T' + x.tab : '');
+  return (x) => (x.blk && fns.has(headOf(x.blk)) ? x.blk : cases.has(x.cs) ? 'C' + x.cs : loops.has(x.loop) ? 'L' + x.loop : loops.has(x.elsOf) ? 'E' + x.elsOf : brs.has(x.br) ? 'B' + x.br : vars[x.tab] ? 'T' + x.tab : '');
 }
 const headOf = (key) => (key && key[0] !== 'T' ? +key.slice(1).split(':')[0] : 0); // bước mở khối (While / Nhánh / hàm)
-function setParent(s, key) { s.loop = key[0] === 'L' ? headOf(key) : undefined; s.br = key[0] === 'B' ? headOf(key) : undefined; s.blk = key[0] === 'F' ? key : undefined; s.cs = key[0] === 'C' ? headOf(key) : undefined; }
+function setParent(s, key) { s.loop = key[0] === 'L' ? headOf(key) : undefined; s.br = key[0] === 'B' ? headOf(key) : undefined; s.blk = key[0] === 'F' ? key : undefined; s.cs = key[0] === 'C' ? headOf(key) : undefined; s.elsOf = key[0] === 'E' ? headOf(key) : undefined; }
 const branchIds = (steps) => new Set(steps.filter((s) => s.action === 'branch').map((s) => s.id));
 // Việc của 1 nhánh (cái này hiện trước thì...) -- 1 câu lệnh, đứng sau `if (whichN === k)`
 function branchAct(s, P) {
@@ -231,6 +241,7 @@ function bodyLines(steps, opt = {}) {
       return;
     }
     if (s.action === 'case') { // trường hợp: if (điều kiện) { các bước con; continue / break }
+      if (!caseCond(s, P)) { if (opt.view) push(`${ind}// ◆ trường hợp chưa chọn điều kiện -- ▦ dạng khối, ↵ để chọn (chưa xuất ra code)`, s.id, { dim: true }); return; }
       if (opt.test) push(`${ind}__pmStep = ${s.id};`, s.id);
       const lv = s.levels && s.levels[s.level], k = 'C' + s.id;
       push(`${ind}if (${caseCond(s, P)}) { // trường hợp: ${s.textEq ? `chữ ${s.neg ? 'khác' : 'là'} "${s.textEq}"` : s.neg ? 'không hiện' : 'đang hiện'} ${(lv && (lv.label || lv.tag)) || ''}`.trimEnd(), s.id);
@@ -256,6 +267,7 @@ function bodyLines(steps, opt = {}) {
     if (s.action === 'loop') {
       push(`${ind}while (${opt.test ? `(__pmStep = ${s.id}) && ` : ''}await w${s.id}.next()) {`, s.id); // hết giờ -> next() chụp màn hình lạ rồi trả false
       emit('L' + s.id, ind + '  ');
+      emit('E' + s.id, ind + '  '); // else: không khớp trường hợp nào -- các bước ở đây chạy trước khi nghỉ rồi quét lại
       if (opt.test) push(`${ind}  __pmStep = ${s.id};`, s.id);
       push(`${ind}  await w${s.id}.idle(${+s.idle > 0 ? +s.idle : 500}); // chưa khớp trường hợp nào -- nghỉ rồi quét lại`, s.id); push(`${ind}}`, s.id);
     }
@@ -321,15 +333,18 @@ function stateOf(id) {
   for (const s of r.steps) if (s.endSug === 'wait' && Date.now() - s.endAt > 6000) s.endSug = null; // chờ element hiện sau ✓ Xong TH -- quá 6s không thấy thì thôi
   const vars = tabVars(r.steps), loops = loopIds(r.steps), brs = branchIds(r.steps), pk = parentKeyOf(r.steps);
   if (r.cur && r.cur.after && !r.steps.some((x) => x.id === r.cur.after)) r.cur = null; // bước con trỏ đứng sau đã bị xoá
-  if (r.armed && !r.steps.some((x) => x.id === r.armed.stepId)) r.armed = null;
+  if (r.armed && !r.armed.lib && !r.steps.some((x) => x.id === r.armed.stepId)) r.armed = null;
   const codeOf = (s) => (loops.has(s.loop) ? loopCode(s, vars[s.tab] || 'page') : brs.has(s.br) ? `if (...) ${branchAct(s, vars[s.tab] || 'page')}` : stepCode(s, vars[s.tab] || 'page'));
   const loopInfo = (s) => (s.action === 'loop' ? { inner: r.steps.filter((x) => x.loop === s.id).length, hasBreak: r.steps.some((x) => x.loop === s.id && (x.action === 'loopBreak' || (x.thenBreak && x.action !== 'skip') || (x.action === 'case' && x.end === 'break'))) } : {});
-  const extra = (s) => ({ ...loopInfo(s), code: codeOf(s), tabVar: vars[s.tab], inLoop: loops.has(s.loop), inBranch: brs.has(s.br), lang: !!s.levels && isLangCode(s.custom || ((s.levels[s.level] || {}).alts || [])[s.alt]?.code || ((s.levels[s.level] || {}).alts || [])[0]?.code), bkCode: backupOf({ ...s, backup: true })?.code, bkOn: !!backupOf(s),
+  const mainCode = (t) => t.custom || ((t.levels[t.level] || {}).alts || [])[t.alt]?.code || ((t.levels[t.level] || {}).alts || [])[0]?.code;
+  const elOf = (s) => (s.el ? { el: undefined, elId: s.el.id, elName: s.el.name, ...Object.fromEntries(EL_KEYS.map((k) => [k, s.el[k]])) } : {}); // bước trỏ tới kho: hiện selector của kho
+  const els = (r.els || []).map((e) => ({ id: e.id, name: e.name, code: selOf(e), css: (e.levels[e.level] || e.levels[0] || {}).css, tag: (e.levels[e.level] || {}).tag, frame: e.frame, lang: isLangCode(selOf(e)), uses: r.steps.filter((x) => x.el === e).length }));
+  const extra = (s) => ({ ...elOf(s), ...loopInfo(s), code: codeOf(s), tabVar: vars[s.tab], inLoop: loops.has(s.loop), inBranch: brs.has(s.br), lang: !!(s.el || s).levels && isLangCode(mainCode(s.el || s)), bkCode: backupOf({ ...(s.el || s), backup: true })?.code, bkOn: !!backupOf(s.el || s),
     kids: s.action === 'branch' ? r.steps.filter((x) => x.br === s.id).length : undefined, inFn: pk(s)[0] === 'F',
     caseInfo: s.action === 'case' ? { kids: r.steps.filter((x) => x.cs === s.id).length, extra: (s.extra || []).map((c) => ({ code: selOf(c), neg: !!c.neg })) } : undefined,
     slotInfo: s.action === 'fn' ? fnKeys(s.tpl).map((k) => ({ key: k, label: SLOT_LABEL(k), code: s.slots && s.slots[k] ? selOf(s.slots[k]) : null })) : undefined, holes: s.action === 'fn' ? holeN(s) : undefined });
   return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, openLoop: loops.has(r.openLoop) ? r.openLoop : null, openBranch: brs.has(r.openBranch) ? r.openBranch : null, loopActions: LOOP_ACTIONS, branchActions: BRANCH_ACTIONS,
-    lines: bodyLines(r.steps, { view: true, cur: r.cur }), cur: r.cur || null, armed: r.armed || null, inCase: r.cur && r.cur.par[0] === 'C' ? headOf(r.cur.par) : null, caseFns: CASE_FNS, andFns: AND_FNS, callFns: CALL_FNS, req: reqOf(r.steps), test: r.test || null, canRun: !!r.run, fns: PICK_FNS, segFrom: r.segFrom, segIds: r.segOpen ? segSteps(r).steps.map((x) => x.id) : [], exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), actions: ACTIONS, code: buildCode(r.steps) };
+    lines: bodyLines(r.steps, { view: true, cur: r.cur }), cur: r.cur || null, armed: r.armed || null, inCase: r.cur && r.cur.par[0] === 'C' ? headOf(r.cur.par) : null, caseFns: CASE_FNS, andFns: AND_FNS, callFns: CALL_FNS, req: reqOf(r.steps), test: r.test || null, canRun: !!r.run, fns: PICK_FNS, segFrom: r.segFrom, segIds: r.segOpen ? segSteps(r).steps.map((x) => x.id) : [], exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), els, actions: ACTIONS, code: buildCode(r.steps) };
 }
 
 // Bước mở khối theo key: 'L5' / 'C5' / 'B5' / 'F5:0' -> bước 5; 'T3' -> bước clickTab mở tab 3
@@ -363,7 +378,30 @@ const sameEl = (a, b) => a && b && a.levels && b.levels && a.levels[0]?.css === 
 const latest = (steps, skip) => { let m = null; for (const x of steps) if ((!skip || !skip(x)) && (!m || x.id > m.id)) m = x; return m; };
 // Con trỏ chèn (r.cur = { after, par }): bước mới vào khối `par`, ngay sau bước `after` (after = bước mở khối -> đầu khối, 0 = đầu code);
 // không có con trỏ thì nối vào cuối như cũ. Đang trong While / Nhánh theo con trỏ thì bảng Alt hiện việc của While / Nhánh.
+// ---------------- kho element: element add trong lần record này (bước ghi được, 🎯 Element mới) -- bước TRỎ tới element trong kho (s.el),
+// sửa selector 1 lần ở kho thì mọi bước dùng nó đổi theo. Cùng selector + cùng iframe thì chỉ lưu 1 lần.
+const EL_KEYS = ['levels', 'level', 'alt', 'custom', 'langAlt', 'backup', 'frame'];
+function libOf(r, src) {
+  if (!src || !src.levels) return null;
+  if (!r.els) { r.els = []; r.elSeq = 0; }
+  const code = selOf(src), has = r.els.find((e) => selOf(e) === code && (e.frame || '') === (src.frame || ''));
+  if (has) return has;
+  const lv = src.levels[src.level] || src.levels[0] || {}, e = { id: ++r.elSeq, name: String(lv.label || lv.tag || 'element').slice(0, 40), tab: src.tab };
+  for (const k of EL_KEYS) if (src[k] !== undefined) e[k] = src[k];
+  r.els.push(e);
+  return e;
+}
+const link = (r, s) => { if (s.levels && !s.el && !['clickTab', 'gotoLink', 'gotoUrl'].includes(s.action)) s.el = libOf(r, s); return s; };
+// Thêm bước vào CUỐI khối `key` (trường hợp 'C5' / else 'E5' -- dạng khối) và con trỏ đứng sau bước đó
+function appendTo(r, key, step) {
+  const pk = parentKeyOf(r.steps), kids = r.steps.filter((x) => pk(x) === key), h = headStep(r.steps, key), prev = kids[kids.length - 1] || h;
+  setParent(step, key); r.steps.splice(prev ? r.steps.indexOf(prev) + 1 : r.steps.length, 0, step);
+  r.cur = { after: step.id, par: key }; syncOpen(r);
+  return step;
+}
+
 function insertStep(r, step) {
+  link(r, step);
   const c = r.cur;
   if (!c) { r.steps.push(step); return step; }
   let key = c.par, i = c.after ? r.steps.findIndex((x) => x.id === c.after) : -1;
@@ -614,7 +652,7 @@ async function handle(id, page, msg, frame) {
     const c = r.steps.find((x) => x.id === msg.stepId && x.action === 'case');
     if (c && c.endSug && c.endSug.levels && msg.accept) {
       const k = 'C' + c.id, pk = parentKeyOf(r.steps), kids = r.steps.filter((x) => pk(x) === k), prev = kids[kids.length - 1];
-      const w = { id: ++r.seq, at: Date.now(), action: 'wait', levels: c.endSug.levels, level: 0, alt: 0, tab: c.endSug.tab ?? c.tab, frame: c.endSug.frame };
+      const w = link(r, { id: ++r.seq, at: Date.now(), action: 'wait', levels: c.endSug.levels, level: 0, alt: 0, tab: c.endSug.tab ?? c.tab, frame: c.endSug.frame });
       setParent(w, k); r.steps.splice(r.steps.indexOf(prev || c) + 1, 0, w);
       if (r.cur && r.cur.par === k && r.cur.after === (prev || c).id) r.cur.after = w.id; // đang ghi tiếp vào trường hợp này -> bước sau đứng sau bước chờ
     }
@@ -630,13 +668,53 @@ async function handle(id, page, msg, frame) {
     }
   }
   else if (msg.op === 'dropExtra') { const c = r.steps.find((x) => x.id === msg.stepId); if (c && c.extra) c.extra = c.extra.filter((_, i) => i !== msg.i); }
-  else if (msg.op === 'arm') r.armed = msg.stepId ? { stepId: msg.stepId, key: msg.key } : null;
+  else if (msg.op === 'arm') r.armed = msg.stepId ? { stepId: msg.stepId, key: msg.key } : msg.lib ? { lib: true } : null; // lib: 🎯 Element mới cho kho
+  // ---- dạng khối: While = các if (trường hợp) + else; ↵ vào 1 if -> bảng 2 ô (thao tác phổ biến + kho element) -- xem blocksView / sideHTML
+  else if (msg.op === 'blockWhile') { // While mới: 1 if (chưa có điều kiện) + else
+    if (!r.segOpen) { r.segOpen = true; r.segFrom = r.seq + 1; }
+    const L = insertStep(r, { id: ++r.seq, at: Date.now(), action: 'loop', timeout: 0 }), c = { id: ++r.seq, at: Date.now(), action: 'case', end: 'continue', extra: [] };
+    appendTo(r, 'L' + L.id, c); r.cur = { after: c.id, par: 'C' + c.id }; syncOpen(r);
+    return { ...stateOf(id), added: c.id };
+  }
+  else if (msg.op === 'caseAdd') { // ＋ ở cuối 1 if: if mới cùng cấp, ngay sau nó
+    const h = r.steps.find((x) => x.id === msg.stepId), key = h && parentKeyOf(r.steps)(h);
+    if (h && key && key[0] === 'L') {
+      const c = { id: ++r.seq, at: Date.now(), action: 'case', end: 'continue', extra: [] }, pk = parentKeyOf(r.steps), sub = (x) => { for (let y = x, d = 0; y && d < 50; y = headStep(r.steps, pk(y)), d++) if (y === h) return true; return false; };
+      const last = [...r.steps].reverse().find(sub); // sau cả các bước con của if đó
+      setParent(c, key); r.steps.splice(r.steps.indexOf(last) + 1, 0, c);
+      r.segOpen = true; // id mới >= segFrom -- đoạn mới kéo theo cả khối While (segSteps)
+      return { ...stateOf(id), added: c.id };
+    }
+  }
+  else if (msg.op === 'enter' && /^[CE]\d+$/.test(msg.key || '') && headStep(r.steps, msg.key)) { // ↵ vào 1 if / else: con trỏ cuối khối, bật ghi -- thao tác trên trang cũng vào khối này
+    const pk = parentKeyOf(r.steps), kids = r.steps.filter((x) => pk(x) === msg.key);
+    r.cur = { after: kids.length ? kids[kids.length - 1].id : headOf(msg.key), par: msg.key }; syncOpen(r);
+    if (!r.segOpen) { r.segOpen = true; r.segFrom = r.seq + 1; }
+    if (r.enabled) r.recording = true;
+  }
+  else if (msg.op === 'caseCond') { // điều kiện của if = 1 element trong kho
+    const c = r.steps.find((x) => x.id === msg.stepId && x.action === 'case'), e = (r.els || []).find((x) => x.id === msg.elId);
+    if (c && e) { c.el = e; c.levels = e.levels; c.level = e.level; c.alt = e.alt; c.frame = e.frame; if (c.end == null) c.end = 'continue'; }
+  }
+  else if (msg.op === 'libStep') { // bấm 1 element trong kho (bảng 2 ô): thêm bước "thao tác + element" vào cuối if / else đang mở
+    const e = (r.els || []).find((x) => x.id === msg.elId), key = /^[CE]\d+$/.test(msg.key || '') && headStep(r.steps, msg.key) ? msg.key : null;
+    if (key && msg.action === 'pause') appendTo(r, key, { id: ++r.seq, at: Date.now(), action: 'fn', fn: 'pause', name: CAT.pause.name, tpl: CAT.pause.code, slots: {} });
+    else if (key && e && ACTIONS[msg.action]) appendTo(r, key, { id: ++r.seq, at: Date.now(), action: msg.action, el: e, levels: e.levels, level: e.level, alt: e.alt, frame: e.frame, tab: e.tab, text: msg.text, enter: !!msg.enter });
+    r.segOpen = true;
+  }
+  else if (msg.op === 'libAdd' && Array.isArray(msg.levels)) { // 🎯 Element mới -> vào kho (đã có cùng selector thì dùng cái cũ)
+    const e = libOf(r, { levels: msg.levels, level: msg.level || 0, alt: msg.alt || 0, custom: msg.custom || null });
+    r.armed = null;
+    return { ...stateOf(id), libAdded: e && e.id };
+  }
+  else if (msg.op === 'libRename') { const e = (r.els || []).find((x) => x.id === msg.elId); if (e && String(msg.name || '').trim()) e.name = String(msg.name).trim().slice(0, 40); }
+  else if (msg.op === 'libCustom') { const e = (r.els || []).find((x) => x.id === msg.elId); if (e) e.custom = String(msg.custom || '').trim() || null; }
   else if (msg.op === 'cursor') { const x = r.steps.find((y) => y.id === msg.stepId); if (x) { r.cur = { after: x.id, par: parentKeyOf(r.steps)(x) }; syncOpen(r); } }
-  else if (msg.op === 'cursorHole' && /^[LBFC]\d+(:\d+)?$/.test(msg.key || '')) { r.cur = { after: headOf(msg.key), par: msg.key }; syncOpen(r); }
+  else if (msg.op === 'cursorHole' && /^[LBFCE]\d+(:\d+)?$/.test(msg.key || '')) { r.cur = { after: headOf(msg.key), par: msg.key }; syncOpen(r); }
   else if (msg.op === 'cursorOff') { r.cur = null; r.openLoop = null; r.openBranch = null; }
   else if (msg.op === 'effect') { // nhận / bỏ gợi ý "Chờ hiện" sau click
     const i = r.steps.findIndex((x) => x.id === msg.stepId), s = r.steps[i];
-    if (s && s.effect && msg.accept) r.steps.splice(i + 1, 0, { id: ++r.seq, at: Date.now(), action: 'wait', levels: s.effect.levels, level: 0, alt: 0, tab: s.tab, frame: s.effect.frame });
+    if (s && s.effect && msg.accept) r.steps.splice(i + 1, 0, link(r, { id: ++r.seq, at: Date.now(), action: 'wait', levels: s.effect.levels, level: 0, alt: 0, tab: s.tab, frame: s.effect.frame, loop: s.loop, cs: s.cs, elsOf: s.elsOf, br: s.br, blk: s.blk }));
     if (s) { s.effect = null; s.effectOff = true; }
   }
   else if (msg.op === 'forEach') { // gộp nhóm click lặp lại thành 1 bước "với từng item"
@@ -656,7 +734,7 @@ async function handle(id, page, msg, frame) {
   else if (msg.op === 'delete') { // xoá While / Nhánh / hàm có khối -> các bước bên trong ra ngoài, vào khối chứa bước bị xoá
     const pk = parentKeyOf(r.steps), d = r.steps.find((s) => s.id === msg.stepId);
     if (d) {
-      const out = pk(d), inside = (s) => s.loop === d.id || s.br === d.id || s.cs === d.id || (s.blk && headOf(s.blk) === d.id);
+      const out = pk(d), inside = (s) => s.loop === d.id || s.elsOf === d.id || s.br === d.id || s.cs === d.id || (s.blk && headOf(s.blk) === d.id);
       for (const s of r.steps) if (inside(s)) setParent(s, out);
       if (r.cur && (r.cur.after === d.id || headOf(r.cur.par) === d.id)) { const i = r.steps.indexOf(d); const prev = r.steps.slice(0, i).reverse().find((x) => pk(x) === out); r.cur = { after: prev ? prev.id : headOf(out), par: out }; }
       r.steps = r.steps.filter((s) => s !== d);
@@ -668,9 +746,12 @@ async function handle(id, page, msg, frame) {
   else if (msg.op === 'update') {
     const s = r.steps.find((x) => x.id === msg.stepId);
     if (s) {
-      const p = msg.patch || {};
-      if (p.level != null && s.levels && p.level >= 0 && p.level < s.levels.length) { s.level = p.level; s.alt = 0; s.custom = null; }
-      if (p.alt != null) { s.alt = p.alt; s.custom = null; }
+      const p = msg.patch || {}; // bước trỏ tới kho: đổi selector là đổi ở kho (mọi bước dùng element đó đổi theo)
+      if (p.action === 'gotoLink' && s.el) { Object.assign(s, { levels: s.el.levels, level: s.el.level, alt: s.el.alt, custom: s.el.custom }); s.el = undefined; } // đọc href: chọn thẻ <a> -- element khác
+      const t = s.el || s;
+      if (p.level != null && t.levels && p.level >= 0 && p.level < t.levels.length) { t.level = p.level; t.alt = 0; t.custom = null; }
+      if (p.alt != null) { t.alt = p.alt; t.custom = null; }
+      for (const k of ['custom', 'langAlt', 'backup']) if (p[k] !== undefined) { t[k] = p[k]; delete p[k]; }
       for (const k of ['action', 'text', 'enter', 'custom', 'url', 'key', 'auto', 'tabUrl', 'timeout', 'thenBreak', 'cond', 'langAlt', 'backup', 'list', 'inner', 'innerAction', 'limit', 'tpl', 'neg', 'textEq', 'end', 'maxN', 'idle', 'miss']) if (p[k] !== undefined) s[k] = p[k];
       if (p.action === 'gotoLink' && s.linkLevel >= 0 && s.linkLevel < s.levels.length) Object.assign(s, { level: s.linkLevel, alt: 0, custom: null }); // đọc href -> chọn đúng thẻ <a>
     }
@@ -710,7 +791,7 @@ function onNewTab(id, page) {
 // data: { excelFile, excelHeaderFile, gsheetFile, matchColumn, profileName } -- để gợi ý row.X / readGoogleSheetCell (xem loadSources);
 // data.run(code, input): chạy code trên profile này giống Run (runScriptOnProfile của server) -- cho nút ▶ Chạy thử
 async function startRecorder(id, context, data) {
-  if (!recorders[id]) recorders[id] = { enabled: true, recording: false, steps: [], seq: 0, segFrom: 1, exports: [], exportSeq: 0, tabSeq: 0 };
+  if (!recorders[id]) recorders[id] = { enabled: true, recording: false, steps: [], seq: 0, segFrom: 1, exports: [], exportSeq: 0, tabSeq: 0, els: [], elSeq: 0 };
   const r = recorders[id];
   r.sources = loadSources(data); // đọc lại mỗi lần bấm Record (vừa import / sync lại thì có dữ liệu mới)
   r.run = data && data.run;
@@ -809,7 +890,7 @@ function pageRecorder() {
   // Xếp hạng (số nhỏ đứng trước): khớp đúng 1 trước; trong đó móc mạnh KHÔNG dựa vào chữ (testid / id / name / href / role) trước, có dựa
   // vào chữ hiện ra (đổi theo ngôn ngữ của profile -- mỗi profile 1 locale) sau, móc yếu (chỉ type / class / thẻ) sau nữa; ô nhập name= lên
   // đầu; đường dẫn css nhiều tầng luôn cuối
-  const isLang = (code) => /getByRole\([^)]*name:|getByText\(|getByPlaceholder\(|getByLabel\(|getByTitle\(|getByAltText\(|\[(aria-label|placeholder|title|alt)=/.test(code || '');
+  const isLang = (code) => /getByRole\([^)]*name:|getByText\(|getByPlaceholder\(|getByLabel\(|getByTitle\(|getByAltText\(|\[(aria-label|placeholder|title|alt)=|@(aria-label|placeholder|title|alt)=|normalize-space\(\)=|contains\(\.,/.test(code || '');
   const isStrong = (code) => /getByTestId\(|'#[A-Za-z]|\[(data-testid|name|href|role|id|for)=/.test(code || '');
   const rank = (a) => (a.deep ? 3 : !a.unique ? 2 : a.field && a.kind === 'name' ? -1 : isStrong(a.code) ? (isLang(a.code) ? 0.5 : 0) : isLang(a.code) ? 1 : 1.5);
   const sortAlts = (alts) => alts.sort((a, b) => rank(a) - rank(b));
@@ -1019,17 +1100,24 @@ function pageRecorder() {
   }, true);
 
   // ---------------- giữ Alt + rê chuột: các lớp phần tử chồng nhau dưới con trỏ; lăn chuột đổi lớp; nhả Alt = bảng đứng yên để chọn
-  let mx = -1, my = -1, pick = null, raf = 0; // pick = { live, rows, sel, moved, t0, altObj, custom, editing, text, enter, perform }
+  let mx = -1, my = -1, pick = null, raf = 0, altDown = false; // pick = { live, rows, sel, moved, t0, altObj, custom, editing, text, enter, perform }
   addEventListener('mousemove', (e) => { mx = e.clientX; my = e.clientY; if (pick && pick.live) { pick.moved = true; if (!raf) raf = requestAnimationFrame(() => { raf = 0; updatePick(); }); } }, true);
   addEventListener('keydown', (e) => {
     if (!e.isTrusted || ours(e)) return;
-    if (e.key === 'Alt') { if (pick && pick.live) e.preventDefault(); else if (st && (st.recording || st.armed) && ui && !e.repeat && !e.ctrlKey) { e.preventDefault(); startPick(); } return; }
+    if (e.key === 'Alt') {
+      altDown = true;
+      if (pick && pick.live) e.preventDefault();
+      else if (st && (st.recording || st.armed) && ui && !e.repeat && !e.ctrlKey) { e.preventDefault(); startPick(); }
+      else if (st && ui && !e.repeat && !e.ctrlKey) call({ op: 'state' }).then((s) => { render(s); if (altDown && !pick && s && (s.recording || s.armed)) startPick(); }); // trạng thái trong trang chưa kịp làm mới (vừa chạy script xong...) -- hỏi lại server
+      return;
+    }
     if (pick && pick.live) closePick(); // Alt + phím khác (Alt+Tab, Alt+←...) là phím tắt, không phải chọn phần tử
     else if (pick && e.key === 'Escape') closePick();
     else if (pick && e.key === 'Enter' && st && st.armed) { e.preventDefault(); e.stopImmediatePropagation(); chotSlot(); }
+    else if (!pick && e.key === 'Escape' && sp && !(st && st.armed)) closeSide();
     else if (!pick && e.key === 'Escape' && st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); }
   }, true);
-  addEventListener('keyup', (e) => { if (e.key !== 'Alt' || !pick || !pick.live) return; e.preventDefault(); if (!pick.moved && Date.now() - pick.t0 < 300) closePick(); else freezePick(); }, true); // preventDefault: Chrome Windows không nhảy focus lên menu ⋮
+  addEventListener('keyup', (e) => { if (e.key === 'Alt') altDown = false; if (e.key !== 'Alt' || !pick || !pick.live) return; e.preventDefault(); if (!pick.moved && Date.now() - pick.t0 < 300) closePick(); else freezePick(); }, true); // preventDefault: Chrome Windows không nhảy focus lên menu ⋮
   addEventListener('blur', () => { if (pick && pick.live) closePick(); });
   addEventListener('wheel', (e) => {
     if (!pick || !pick.live || !pick.rows.length) return;
@@ -1062,6 +1150,7 @@ function pageRecorder() {
     return rows;
   }
   function startPick() {
+    if (ui) ui.side.classList.add('mini'); // bảng 2 ô mờ + không chặn chuột khi đang chọn element
     pick = { live: true, rows: [], sel: 0, moved: false, t0: Date.now(), text: '', enter: false, perform: true };
     updatePick();
   }
@@ -1078,13 +1167,14 @@ function pageRecorder() {
     if (!pick) return;
     pick.live = false;
     if (!pick.rows.length) return closePick();
-    for (const r of pick.rows) r.alts = bestAlts(r.el); // tính sẵn cho mọi lớp: menu hover có thể tắt khi chuột rời đi, phần tử biến mất
+    for (const r of pick.rows) { r.alts = bestAlts(r.el); r.tree = snapTree(r.el); } // tính / chụp sẵn cho mọi lớp: menu hover có thể tắt khi chuột rời đi, phần tử biến mất
     selectRow(pick.sel);
   }
   function selectRow(i) {
     const r = pick.rows[i];
     if (!r) return;
-    Object.assign(pick, { sel: i, altObj: r.alts[0], altTouched: false, custom: null, editing: false });
+    Object.assign(pick, { sel: i, altObj: r.alts[0], altTouched: false, custom: null, editing: false, xs: {}, xCount: null });
+    xMark(null);
     drawPick();
     if (r.counted) return;
     r.counted = true;
@@ -1102,7 +1192,7 @@ function pageRecorder() {
       if (pick && pick.rows[pick.sel] === r) { if (!pick.altTouched) pick.altObj = r.alts[0]; drawAltSelect(); }
     });
   }
-  function closePick() { pick = null; if (ui) ui.pick.hidden = true; boxEl(null); }
+  function closePick() { pick = null; xMark(null); if (ui) { ui.pick.hidden = true; ui.side.classList.remove('mini'); } boxEl(null); }
   const altLabel = (a) => `${a.count == null ? (a.unique ? '' : '⚠ ') : a.unique ? '✓1 ' : `⚠${a.count} `}${isLang(a.code) ? '🌐 ' : ''}${a.kind}: ${a.code}${a.note && a.count == null ? ' (' + a.note + ')' : ''}`; // 🌐 = dựa vào chữ, đổi theo ngôn ngữ
   function drawAltSelect() {
     const r = pick.rows[pick.sel], s = ui.pick.querySelector('[data-f=palt]');
@@ -1110,15 +1200,85 @@ function pageRecorder() {
     const cc = pick.customCount == null ? '' : pick.customCount === 1 ? '✓1 ' : `⚠${pick.customCount} `;
     setHTML(s, r.alts.map((a, k) => `<option value="${k}" ${a === pick.altObj && !pick.custom ? 'selected' : ''}>${esc(altLabel(a))}</option>`).join('') + (pick.custom ? `<option selected>${cc}sửa tay: ${esc(pick.custom)}</option>` : ''));
   }
-  // Bấm thuộc tính trong khung HTML: thêm / bỏ vào selector tự ghép <thẻ>[a="..."][b="..."] -> thành selector "sửa tay", Playwright đếm số khớp
-  function toggleFrag(frag) {
-    const r = pick.rows[pick.sel];
-    pick.attrs = pick.attrs || new Set();
-    if (pick.attrs.has(frag)) pick.attrs.delete(frag); else pick.attrs.add(frag);
-    const css = pick.attrs.size ? r.el.tagName.toLowerCase() + [...pick.attrs].join('') : '';
-    pick.custom = css ? `page.locator(${sq(css)})` : null; pick.customCount = null;
-    drawPick();
-    if (css) call({ op: 'count', codes: [pick.custom] }).then((res) => { if (pick && res && res.counts && res.counts[0]) { pick.customCount = res.counts[0].all; drawAltSelect(); } });
+  // ---------------- ghép XPath từ HTML gốc: bảng đứng yên hiện ĐÚNG HTML quanh element (2 tầng cha, element, 2 tầng con -- chụp lúc nhả Alt vì
+  // menu / popup có thể biến mất). Bấm thuộc tính / class / chữ = thêm điều kiện (2 cái trở lên nối and, bấm "and" đổi or); bấm tên thẻ = thẻ ↔ *;
+  // bấm / // giữa 2 tầng = con trực tiếp ↔ con cháu bất kỳ; điều kiện ở tầng cha = móc từ cha xuống, ở tầng con = element CÓ CHỨA con đó.
+  // Kết quả là selector "sửa tay" page.locator('xpath=...'), Playwright đếm số khớp (cả / đang hiện), mọi chỗ khớp tô viền xanh trên trang.
+  const ownText = (n) => clean([...n.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent).join(' ')).slice(0, 60);
+  const nodeInfo = (n) => ({ tag: n.tagName.toLowerCase(), attrs: [...n.attributes].filter((a) => a.name !== 'style' && a.value.length <= 200).map((a) => ({ n: a.name, v: a.value })), text: ownText(n), kids: n.childElementCount });
+  function snapTree(el) {
+    const up = [];
+    for (let n = el.parentElement; n && n !== document.body && n !== document.documentElement && up.length < 2; n = n.parentElement) up.push(nodeInfo(n));
+    return { up, me: nodeInfo(el), down: [...el.children].slice(0, 8).map((c) => ({ ...nodeInfo(c), sub: [...c.children].slice(0, 4).map(nodeInfo) })), more: Math.max(0, el.childElementCount - 8), shadow: el.getRootNode() !== document };
+  }
+  const xq = (v) => (!v.includes('"') ? `"${v}"` : !v.includes("'") ? `'${v}'` : `concat("${v.split('"').join(`", '"', "`)}")`);
+  const nodeAt = (t, k) => (k === 'p2' ? t.up[1] : k === 'p1' ? t.up[0] : k === 'me' ? t.me : ((m) => m && (m[2] != null ? (t.down[+m[1]] || { sub: [] }).sub[+m[2]] : t.down[+m[1]]))(/^c(\d+)(?:_(\d+))?$/.exec(k)));
+  const xPred = (p, nd, x) => (p === 't' ? (x.tm === 'c' ? `contains(., ${xq(nd.text)})` : `text()[normalize-space()=${xq(nd.text)}]`)
+    : p.startsWith('c:') ? `contains(@class, ${xq(p.slice(2))})` : `@${p.slice(2)}=${xq((nd.attrs.find((a) => a.n === p.slice(2)) || { v: '' }).v)}`);
+  function xpOf(t, xs) {
+    const g = (k) => xs[k] || { sel: [] }, step = (k, nd) => `${g(k).any ? '*' : nd.tag}${g(k).sel.length ? `[${g(k).sel.map((p) => xPred(p, nd, g(k))).join(` ${g(k).join || 'and'} `)}]` : ''}`;
+    let xp = '', prev = false;
+    for (const k of ['p2', 'p1']) { const nd = nodeAt(t, k); if (!nd || !g(k).sel.length) { prev = false; continue; } xp += (prev && g(k).sep === '/' ? '/' : '//') + step(k, nd); prev = true; }
+    xp += (prev && g('me').sep === '/' ? '/' : '//') + step('me', t.me);
+    t.down.forEach((c, i) => { if (g('c' + i).sel.length) xp += `[${g('c' + i).sep === '/' ? './' : './/'}${step('c' + i, c)}]`; c.sub.forEach((d, j) => { if (g(`c${i}_${j}`).sel.length) xp += `[.//${step(`c${i}_${j}`, d)}]`; }); });
+    return +xs.nth > 0 ? `(${xp})[${+xs.nth}]` : xp;
+  }
+  const weakAttr = (a) => (a.n === 'id' ? !goodId(a.v) : a.v.length > 90 || /\d{3,}/.test(a.v));
+  function xWarn(t, xs) {
+    const all = Object.entries(xs).filter(([k, x]) => k !== 'nth' && x && x.sel), n = all.reduce((a, [, x]) => a + x.sel.length, 0), w = [];
+    const weak = (k, p) => { const nd = nodeAt(t, k); if (!nd) return false; if (p.startsWith('c:')) return !goodClass(p.slice(2)); const a = p.startsWith('a:') && nd.attrs.find((y) => y.n === p.slice(2)); return !!a && weakAttr(a); };
+    if (n > 3) w.push(`${n} điều kiện -- càng nhiều càng dễ gãy khi trang đổi (nên: 1 móc mạnh, hoặc 1 cha ổn định + 1 móc)`);
+    if (all.some(([k, x]) => x.sel.some((p) => weak(k, p)))) w.push('có thuộc tính mờ (tự sinh / đổi theo lần tải)');
+    if (all.some(([, x]) => x.sep === '/' && x.sel.length)) w.push('dùng / (con trực tiếp) -- trang thêm 1 lớp bọc là gãy');
+    if (all.some(([, x]) => x.sel.some((p) => p === 't' || /^a:(aria-label|placeholder|title|alt)$/.test(p)))) w.push('🌐 dựa vào chữ -- profile khác ngôn ngữ thấy chữ khác');
+    return w;
+  }
+  function xTree(r) {
+    const t = r.tree, xs = pick.xs || {}, g = (k) => xs[k] || { sel: [] }, has = (k, p) => g(k).sel.includes(p);
+    if (t.shadow) return '<div class="xt"><div class="fnh">Element nằm trong shadow DOM -- XPath không với tới được, dùng selector gợi ý ở trên</div></div>';
+    const line = (k, nd, depth, sep) => {
+      const ats = nd.attrs.map((a) => (a.n === 'class' ? `class="${a.v.split(/\s+/).filter(Boolean).map((c) => `<span class="xa${has(k, 'c:' + c) ? ' on' : ''}${goodClass(c) ? '' : ' weak'}" data-x="${k}" data-p="c:${esc(c)}">${esc(c)}</span>`).join(' ')}"`
+        : `<span class="xa${has(k, 'a:' + a.n) ? ' on' : ''}${weakAttr(a) ? ' weak' : ''}" data-x="${k}" data-p="a:${esc(a.n)}">${esc(a.n)}="${esc(a.v.length > 60 ? a.v.slice(0, 60) + '…' : a.v)}"</span>`)).join(' ');
+      return `<div class="xl${k === 'me' ? ' me' : ''}" style="padding-left:${depth * 14 + 4}px">${sep ? `<span class="xs${g(k).sep === '/' ? ' on' : ''}" data-x="${k}" data-p="sep" title="/ = con trực tiếp · // = con cháu bất kỳ">${g(k).sep === '/' ? '/' : '//'}</span>` : ''}<span class="xg${g(k).any ? ' on' : ''}" data-x="${k}" data-p="tag" title="Bấm: thẻ ↔ * (thẻ bất kỳ)">&lt;${g(k).any ? '*' : nd.tag}</span>${ats ? ' ' + ats : ''}&gt;${nd.text ? `<span class="xa xtx${has(k, 't') ? ' on' : ''}" data-x="${k}" data-p="t" title="Bấm: chữ đúng bằng → chứa chữ → bỏ">${has(k, 't') ? (g(k).tm === 'c' ? 'chứa: ' : '= ') : ''}${esc(nd.text)}</span>` : ''}${g(k).sel.length > 1 ? ` <span class="xj" data-x="${k}" data-p="join" title="and = khớp hết · or = khớp 1 cái là được">${g(k).join || 'and'}</span>` : ''}${k === 'me' ? ' <span class="kc">★ đang chọn</span>' : nd.kids && depth > 2 && !nd.sub ? ` <span class="kc">· ${nd.kids} con</span>` : ''}</div>`;
+    };
+    let html = '';
+    if (t.up[1]) html += line('p2', t.up[1], 0, false);
+    if (t.up[0]) html += line('p1', t.up[0], 1, !!t.up[1] && g('p2').sel.length);
+    html += line('me', t.me, 2, !!t.up[0] && g('p1').sel.length);
+    t.down.forEach((c, i) => { html += line('c' + i, c, 3, true); c.sub.forEach((d, j) => { html += line(`c${i}_${j}`, d, 4, false); }); });
+    if (t.more) html += `<div class="xl kc" style="padding-left:46px">… và ${t.more} con nữa</div>`;
+    const touched = Object.keys(xs).length > 0, xp = touched ? xpOf(t, xs) : '', c = pick.xCount, w = touched ? xWarn(t, xs) : [];
+    return `<div class="xt">${html}</div><div class="xr">${xp ? `<code>xpath=${esc(xp)}</code><span class="xc">${c ? (c.all === 1 ? '✓1' : `⚠${c.all}${c.vis !== c.all ? ` (hiện ${c.vis})` : ''}`) : '…'}</span>${c && c.all > 1 || +xs.nth ? `<span class="lv">thứ</span><input data-f="xnth" inputmode="numeric" style="width:38px" value="${+xs.nth || ''}" placeholder="n" title="Lấy cái thứ n trong các cái khớp">` : ''}` : '<span class="fnh">Bấm thuộc tính / chữ / tên thẻ ở trên để tự ghép XPath (không bấm = dùng selector gợi ý)</span>'}</div>${w.map((x) => `<div class="xw">⚠ ${esc(x)}</div>`).join('')}`;
+  }
+  function xToggle(k, p) {
+    const xs = pick.xs = pick.xs || {}, x = xs[k] = xs[k] || { sel: [] };
+    if (p === 'tag') x.any = !x.any;
+    else if (p === 'sep') x.sep = x.sep === '/' ? '//' : '/';
+    else if (p === 'join') x.join = x.join === 'or' ? 'and' : 'or';
+    else if (p === 't') { if (!x.sel.includes('t')) { x.sel.push('t'); x.tm = 'e'; } else if (x.tm !== 'c') x.tm = 'c'; else x.sel = x.sel.filter((y) => y !== 't'); }
+    else x.sel = x.sel.includes(p) ? x.sel.filter((y) => y !== p) : [...x.sel, p];
+    xApply();
+  }
+  function xApply() {
+    const r = pick.rows[pick.sel], xp = xpOf(r.tree, pick.xs);
+    pick.custom = `page.locator(${sq('xpath=' + xp)})`; pick.customCount = null; pick.xCount = null;
+    drawPick(); xMark(xp);
+    const code = pick.custom;
+    call({ op: 'count', codes: [code] }).then((res) => { const c = res && res.counts && res.counts[0]; if (pick && pick.custom === code && c) { pick.xCount = c; pick.customCount = c.all; drawPick(); } });
+  }
+  let xmarks = [];
+  function xMark(xp) { // tô viền mọi chỗ khớp XPath trên trang
+    for (const m of xmarks) m.remove();
+    xmarks = [];
+    if (!xp) return;
+    let snap; try { snap = document.evaluate(xp, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null); } catch { return; }
+    for (let i = 0; i < Math.min(snap.snapshotLength, 30); i++) {
+      const n = snap.snapshotItem(i), b = n.getBoundingClientRect ? n.getBoundingClientRect() : null;
+      if (!b || !b.width) continue;
+      const d = document.createElement('div');
+      d.style.cssText = `position:fixed;pointer-events:none;z-index:2147483645;left:${b.left - 3}px;top:${b.top - 3}px;width:${b.width + 6}px;height:${b.height + 6}px;border:2px dashed #34d399;border-radius:4px`;
+      document.documentElement.appendChild(d); xmarks.push(d);
+    }
   }
   // Bảng Alt KHÔNG còn nút hàm: gõ tên việc / hàm (c -> clickEl, i -> If hiện..., w -> While / waitEl, n -> Nhánh, đ / dong -> Đóng...)
   // rồi ↑ ↓ Enter hoặc bấm chuột. Danh sách theo ngữ cảnh: thường = hàm có act trong public/fncatalog.js (server gửi state.fns) + mở
@@ -1164,10 +1324,10 @@ function pageRecorder() {
     : st && st.openBranch
       ? `<div class="wbar on br"><b>⑂ Đang trong Nhánh</b><span>${branchN()} nhánh</span>${live ? '' : '<button data-op="bend" title="Kết thúc Nhánh -- bước sau ghi như thường">Đóng Nhánh</button>'}</div>`
       : '');
-  // HTML đầy đủ của phần tử đang chọn (mọi thuộc tính, chữ bên trong, số con) -- để căn đúng phần tử; bảng đứng yên thì bấm thuộc tính
-  // để thêm / bỏ vào 1 selector tự ghép (Playwright đếm số khớp ngay). Thuộc tính mờ = tự sinh / đổi theo lần tải, không nên dùng.
+  // HTML đầy đủ của phần tử dưới con trỏ (mọi thuộc tính, chữ bên trong, số con) lúc đang giữ Alt -- nhả Alt thì thành bảng ghép XPath (xTree).
+  // Thuộc tính mờ = tự sinh / đổi theo lần tải, không nên dùng.
   function elBox(r) {
-    const el = r.el, tag = el.tagName.toLowerCase(), on = pick.attrs || new Set(), frags = [];
+    const el = r.el, tag = el.tagName.toLowerCase(), on = new Set(), frags = [];
     for (const a of el.attributes) {
       if (a.name === 'class') { for (const c of el.classList) frags.push({ show: '.' + c, frag: '.' + cssEsc(c), weak: !goodClass(c) }); continue; }
       const v = a.value, frag = a.name === 'id' ? '#' + cssEsc(v) : `[${a.name}="${attrEsc(v)}"]`;
@@ -1181,12 +1341,12 @@ function pageRecorder() {
     const p = ui.pick, r = pick.rows[pick.sel], acts = (st && st.actions) || {};
     let html = `<div class="ph"><b>${pick.live ? 'Giữ Alt · lăn chuột đổi lớp · nhả Alt để chọn' : 'Chọn phần tử'}</b>${pick.live ? '' : '<button data-op="pclose" title="Đóng (Esc)">✕</button>'}</div>${whileBar(pick.live)}`;
     const r0 = pick.rows[pick.sel];
-    html += pick.rows.length ? `<div class="rows">${pick.rows.map((x, i) => `<div class="row ${i === pick.sel ? 'on' : ''}" data-i="${i}"><span class="star">${x.inter ? '★' : ''}</span>&lt;${esc(x.tag)}&gt; <span class="lb">${esc(x.label)}</span>${x.under ? '<span class="un">dưới lớp phủ</span>' : ''}<span class="sz">${x.size}${x.fold ? ' ×' + (x.fold + 1) : ''}</span></div>`).join('')}</div>${r0 && r0.el.isConnected ? elBox(r0) : ''}` : '<div class="empty">Rê chuột lên phần tử cần chọn</div>';
+    html += pick.rows.length ? `<div class="rows">${pick.rows.map((x, i) => `<div class="row ${i === pick.sel ? 'on' : ''}" data-i="${i}"><span class="star">${x.inter ? '★' : ''}</span>&lt;${esc(x.tag)}&gt; <span class="lb">${esc(x.label)}</span>${x.under ? '<span class="un">dưới lớp phủ</span>' : ''}<span class="sz">${x.size}${x.fold ? ' ×' + (x.fold + 1) : ''}</span></div>`).join('')}</div>${!r0 ? '' : pick.live ? (r0.el.isConnected ? elBox(r0) : '') : r0.tree ? xTree(r0) : ''}` : '<div class="empty">Rê chuột lên phần tử cần chọn</div>';
     const arm = armedInfo();
-    if (!pick.live && r && arm) html += `<div class="det"><div class="armbar">🎯 Chọn element cho <b>${esc(arm.label)}</b> của hàm <b>${esc(arm.fn)}</b></div>
+    if (!pick.live && r && arm) html += `<div class="det"><div class="armbar">${arm.lib ? '🎯 Chọn <b>element mới</b> cho kho element' : `🎯 Chọn element cho <b>${esc(arm.label)}</b> của hàm <b>${esc(arm.fn)}</b>`}</div>
       <div class="r"><select data-f="palt" class="grow"></select><button data-op="pedit" title="Tự sửa selector">✎</button></div>
       ${pick.editing ? `<div class="r"><input class="grow" data-f="pcustom" value="${esc(pick.custom || (pick.altObj || {}).code)}" title="Enter để lưu"></div>` : ''}
-      <div class="r"><button data-op="pslot" class="pri grow" title="Enter">✓ Chốt element này</button><button data-op="pagain" title="Đóng bảng, giữ Alt chọn lại">↺ Chọn lại</button></div></div>`;
+      <div class="r"><button data-op="pslot" class="pri grow" title="Enter">${arm.lib ? '✓ Thêm vào kho' : '✓ Chốt element này'}</button><button data-op="pagain" title="Đóng bảng, giữ Alt chọn lại">↺ Chọn lại</button></div></div>`;
     else if (!pick.live && r) html += `<div class="det">
       <div class="r"><select data-f="palt" class="grow"></select><button data-op="pedit" title="Tự sửa selector">✎</button></div>
       ${pick.editing ? `<div class="r"><input class="grow" data-f="pcustom" value="${esc(pick.custom || (pick.altObj || {}).code)}" title="Enter để lưu"></div>` : ''}
@@ -1199,7 +1359,7 @@ function pageRecorder() {
       <label class="lv"><input type="checkbox" data-f="pdo" ${pick.perform ? 'checked' : ''}> Làm luôn trên trang (click, gõ, hover, nhấp đúp, tick...)</label></div>`;
     const hadFocus = root.activeElement;
     setHTML(p, html);
-    p.hidden = false;
+    p.hidden = false; p.classList.toggle('wide', !pick.live);
     if (!pick.live && r) drawAltSelect();
     const fi = p.querySelector(`[data-f=${(hadFocus && hadFocus.dataset && hadFocus.dataset.f) || 'pq'}]`) || p.querySelector('[data-f=pq]'); // bảng đứng yên: con trỏ ở sẵn ô gõ tên hàm (đang gõ ô khác thì giữ ô đó)
     if (fi) { fi.focus(); if (fi.type === 'text' || fi.tagName === 'INPUT' && !fi.type.match(/checkbox/)) fi.setSelectionRange(fi.value.length, fi.value.length); }
@@ -1212,6 +1372,7 @@ function pageRecorder() {
   }
   // Ô element đang chờ chọn (bấm 🎯 Pick ở 1 hàm trong bảng ☰) -- giữ ở server nên chuyển trang / reload vẫn còn
   function armedInfo() {
+    if (st && st.armed && st.armed.lib) return { label: 'element mới', fn: 'kho element', lib: true };
     const a = st && st.armed, x = a && st.steps.find((y) => y.id === a.stepId), sl = x && (x.slotInfo || []).find((z) => z.key === a.key);
     return sl ? { label: sl.label, fn: x.name } : null;
   }
@@ -1219,6 +1380,10 @@ function pageRecorder() {
     const r = pick && pick.rows[pick.sel], a = st && st.armed;
     if (!r || !a) return;
     const ch = chainFor(r.el, { level: 0, alts0: r.alts });
+    if (a.lib) { // 🎯 Element mới -> vào kho; bảng 2 ô đang chọn thao tác thì dùng luôn element đó
+      call({ op: 'libAdd', levels: ch.levels, level: 0, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom }).then((s) => { render(s); if (s && s.libAdded && sp) useEl(s.libAdded); else toast('Đã thêm vào kho element'); });
+      return closePick();
+    }
     call({ op: 'fnSlot', stepId: a.stepId, key: a.key, levels: ch.levels, level: 0, alt: Math.max(0, r.alts.indexOf(pick.altObj)), custom: pick.custom }).then((s) => {
       render(s); const n = armedInfo();
       toast(n ? `Đã chốt ✓ -- tiếp: giữ Alt chọn ${n.label}` : 'Đã chốt ✓ -- hàm đã đủ element');
@@ -1251,15 +1416,16 @@ function pageRecorder() {
       else if (f === 'pdo') pick.perform = el.checked;
       else if (f === 'pbreak') pick.thenBreak = el.checked;
       else if (f === 'pdom') pick.dom = el.checked;
+      else if (f === 'xnth') { pick.xs.nth = Math.max(0, parseInt(el.value, 10) || 0); xApply(); }
       return;
     }
     if (pick.live) return;
     const row = el.closest('.row'), btn = el.closest('button');
-    if (row) { pick.attrs = null; pick.customCount = null; return selectRow(+row.dataset.i); }
+    if (row) { pick.customCount = null; return selectRow(+row.dataset.i); }
     const fn = el.closest('.fn');
     if (fn) return runFn(pick.fnRes[+fn.dataset.i]);
-    const at = el.closest('.at');
-    if (at) return toggleFrag(at.dataset.frag);
+    const xc = el.closest('[data-p]');
+    if (xc && xc.dataset.x) return xToggle(xc.dataset.x, xc.dataset.p);
     if (!btn) return;
     if (btn.dataset.op === 'pclose') return closePick();
     if (btn.dataset.op === 'pslot') return chotSlot();
@@ -1326,6 +1492,23 @@ function pageRecorder() {
     .fn{display:flex;gap:8px;align-items:baseline;padding:4px 6px;border-radius:6px;cursor:pointer}.fn b{white-space:nowrap;font-weight:600}.fn span{opacity:.6;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .fn:hover{background:#1a1d27}.fn.on{background:#e8a33d33;outline:1px solid #e8a33d}
     .det{border-top:1px solid #2a2e3a;margin-top:6px;padding-top:6px}.acts{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+    .side{position:fixed;right:0;top:0;bottom:0;width:min(46vw,640px);min-width:360px;display:flex;flex-direction:column;gap:8px;padding:10px;background:#12141c;color:#e8e9ed;border-left:2px solid #34d399;box-shadow:-10px 0 40px #000a;overflow:hidden}
+    .side[hidden]{display:none}.side.mini{opacity:.12;pointer-events:none}.side button,.side select,.side input{font-size:13px}.sh{display:flex;gap:8px;align-items:center}.sh b{font-size:15px;color:#6ee7b7}
+    .cbar{display:flex;gap:6px;align-items:center;padding:6px 8px;border:1px solid #34d39966;border-radius:8px;background:#34d39912;font-size:13px}.cbar i{opacity:.7}
+    .box{border:1px solid #2a2e3a;border-radius:10px;padding:8px;background:#1a1d27}.box.big{flex:1;display:flex;flex-direction:column;min-height:0}.bt{display:flex;gap:6px;align-items:center;font-weight:600;margin-bottom:6px;font-size:13px}
+    .acts2{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px}.acts2 button{padding:9px 6px}.acts2 button.on{background:#e8a33d;color:#1a1206;border-color:#e8a33d}
+    .els{overflow:auto;flex:1}.elr{display:grid;grid-template-columns:minmax(90px,30%) 1fr auto;gap:8px;align-items:center;padding:7px 8px;border-radius:8px;cursor:pointer;border:1px solid transparent;font-size:13px}
+    .elr:hover{border-color:#e8a33d;background:#e8a33d14}.elr code{font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .sk{max-height:24vh;overflow:auto}.bk{display:flex;gap:6px;align-items:center;padding:3px 6px;border-radius:6px;font-size:12px}.bk:hover{background:#1a1d27}.bk span{flex:1}.bk button{padding:0 6px}
+    .blk{border:1px solid #a78bfa;border-radius:10px;padding:6px;margin:6px 0;background:#a78bfa0f}.bh{display:flex;gap:6px;align-items:center;cursor:pointer;padding:2px 4px}.bh b{color:#c4b5fd}.bh span{opacity:.7}
+    .bif{border:1px solid #34d39966;border-radius:8px;margin:6px 0 0 12px;padding:4px 6px;background:#34d3990d}.bif.else{border-color:#3a3f4d;border-style:dashed;background:none}.bif.nocond .bc{color:#fca5a5}
+    .bifh{display:flex;gap:6px;align-items:center}.bifh b{color:#6ee7b7}.bif.else .bifh b{color:#c4b5fd}.bc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.be{opacity:.6;font-size:11px;white-space:nowrap}
+    .bln{font-family:Consolas,monospace;font-size:11px;opacity:.6;padding:1px 4px;white-space:pre-wrap;word-break:break-all}.bnew{margin-top:8px;width:100%;padding:8px;border-color:#a78bfa;color:#c4b5fd}
+    .pick.wide{width:min(640px,calc(100vw - 16px))}.xt{margin:6px 0 0;padding:6px 4px;border:1px solid #2a2e3a;border-radius:8px;background:#0d0f15;font-family:Consolas,monospace;font-size:11.5px;line-height:1.75;max-height:36vh;overflow:auto}
+    .xl{white-space:nowrap;color:#808080}.xl.me{background:#e8a33d1a;border-radius:4px}.xg{color:#569cd6;cursor:pointer;border-radius:3px}.xa{color:#9cdcfe;cursor:pointer;padding:0 2px;border-radius:3px}.xa.xtx{color:#d4d4d4}
+    .xa:hover,.xg:hover,.xs:hover,.xj:hover{background:#1a1d27;outline:1px solid #e8a33d88}.xa.on,.xg.on{background:#e8a33d40;color:#f5b455}.xa.weak{opacity:.45}.xa.weak.on{opacity:1}
+    .xs{color:#c586c0;cursor:pointer;margin-right:4px;padding:0 2px;border-radius:3px}.xs.on{color:#f5b455}.xj{color:#c586c0;cursor:pointer;border:1px solid #c586c066;border-radius:4px;padding:0 4px}
+    .xr{display:flex;gap:6px;align-items:center;margin-top:4px;font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;word-break:break-all}.xr code{flex:1}.xc{color:#7ee2a8;white-space:nowrap}.xw{color:#fbbf24;font-size:11px;margin-top:2px}
     .toast{position:absolute;right:0;bottom:56px;background:#1a1d27;color:#e8e9ed;border:1px solid #e8a33d;border-radius:8px;padding:6px 10px;white-space:nowrap;box-shadow:0 4px 16px #0006}`;
 
   function mount() {
@@ -1335,9 +1518,9 @@ function pageRecorder() {
     host.style.cssText = 'all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647';
     window.__pmRecUI = host;
     root = host.attachShadow({ mode: 'closed' });
-    setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
+    setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="side" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
       <div class="pill" title="Bấm: ghi / tạm dừng / ghi tiếp (cùng 1 đoạn). ⏹: xuất code cả đoạn. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="caseEnd" title="Xong trường hợp đang ghi -- bước sau ra ngoài khối" hidden>✓ Xong TH</button><button data-op="export" title="Kết thúc đoạn + xuất code (editor + clipboard)" hidden>⏹ Xuất</button><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
-    ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast') };
+    ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast'), side: root.querySelector('.side') };
     document.documentElement.appendChild(host);
     for (const t of ['input', 'change']) root.addEventListener(t, (e) => uiEvent(e, e.composedPath()[0]));
     for (const t of ['input', 'change']) host.addEventListener(t, (e) => e.stopPropagation()); // trang web không nhận sự kiện của panel
@@ -1374,12 +1557,14 @@ function pageRecorder() {
         if (e.key === 'Escape') { fq = ''; el.value = ''; return drawCallList(); }
         fqi = Math.max(0, Math.min(fqRes.length - 1, fqi + (e.key === 'ArrowDown' ? 1 : -1))); return drawCallList();
       }
-      if (e.key === 'Escape') { if (pick) closePick(); else if (editing) { editing = null; draw(st); } else if (st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur();
+      if (e.key === 'Escape') { if (pick) closePick(); else if (sp && !(st && st.armed)) closeSide(); else if (editing) { editing = null; draw(st); } else if (st && st.armed) { call({ op: 'arm' }).then(render); toast('Đã huỷ chờ chọn element'); } } else if (e.key === 'Enter' && el.tagName === 'INPUT') el.blur();
     }
     else if (t === 'input') {
       if (inPick && pick && el.dataset.f === 'ptext') pick.text = el.value;
       if (inPick && pick && el.dataset.f === 'pq') { pick.q = el.value; pick.qi = 0; setHTML(ui.pick.querySelector('.fnl'), fnListHTML()); }
       if (!inPick && el.dataset.f === 'fq') { fq = el.value; fqi = 0; drawCallList(); }
+      if (sp && el.dataset.f === 'stext') sp.text = el.value;
+      if (sp && el.dataset.f === 'sq') { sp.q = el.value; setHTML(ui.side.querySelector('.els'), elsHTML(st)); }
     }
     else if (t === 'click' || t === 'change') (inPick ? (pick && onPick(e, el)) : onPanel(e, el));
   }
@@ -1427,6 +1612,7 @@ function pageRecorder() {
   }
   // ✓ Xong trường hợp: con trỏ ra sau khối; chưa kết thúc bằng bước chờ mà thấy element mới hiện -> gợi ý "Chờ hiện" ở ☰ (caseSug ở server)
   function caseEnd() {
+    if (sp) { sp = null; drawSide(st); }
     return call({ op: 'caseEnd' }).then((s) => {
       if (!s) return;
       render(s);
@@ -1498,6 +1684,7 @@ function pageRecorder() {
       ${(x.slotInfo || []).map((sl) => { const on = st.armed && st.armed.stepId === x.id && st.armed.key === sl.key; return `<div class="r slot${on ? ' on' : ''}"><span class="lv">${esc(sl.label)}</span><span class="grow sc">${sl.code ? esc(sl.code) : '— chưa chọn —'}</span><button data-op="arm" data-key="${esc(sl.key)}"${sl.code || on ? '' : ' class="pri"'} title="Bấm rồi giữ Alt chọn element trên trang, nhả Alt bấm ✓ Chốt">${on ? '⏳ chờ Alt… (bấm để huỷ)' : sl.code ? '🎯 Chọn lại' : '🎯 Pick element'}</button></div>`; }).join('')}
       <textarea data-f="tpl" rows="${Math.min(9, String(x.tpl).split('\n').length + 1)}" spellcheck="false" title="Sửa code mẫu: 'SELECTOR' = ô element (chọn bằng 🎯), TEXT / VALUE... = giá trị; dòng trống trong { } = chỗ chèn bước con">${esc(x.tpl)}</textarea>
       ${x.holes ? '<div class="tag">Khối { }: bấm dòng "▸ trống" trong code (hoặc ↑ ↓ 1 bước sát hàm) để đưa bước vào trong khối</div>' : ''}</div>`;
+    if (x.action === 'case' && !x.levels) return `<div class="st case" data-id="${x.id}"><div class="r"><span class="n">${i + 1}</span><b>◆ Trường hợp</b><span class="lv">chưa chọn điều kiện -- mở ▦ Khối, bấm ↵ ở if này để chọn</span>${tools}</div></div>`;
     if (x.action === 'case') {
       const lv = x.levels[x.level], ci = x.caseInfo || { kids: 0, extra: [] };
       return `<div class="st case" data-id="${x.id}" data-css="${esc(lv.css)}"><div class="r"><span class="n">${i + 1}</span><b>◆ Trường hợp</b><span class="lv">khi element</span><select data-f="neg"><option value="0">${x.textEq ? 'có chữ là' : 'đang hiện'}</option><option value="1" ${x.neg ? 'selected' : ''}>${x.textEq ? 'có chữ KHÁC' : 'KHÔNG hiện'}</option></select>${tools}</div>
@@ -1543,6 +1730,105 @@ function pageRecorder() {
       ${['pressKey', 'upload', 'getAttr'].includes(x.action) ? `<div class="r"><span class="lv">${{ pressKey: 'phím', upload: 'file', getAttr: 'thuộc tính' }[x.action]}</span><input class="grow" data-f="text" value="${esc(x.text || '')}" placeholder="${{ pressKey: 'Enter / Escape / Tab / Control+A...', upload: 'đường dẫn file (= để dùng biểu thức JS)', getAttr: 'href' }[x.action]}"></div>` : ''}
       <div class="code">${esc(x.code || '// (bỏ qua)')}</div></div>`;
   }
+  // ---------------- dạng khối: While = các if (trường hợp) + else. ＋ ở cuối if = if mới cùng cấp, ↵ = vào if -> bảng 2 ô bên phải
+  // (ô trên: thao tác phổ biến, ô dưới: element đã add trong lần record này -- bấm thao tác rồi bấm element là thêm bước). Bước ngoài While hiện dạng code.
+  let sp = null, bexp = null, lastSide = ''; // sp: bảng 2 ô đang mở { key: 'C5' (if) | 'E5' (else của While 5), act, text, enter, q }; bexp: While đang mở cài đặt
+  const SP_ACTS = [['click', 'Click'], ['type', 'Gõ'], ['wait', 'Chờ hiện'], ['waitGone', 'Chờ mất'], ['hover', 'Hover'], ['dblclick', 'Nhấp đúp'], ['rightClick', 'Chuột phải'], ['check', 'Tick'], ['uncheck', 'Bỏ tick'], ['scroll', 'Cuộn tới'], ['getText', 'Lấy chữ'], ['pause', 'Nghỉ (không cần element)']];
+  const elName = (x) => x.elName || (x.levels && x.levels[x.level] && (x.levels[x.level].label || x.levels[x.level].tag)) || '';
+  const stepLabel = (k, acts) => (k.action === 'fn' ? `ƒ ${k.name}` : `${acts[k.action] || k.action}${elName(k) ? ' · ' + elName(k) : ''}${['type', 'ifType', 'select'].includes(k.action) && k.text ? ` "${String(k.text).slice(0, 30)}"` : ''}`);
+  const kidRow = (k, acts) => `<div class="bk" data-id="${k.id}"${k.levels && k.levels[k.level] ? ` data-css="${esc(k.levels[k.level].css)}"` : ''}><span>${esc(stepLabel(k, acts))}</span><button data-op="del" title="Xoá bước">✕</button></div>`;
+  const condText = (c) => (!c.levels ? '<i>chưa chọn điều kiện -- ↵ rồi "◆ Làm điều kiện if"</i>' : `${c.textEq ? `chữ ${c.neg ? 'khác' : 'là'} "${esc(c.textEq)}" ·` : c.neg ? 'KHÔNG hiện' : 'hiện'} <b>${esc(elName(c))}</b>${(c.extra || []).length ? ` VÀ ${c.extra.length} điều kiện` : ''}`);
+  function blocksView(s) {
+    const byId = new Map(s.steps.map((x) => [x.id, x])), acts = s.actions || {};
+    const up = (x) => byId.get(x.cs || x.loop || x.elsOf || x.br || (x.blk ? +x.blk.slice(1).split(':')[0] : 0));
+    const topLoop = (x) => { let t = null; for (let y = x, d = 0; y && d < 50; y = up(y), d++) if (y.action === 'loop') t = y; return t; };
+    const loopBlock = (L) => {
+      const idx = s.steps.indexOf(L), kids = s.steps.filter((x) => x.loop === L.id), els = s.steps.filter((x) => x.elsOf === L.id), miss = L.miss == null || L.miss === '' ? 20 : +L.miss;
+      const ifs = kids.map((c) => (c.action !== 'case' ? kidRow(c, s.loopActions) : `<div class="bif${c.levels ? '' : ' nocond'}" data-id="${c.id}"${c.levels && c.levels[c.level] ? ` data-css="${esc(c.levels[c.level].css)}"` : ''}><div class="bifh"><b>if</b><span class="bc">${condText(c)}</span><span class="be">→ ${{ continue: 'quét lại', break: 'thoát While', none: 'đi tiếp' }[c.end || 'none']}</span><span class="grow"></span><button data-op="caseAdd" title="Thêm if mới cùng cấp, ngay sau if này">＋</button><button data-op="enter" data-key="C${c.id}" class="pri" title="Vào if này: bảng thao tác + element">↵</button><button data-op="del" title="Xoá if (các bước bên trong ra ngoài)">✕</button></div>${s.steps.filter((x) => x.cs === c.id).map((k) => kidRow(k, acts)).join('')}</div>`)).join('');
+      return `<div class="blk"><div class="bh" data-id="${L.id}"><b>⟳ While ${L.id}</b><span>${kids.filter((x) => x.action === 'case').length} if · bấm để cài đặt</span></div>${bexp === L.id ? stepHTML(L, idx, acts) : ''}${ifs}
+        <div class="bif else" data-id="${L.id}"><div class="bifh"><b>else</b><span class="bc">không khớp if nào → nghỉ ${+L.idle > 0 ? +L.idle : 500} ms${miss ? ` · ${miss} vòng liền = màn hình lạ (chụp ảnh)` : ''}</span><span class="grow"></span><button data-op="enter" data-key="E${L.id}" title="Thêm bước vào else">↵</button></div>${els.map((k) => kidRow(k, acts)).join('')}</div></div>`;
+    };
+    let html = '';
+    const done = new Set();
+    for (const ln of s.lines) {
+      if (ln.cursor || ln.hole) continue;
+      const x = byId.get(ln.id), L = x && topLoop(x);
+      if (L) { if (!done.has(L.id)) { done.add(L.id); html += loopBlock(L); } continue; }
+      html += `<div class="bln">${hlJs(ln.t)}</div>`;
+    }
+    return html + '<button data-op="blockWhile" class="bnew" title="While mới: 1 if + else -- ↵ vào if để chọn điều kiện và thêm thao tác">＋ While (dạng khối)</button>';
+  }
+  const elsHTML = (s) => { const q = foldVi(sp.q || '').trim(), els = (s.els || []).filter((e) => !q || foldVi(`${e.name} ${e.code}`).includes(q));
+    return els.length ? els.map((e) => `<div class="elr" data-el="${e.id}"${e.css ? ` data-css="${esc(e.css)}"` : ''} title="Bấm: ${sp.act === 'cond' ? 'làm điều kiện if' : 'thêm bước với element này'}"><b>${esc(e.name)}</b><code>${esc(e.code)}</code><span class="lv">${e.lang ? '🌐 ' : ''}${e.uses} bước</span></div>`).join('')
+      : `<div class="fnh">${(s.els || []).length ? 'Không có element nào khớp' : 'Chưa có element -- thao tác trên trang (click, gõ...) hoặc bấm 🎯 Element mới'}</div>`; };
+  function sideHTML(s) {
+    const id = +sp.key.slice(1), isCase = sp.key[0] === 'C', h = s.steps.find((x) => x.id === id);
+    if (!h) return '';
+    const kids = s.steps.filter((x) => (isCase ? x.cs === id : x.elsOf === id)), acts = isCase ? [['cond', '◆ Làm điều kiện if'], ...SP_ACTS] : SP_ACTS, arm = st.armed && st.armed.lib;
+    return `<div class="sh"><b>${isCase ? `◆ if #${id}` : `else của While ${id}`}</b><span class="lv">${isCase ? 'bấm thao tác, rồi bấm element bên dưới' : 'không khớp if nào thì làm các bước này'}</span><span class="grow"></span><button data-op="spClose" class="pri" title="Xong (Esc)">Xong ✕</button></div>
+      ${isCase ? `<div class="cbar" data-id="${id}"><span class="lv">Điều kiện:</span><span class="grow">${condText(h)}</span><select data-f="neg"><option value="0">đang hiện</option><option value="1" ${h.neg ? 'selected' : ''}>KHÔNG hiện</option></select><select data-f="end"><option value="continue" ${h.end === 'continue' ? 'selected' : ''}>→ quét lại</option><option value="break" ${h.end === 'break' ? 'selected' : ''}>→ thoát While</option><option value="none" ${!h.end || h.end === 'none' ? 'selected' : ''}>→ đi tiếp</option></select></div>` : ''}
+      <div class="sk"><div class="bt">Các bước trong ${isCase ? 'if' : 'else'} (${kids.length})</div>${kids.length ? kids.map((k) => kidRow(k, s.actions || {})).join('') : '<div class="fnh">Chưa có bước -- bấm thao tác rồi bấm element, hoặc thao tác thẳng trên trang</div>'}</div>
+      <div class="box"><div class="bt">Thao tác</div><div class="acts2">${acts.map(([a, n]) => `<button data-sact="${a}" class="${sp.act === a ? 'on' : ''}">${n}</button>`).join('')}</div>
+        ${sp.act === 'type' ? `<div class="r"><input class="grow" data-f="stext" value="${esc(sp.text)}" placeholder="Chữ cần gõ (= để dùng biểu thức JS, VD: = row.D)"><label class="lv"><input type="checkbox" data-f="senter" ${sp.enter ? 'checked' : ''}> Enter</label></div>${srcSelect('ssrc')}` : ''}</div>
+      <div class="box big"><div class="bt">Element đã add (${(s.els || []).length})<input data-f="sq" class="grow" value="${esc(sp.q)}" placeholder="tìm element..." autocomplete="off"><button data-op="libNew" class="${arm ? 'pri' : ''}" title="Giữ Alt chọn element trên trang -> vào kho">${arm ? '⏳ giữ Alt chọn… (bấm để huỷ)' : '🎯 Element mới'}</button></div><div class="els">${elsHTML(s)}</div></div>`;
+  }
+  function drawSide(s, force) {
+    if (!ui) return;
+    ui.side.hidden = !sp; ui.panel.hidden = !open || !!sp;
+    if (!sp) { lastSide = ''; return; }
+    const a = ui.root.activeElement;
+    if (!force && (held || (a && ui.side.contains(a) && ['INPUT', 'SELECT'].includes(a.tagName) && a.type !== 'checkbox'))) return; // đang gõ / đang nhấn chuột -- không vẽ lại
+    const html = sideHTML(s);
+    if (!html) { sp = null; ui.side.hidden = true; ui.panel.hidden = !open; return; } // if / While vừa bị xoá
+    if (html === lastSide && !force) return;
+    lastSide = html;
+    const sc = ui.side.querySelector('.els'), top = sc ? sc.scrollTop : 0;
+    setHTML(ui.side, html);
+    const sc2 = ui.side.querySelector('.els'); if (sc2) sc2.scrollTop = top;
+  }
+  function openSide(key) { // ↵: con trỏ vào cuối if / else (thao tác trên trang cũng vào đó), mở bảng 2 ô
+    const h = st && st.steps.find((x) => x.id === +key.slice(1));
+    sp = { key, act: key[0] === 'C' && h && !h.levels ? 'cond' : 'click', text: '', enter: false, q: '' };
+    call({ op: 'enter', key }).then((s) => { render(s); drawSide(s, true); toast(key[0] === 'C' ? (sp && sp.act === 'cond' ? '◆ Chọn element làm điều kiện cho if này' : '◆ Bấm thao tác rồi bấm element -- thêm vào if') : 'Thêm bước vào else'); });
+  }
+  function closeSide() { // Xong: if -> như ✓ Xong TH (con trỏ ra sau if + gợi ý Chờ hiện); else -> con trỏ ra sau While
+    const k = sp && sp.key; sp = null; drawSide(st);
+    if (!k) return;
+    if (k[0] === 'C') caseEnd(); else call({ op: 'cursor', stepId: +k.slice(1) }).then(render);
+  }
+  function useEl(elId) { // bấm 1 element trong kho: làm điều kiện if, hoặc thêm bước "thao tác + element"
+    if (!sp) return;
+    const e = (st.els || []).find((x) => x.id === elId), cond = sp.act === 'cond', name = e ? e.name : 'element';
+    if (!cond && sp.act === 'type' && !String(sp.text).trim()) return toast('Gõ chữ cần gõ vào ô trước, rồi mới bấm element');
+    call(cond ? { op: 'caseCond', stepId: +sp.key.slice(1), elId } : { op: 'libStep', key: sp.key, elId, action: sp.act, text: sp.text, enter: sp.enter }).then((s) => {
+      if (cond && sp) sp.act = 'click';
+      render(s); drawSide(s, true);
+      toast(cond ? `◆ Điều kiện: ${name} đang hiện -- giờ bấm thao tác + element để thêm bước` : `+ ${(s.actions || {})[sp ? sp.act : ''] || 'bước'} · ${name}`);
+    });
+  }
+  function onSide(e, el) {
+    const f = el.dataset && el.dataset.f;
+    if (!sp) return;
+    if (e.type === 'change') {
+      if (f === 'neg' || f === 'end') upd(+sp.key.slice(1), f === 'neg' ? { neg: el.value === '1' } : { end: el.value });
+      else if (f === 'senter') sp.enter = el.checked;
+      else if (f === 'stext') sp.text = el.value;
+      else if (f === 'ssrc' && el.value) { sp.text = '= ' + el.value; drawSide(st, true); }
+      return;
+    }
+    if (e.type !== 'click') return;
+    const b = el.closest('button'), row = el.closest('.elr'), bk = el.closest('.bk');
+    if (b && b.dataset.sact) {
+      if (b.dataset.sact === 'pause') { call({ op: 'libStep', key: sp.key, action: 'pause' }).then((s) => { render(s); drawSide(s, true); toast('+ Nghỉ ngẫu nhiên'); }); return; }
+      sp.act = b.dataset.sact; drawSide(st, true);
+      if (sp.act === 'type') { const i = ui.side.querySelector('[data-f=stext]'); if (i) i.focus(); }
+      return;
+    }
+    if (b && b.dataset.op === 'spClose') return closeSide();
+    if (b && b.dataset.op === 'libNew') { const on = st.armed && st.armed.lib; call({ op: 'arm', lib: !on }).then((s) => { render(s); drawSide(s, true); toast(on ? 'Đã huỷ chờ chọn element' : '🎯 Giữ Alt + rê chuột lên element, nhả Alt rồi bấm ✓ Thêm vào kho (Enter)'); }); return; }
+    if (b && b.dataset.op === 'del' && bk) { call({ op: 'delete', stepId: +bk.dataset.id }).then((s) => { render(s); drawSide(s, true); }); return; }
+    if (row) useEl(+row.dataset.el);
+  }
   function draw(s) {
     const segN = s.steps.filter((x) => x.id >= s.segFrom).length;
     ui.pill.classList.toggle('rec', !!s.recording);
@@ -1552,7 +1838,8 @@ function pageRecorder() {
     ui.pill.querySelector('.lbl').textContent = arm ? `🎯 Alt → ${arm.label}` : s.recording ? `REC · ${segN} bước` : s.segOpen ? `⏸ Tạm dừng · ${segN} bước` : 'Ghi';
     ui.pill.querySelector('[data-op=export]').hidden = !s.segOpen;
     ui.pill.querySelector('[data-op=caseEnd]').hidden = !s.inCase;
-    if (!open) return;
+    drawSide(s);
+    if (!open || sp) return;
     const a = ui.root.activeElement;
     if (held || (a && (a.tagName === 'INPUT' && a.type !== 'checkbox' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA'))) return; // đang sửa 1 ô / đang nhấn chuột -- không vẽ lại
     const list = ui.panel.querySelector('.list'), scroll = list ? list.scrollTop : 0;
@@ -1560,12 +1847,12 @@ function pageRecorder() {
     const cards = () => s.steps.map((x, i) => (s.segOpen && segSet.has(x.id) && (i === 0 || !segSet.has(s.steps[i - 1].id)) ? `<div class="seg">— đoạn ${s.recording ? 'đang ghi' : 'tạm dừng'} (⏹ Xuất = xuất cả đoạn) —</div>` : '') + stepHTML(x, i, s.actions || {}) + ghosts(x)).join('');
     const blockBtns = s.inCase ? '<button data-op="caseEnd" title="Xong trường hợp đang ghi">✓ Xong trường hợp</button>' : !s.segOpen ? '' : s.openLoop ? '<button data-op="wend" title="Kết thúc vòng lặp">Đóng While</button>' : s.openBranch ? '<button data-op="bend" title="Kết thúc Nhánh">Đóng Nhánh</button>'
       : '<button data-op="wstart" title="Mở vòng lặp while -- bước ghi / chọn sau đó thành các If trong vòng lặp">⟳ While</button><button data-op="bstart" title="Chờ nhiều phần tử, cái nào hiện trước thì làm việc của nó (waitAny)">⑂ Nhánh</button>';
-    const html = `<div class="hd"><b>${view === 'code' ? 'Code' : 'Các bước'}</b>
+    const html = `<div class="hd"><b>${view === 'code' ? 'Code' : view === 'blocks' ? 'Khối' : 'Các bước'}</b><button data-op="vblocks" title="${view === 'blocks' ? 'Xem dạng code' : 'Dạng khối: While = các if + else, ↵ vào if để thêm thao tác'}">${view === 'blocks' ? '{ } Code' : '▦ Khối'}</button>
         <button data-op="rec">${s.recording ? '⏸ Tạm dừng' : s.segOpen ? '▶ Ghi tiếp' : '⏺ Ghi đoạn mới'}</button>${s.segOpen ? '<button data-op="export">⏹ Xuất</button>' : ''}${blockBtns}
         ${s.canRun ? `<button data-op="test" title="Chạy ${s.segOpen ? 'đoạn đang ghi' : 'mọi bước'} trên chính trang này, báo bước nào hỏng" ${testing || (s.test && s.test.running) ? 'disabled' : ''}>▶ Chạy thử</button>` : ''}
         <button data-op="copy" class="pri">Copy</button>${!s.steps.length && s.canUndo ? '<button data-op="undo">↶ Khôi phục</button>' : '<button data-op="clear">Xoá hết</button>'}<button data-op="view" title="${view === 'code' ? 'Xem dạng ô (mỗi bước 1 ô)' : 'Xem dạng code'}">${view === 'code' ? '▤' : '{ }'}</button><button data-op="close" title="Thu nhỏ">—</button></div>
       <div class="fbar"><input data-f="fq" value="${esc(fq)}" placeholder="ƒ Gọi hàm: gõ tên -- if, while, nhánh, pause, goto, tab mới, excel..." autocomplete="off" spellcheck="false"><div class="fnl2"${fq ? '' : ' hidden'}>${fq ? callListHTML() : ''}</div></div>
-      ${testBar(testing ? { running: true } : s.test)}<div class="list">${s.steps.length ? (view === 'code' ? codeView(s) : cards()) : '<div class="empty">Chưa có bước nào -- cứ thao tác trên trang, code sẽ hiện ở đây. Giữ Alt + rê chuột để chọn đúng phần tử.</div>'}</div>`;
+      ${testBar(testing ? { running: true } : s.test)}<div class="list">${view === 'blocks' ? blocksView(s) : s.steps.length ? (view === 'code' ? codeView(s) : cards()) : '<div class="empty">Chưa có bước nào -- cứ thao tác trên trang, code sẽ hiện ở đây. Giữ Alt + rê chuột để chọn đúng phần tử.</div>'}</div>`;
     if (html === lastPanel && ui.panel.firstChild) return; // làm mới định kỳ mà không có gì đổi -> không vẽ lại (đỡ giật, không mất chỗ đang rê / cuộn)
     lastPanel = html;
     setHTML(ui.panel, html);
@@ -1605,9 +1892,10 @@ function pageRecorder() {
   }
   const upd = (stepId, patch) => call({ op: 'update', stepId, patch }).then((s) => { render(s); const x = s && s.steps.find((y) => y.id === stepId); highlight(x && x.levels ? x.levels[x.level].css : null); });
   function onPanel(e, el) {
+    if (el.closest('.side')) return onSide(e, el);
     if (el.closest('.pill')) {
       if (e.type !== 'click' || (drag && drag.moved)) return;
-      if (el.closest('[data-op=menu]')) { open = !open; ui.panel.hidden = !open; ui.toast.hidden = true; if (!open) highlight(null); refresh(); }
+      if (el.closest('[data-op=menu]')) { if (sp) closeSide(); open = !open; ui.panel.hidden = !open; ui.toast.hidden = true; if (!open) highlight(null); refresh(); }
       else if (el.closest('[data-op=export]')) recExport();
       else if (el.closest('[data-op=caseEnd]')) caseEnd();
       else recToggle();
@@ -1641,12 +1929,17 @@ function pageRecorder() {
     const btn = el.closest('button'), op = btn && btn.dataset.op, ln = el.closest('.ln');
     const hole = el.closest('[data-hole]');
     if (hole && !btn) { call({ op: 'cursorHole', key: hole.dataset.hole }).then((s) => { render(s); toast('▸ Bước mới sẽ ghi vào trong khối này'); }); return; }
+    const bh = el.closest('.bh');
+    if (bh && !btn) { bexp = bexp === +bh.dataset.id ? null : +bh.dataset.id; draw(st); return; } // bấm đầu While (dạng khối): mở / đóng cài đặt While
     if (ln && !btn) { const k = +ln.dataset.k; expK = expK === k ? -1 : k; editing = null; draw(st); return; } // bấm 1 dòng code: mở / đóng chỉnh bước đó
     if (!op) return;
     if (op === 'caseEnd') { caseEnd(); return; }
     if (op === 'curOff') { call({ op: 'cursorOff' }).then((s) => { render(s); toast('Bước mới lại nối vào cuối'); }); return; }
     if (op === 'close') { open = false; ui.panel.hidden = true; highlight(null); return; }
     if (op === 'view') { view = view === 'code' ? 'cards' : 'code'; expK = -1; draw(st); return; }
+    if (op === 'vblocks') { view = view === 'blocks' ? 'code' : 'blocks'; expK = -1; draw(st); return; }
+    if (op === 'blockWhile') { call({ op: 'blockWhile' }).then((s) => { render(s); if (s && s.added) openSide('C' + s.added); }); return; }
+    if (op === 'enter') { openSide(btn.dataset.key); return; }
     if (op === 'test') { testing = true; draw(st); call({ op: 'testRun' }).then((s) => { testing = false; render(s); }); return; } // testing: đợt làm mới định kỳ về trước không đè lại kết quả cũ
     if (op === 'tclose') { call({ op: 'testClear' }).then(render); return; }
     if (op === 'bstart' || op === 'bend') { call({ op: op === 'bstart' ? 'branchStart' : 'branchEnd' }).then((s) => { render(s); toast(op === 'bstart' ? '⑂ Đã mở Nhánh -- chọn (giữ Alt) từng phần tử có thể hiện ra, mỗi cái 1 nhánh' : 'Đã đóng Nhánh'); }); return; }
@@ -1663,6 +1956,7 @@ function pageRecorder() {
     if (op === 'reopen') { call({ op: 'reopen', stepId }).then((s) => { render(s); toast(step.action === 'loop' ? `⟳ Ghi thêm vào While ${stepId} -- giữ Alt chọn element → "Khi hiện → ghi khối"; ⏹ Xuất ra cả khối While đã cập nhật` : '◆ Ghi thêm vào trường hợp -- thao tác trên trang, xong bấm ✓ Xong TH'); }); return; }
     if (op === 'feOk') { call({ op: 'forEach', stepId }).then((s) => { render(s); toast('⟲ Đã gộp thành vòng với từng item'); }); return; }
     if (op === 'dropExtra') { call({ op: 'dropExtra', stepId, i: +btn.dataset.i }).then(render); return; }
+    if (op === 'caseAdd') { call({ op: 'caseAdd', stepId }).then((s) => { render(s); if (s && s.added) openSide('C' + s.added); }); return; }
     if (op === 'here') { call({ op: 'cursor', stepId }).then((s) => { render(s); toast('▸ Bước mới sẽ chèn sau bước này'); }); return; }
     if (op === 'arm') { const on = st.armed && st.armed.stepId === stepId && st.armed.key === btn.dataset.key; call({ op: 'arm', stepId: on ? null : stepId, key: btn.dataset.key }).then((s) => { render(s); toast(on ? 'Đã huỷ chờ chọn element' : '🎯 Giữ Alt + rê chuột lên element, nhả Alt rồi bấm ✓ Chốt (Enter)'); }); return; }
     if (op === 'del') { expK = -1; call({ op: 'delete', stepId }).then(render); }
