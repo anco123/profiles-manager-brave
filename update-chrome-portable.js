@@ -21,7 +21,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { checkChromeVersion } = require('./chrome-version-check');
+const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
 
 // Same tiny hand-rolled .env loader as server.js (kept identical on
 // purpose, so this always agrees with the server about what
@@ -34,12 +34,12 @@ if (fs.existsSync(ENV_FILE)) {
     const eq = trimmed.indexOf('=');
     if (eq === -1) return;
     const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^(["'])(.*)\1$/, '$2'); // KEY="giá trị" (kiểu .env.example) -> bỏ dấu ngoặc
     if (!(key in process.env)) process.env[key] = value;
   });
 }
 
-const CHROME_PATH = process.env.CHROME_PATH || '';
+const CHROME_PATH = resolveChromePath(process.env.CHROME_PATH);
 const PORTABLEAPPS_URL = 'https://portableapps.com/apps/internet/google_chrome_portable';
 
 async function main() {

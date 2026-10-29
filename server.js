@@ -44,7 +44,7 @@ const fs = require('fs');
 const { exec } = require('child_process');
 const { chromium } = require('playwright');
 const { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
-const { checkChromeVersion } = require('./chrome-version-check');
+const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
 const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode, recorderExports, recorderHeader } = require('./recorder');
 
 const app = express();
@@ -80,7 +80,7 @@ if (fs.existsSync(ENV_FILE)) {
     const eq = trimmed.indexOf('=');
     if (eq === -1) return;
     const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim();
+    const value = trimmed.slice(eq + 1).trim().replace(/^(["'])(.*)\1$/, '$2'); // KEY="giá trị" (kiểu .env.example) -> bỏ dấu ngoặc
     if (!(key in process.env)) process.env[key] = value;
   });
 }
@@ -115,7 +115,8 @@ function autoDetectPortableChrome() {
   }
   return '';
 }
-const CHROME_PATH = process.env.CHROME_PATH || autoDetectPortableChrome();
+// resolveChromePath: bỏ dấu ngoặc kép, trỏ vào thư mục / GoogleChromePortable.exe -> tự tìm chrome.exe bên trong (xem chrome-version-check.js)
+const CHROME_PATH = resolveChromePath(process.env.CHROME_PATH) || autoDetectPortableChrome();
 
 // Bật/tắt qua Settings panel (gear icon, topbar) -- xem
 // clearProfileCache()/CACHE_ONLY_DIR_NAMES phía dưới để biết chính xác
