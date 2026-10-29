@@ -315,6 +315,8 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .meta dd { margin: 0; font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+/* 📁 mở folder profile -- góc trên thẻ, cạnh ô chọn (để hàng nút dưới không bị xuống dòng) */
+.btn-folder { flex: none; margin-left: auto; margin-right: 26px; padding: 5px 9px; font-size: .95rem; line-height: 1; align-self: flex-start; }
 
 .btn-fingerprint {
   flex: none; /* icon-only now (see index.html) -- no reason for it to grow/shrink like the text buttons */

@@ -41,7 +41,8 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { exec } = require('child_process');
+const os = require('os');
+const { exec, spawn } = require('child_process');
 const { chromium } = require('playwright');
 const { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
@@ -84,6 +85,23 @@ if (fs.existsSync(ENV_FILE)) {
     if (!(key in process.env)) process.env[key] = value;
   });
 }
+
+// machines.json (CÓ trong git -- 3 máy dùng chung 1 repo, mỗi máy 1 folder profile): cấu hình riêng từng máy theo TÊN MÁY (os.hostname(),
+// không phân biệt hoa thường), VD { "PC-NHA": { "DATA_DIR": "..\\Profile", "CHROME_PATH": "..\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe" } }.
+// Pull về máy nào cũng tự lấy đúng cấu hình của máy đó, không phải tạo .env. Có .env (không vào git) thì .env ưu tiên hơn.
+const MACHINE = os.hostname();
+let MACHINE_CONFIG = null;
+try {
+  const all = JSON.parse(fs.readFileSync(path.join(__dirname, 'machines.json'), 'utf-8'));
+  const mine = Object.entries(all || {}).find(([k]) => k.toLowerCase() === MACHINE.toLowerCase());
+  if (mine && mine[1] && typeof mine[1] === 'object') {
+    MACHINE_CONFIG = mine[1];
+    for (const [k, v] of Object.entries(mine[1])) if (!(k in process.env) && v != null && v !== '') process.env[k] = String(v);
+  }
+} catch (err) { if (err.code !== 'ENOENT') console.warn(`machines.json lỗi, bỏ qua: ${err.message}`); }
+console.log(`Máy này: ${MACHINE}${MACHINE_CONFIG ? ' -- dùng cấu hình trong machines.json' : ' (chưa có trong machines.json)'}`);
+// DATA_DIR tương đối (..\\Profile) tính từ thư mục project -- ghi lại đường dẫn đầy đủ vào process.env để scripts/datapaths.js đọc cùng 1 chỗ
+if (process.env.DATA_DIR && process.env.DATA_DIR.trim()) process.env.DATA_DIR = path.resolve(__dirname, process.env.DATA_DIR.trim());
 
 // THE global override you asked for. When this is set, EVERY profile
 // launches with this exact Chrome build -- full stop, no per-profile
@@ -328,8 +346,23 @@ app.get('/api/profiles', (req, res) => {
     // is set globally it overrides this profile's own engineMode, so the
     // UI should say so rather than show a label that would be a lie.
     effectiveEngineMode: CHROME_PATH ? 'chrome-portable-global' : p.engineMode,
+    dataPath: path.join(PROFILES_ROOT, p.id), // folder trình duyệt của profile -- nút 📁 ở Home
   }));
   res.json(withStatus);
+});
+
+// 📁 ở Home: mở folder của profile bằng trình quản lý file của máy (Windows Explorer / Finder / xdg-open). Chưa có folder (chưa Launch lần nào)
+// thì tạo trống để vẫn mở được.
+app.post('/api/profiles/:id/open-folder', (req, res) => {
+  if (!readProfiles().some((p) => p.id === req.params.id)) return res.status(404).json({ error: 'Không thấy profile' });
+  const dir = path.join(PROFILES_ROOT, req.params.id);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const [cmd, args] = process.platform === 'win32' ? ['explorer.exe', [dir]] : process.platform === 'darwin' ? ['open', [dir]] : ['xdg-open', [dir]];
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: false });
+    child.on('error', () => {}); child.unref();
+    res.json({ ok: true, path: dir });
+  } catch (err) { res.status(500).json({ error: `Không mở được folder ${dir}: ${err.message}`, path: dir }); }
 });
 
 // -------------------------------------------------------------------
@@ -375,7 +408,7 @@ function writeEnvValues(updates) {
 }
 
 app.get('/api/settings', (req, res) => {
-  res.json({ dataDir: DATA_DIR, chromePath: CHROME_PATH, autoClearCacheAfterRun: AUTO_CLEAR_CACHE_AFTER_RUN });
+  res.json({ dataDir: DATA_DIR, chromePath: CHROME_PATH, autoClearCacheAfterRun: AUTO_CLEAR_CACHE_AFTER_RUN, machine: MACHINE, machineConfig: MACHINE_CONFIG });
 });
 
 app.post('/api/settings', (req, res) => {
