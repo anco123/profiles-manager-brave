@@ -32,7 +32,7 @@ const call = (msg) => page.evaluate((m) => window.__pmRec(m), msg);
 async function uiClick(loc) { await loc.waitFor({ state: 'visible', timeout: 8000 }); await helpers.clickVisibly(page, await loc.boundingBox()); await page.waitForTimeout(350); }
 const side = (sel) => page.locator('.side ' + sel);
 const add = () => uiClick(side('[data-op=sadd]')); // ＋ Thêm bước / ◆ Đặt làm điều kiện
-const elRow = (name) => page.locator('.side .elr').filter({ has: page.locator('b', { hasText: new RegExp(`^${name}$`) }) });
+const elRow = (name) => page.locator('.libw .elr').filter({ has: page.locator('b', { hasText: new RegExp(`^${name}$`) }) });
 const ok = (name) => { done++; console.log('  ✓ ' + name); };
 
 (async () => {
