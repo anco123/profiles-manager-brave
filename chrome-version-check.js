@@ -22,6 +22,8 @@
  */
 
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const https = require('https');
 
 const VERSION_API = 'https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions';
@@ -38,7 +40,32 @@ function majorOf(version) {
   return parseInt(version.split('.')[0], 10);
 }
 
+// CHROME_PATH người dùng gõ tay hay sai kiểu: có dấu ngoặc kép bao quanh, trỏ vào THƯ MỤC (GoogleChromePortable, Chrome-bin...) thay vì
+// chrome.exe, hoặc trỏ vào GoogleChromePortable.exe (trình khởi động của PortableApps -- mở Chrome rồi thoát, Playwright không dùng được).
+// Thư mục -> tự tìm chrome.exe bên trong; launcher -> chrome.exe tương ứng nếu có. Trả về đường dẫn đã sửa (không có gì để sửa thì giữ nguyên).
+// Đường dẫn TƯƠNG ĐỐI (..\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe) tính từ thư mục project (chỗ có server.js) -- chép cả thư mục cha
+// (project + GoogleChromePortable nằm cạnh nhau) sang máy / ổ khác vẫn chạy, không phải sửa .env.
+function resolveChromePath(p) {
+  p = String(p || '').trim().replace(/^(["'])(.*)\1$/, '$2').trim();
+  if (!p) return '';
+  if (!path.isAbsolute(p)) p = path.resolve(__dirname, p);
+  const tries = (dir) => [path.join(dir, 'App', 'Chrome-bin', 'chrome.exe'), path.join(dir, 'Chrome-bin', 'chrome.exe'), path.join(dir, 'chrome.exe')];
+  let st = null; try { st = fs.statSync(p); } catch {}
+  if (st && st.isDirectory()) return tries(p).find((f) => fs.existsSync(f)) || p;
+  if (st && /portable\.exe$/i.test(p)) return tries(path.dirname(p)).find((f) => fs.existsSync(f)) || p;
+  return p;
+}
+
+// Thư mục cạnh chrome.exe tên đúng số phiên bản (Chrome-bin\130.0.6723.92\) -- dự phòng khi file .exe không ghi phiên bản
+function versionFromFolder(chromePath) {
+  try { return fs.readdirSync(path.dirname(chromePath)).filter((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d)).sort((a, b) => b.split('.').map(Number).reduce((r, x, i) => r || x - a.split('.').map(Number)[i], 0))[0] || null; } catch { return null; }
+}
+
 function getInstalledVersion(chromePath) {
+  chromePath = resolveChromePath(chromePath);
+  let st = null; try { st = fs.statSync(chromePath); } catch {}
+  if (!st) throw new Error(`Không thấy file "${chromePath}" (CHROME_PATH trong .env / Settings). Sửa lại cho đúng đường dẫn tới ...\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe`);
+  if (st.isDirectory()) throw new Error(`CHROME_PATH đang trỏ vào THƯ MỤC "${chromePath}" và không thấy chrome.exe bên trong -- phải trỏ tới file chrome.exe (thường là ...\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe)`);
   // Does NOT execute chrome.exe at all -- two rounds of trying to
   // safely invoke it with --version (first with shell:true + manual
   // quoting, then without) both turned out to still let a real window
@@ -50,13 +77,13 @@ function getInstalledVersion(chromePath) {
   // PowerShell's Get-Item, which only reads bytes from the file --
   // Chrome is never launched, so there is no process, no window, no
   // page load, and no CLI-flag behavior to depend on at all.
-  const output = execFileSync(
-    'powershell.exe',
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `(Get-Item -LiteralPath '${chromePath}').VersionInfo.ProductVersion`],
-    { encoding: 'utf-8' }
-  );
-  const version = extractVersion(output);
-  if (!version) throw new Error(`Read chrome.exe's file metadata but couldn't find a version number in it: "${output.trim()}". Is CHROME_PATH pointing at a real chrome.exe?`);
+  // ProductVersion trống (một số bản build Chrome / Chromium portable) -> thử FileVersion, rồi tới thư mục số phiên bản cạnh chrome.exe
+  let output = '';
+  try {
+    output = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `$v = (Get-Item -LiteralPath '${chromePath.replace(/'/g, "''")}').VersionInfo; "$($v.ProductVersion) | $($v.FileVersion)"`], { encoding: 'utf-8' });
+  } catch (e) { output = ''; }
+  const version = extractVersion(output) || versionFromFolder(chromePath);
+  if (!version) throw new Error(`Không đọc được phiên bản của "${chromePath}" (thông tin file: "${output.trim()}"). CHROME_PATH có đúng là chrome.exe thật không? -- thường là ...\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe, không phải GoogleChromePortable.exe`);
   return version;
 }
 
@@ -107,4 +134,4 @@ async function checkChromeVersion(chromePath) {
   return { configured: true, installed, latest, outdated: majorsBehind > 0, majorsBehind, error: null };
 }
 
-module.exports = { checkChromeVersion, extractVersion, majorOf };
+module.exports = { checkChromeVersion, extractVersion, majorOf, resolveChromePath };
