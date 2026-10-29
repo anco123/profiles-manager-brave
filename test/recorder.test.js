@@ -35,12 +35,16 @@ const shotOf = (t) => { const m = /ảnh: (\S+\.png)/.exec(t || ''); if (m) shot
 // Bấm nút trong giao diện recorder (shadow DOM): đi chuột thật + nhấn (clickVisibly theo toạ độ -- clickEl kiểm tra "bị đè" bằng
 // document.elementFromPoint, với phần tử trong shadow DOM luôn ra thẻ host nên báo bị đè oan)
 async function uiClick(loc) { await loc.waitFor({ state: 'visible', timeout: 8000 }); await helpers.clickVisibly(page, await loc.boundingBox()); await page.waitForTimeout(300); }
-// Giữ Alt + rê chuột lên element, nhả Alt, gõ tên việc trong bảng chọn rồi Enter
-async function altPick(loc, q) {
+// Giữ Alt + rê chuột lên element, nhả Alt, Enter = ✓ Thêm vào kho (bảng 2 ô đang mở thì điền vào ô Element)
+async function altAdd(loc) {
   await page.keyboard.down('Alt'); await A.hoverEl(loc); await page.waitForTimeout(150); await page.keyboard.up('Alt');
-  await page.locator('.pick [data-f=pq]').waitFor({ timeout: 5000 });
-  await page.keyboard.type(q, { delay: 20 }); await page.keyboard.press('Enter'); await page.waitForTimeout(400);
+  await page.locator('.pick [data-op=pslot]').waitFor({ timeout: 5000 });
+  await page.keyboard.press('Enter'); await page.waitForTimeout(500);
 }
+// Bảng ☰ sang dạng 'Khối' / 'Code' (bấm ▦ Khối / { } Code, bấm lại nếu lần bấm chưa ăn)
+async function setView(name) { for (let i = 0; i < 3 && (await page.locator('.hd b').first().innerText()) !== name; i++) { await uiClick(page.locator('.hd [data-op=vblocks]')); await page.waitForTimeout(300); } assert.strictEqual(await page.locator('.hd b').first().innerText(), name); }
+// Bảng 2 ô: chọn element bằng Alt rồi ◆ Đặt làm điều kiện if
+async function condBy(loc) { await altAdd(loc); await uiClick(page.locator('.side [data-op=sadd]')); }
 const ok = (name) => { done++; console.log('  ✓ ' + name); };
 
 async function testGuardUnit() { // whileGuard: vòng khớp trường hợp thì đếm lại; miss vòng LIỀN không khớp = màn hình lạ
@@ -73,14 +77,15 @@ async function testGuardUnit() { // whileGuard: vòng khớp trường hợp th�
 
     // ---- ghi While + trường hợp 1 (Next hiện -> click), ✓ Xong TH -> gợi ý Chờ hiện hộp thoại vừa hiện ra
     await uiClick(page.locator('.pill [data-op=menu]'));
-    await uiClick(page.locator('.hd [data-op=wstart]'));
-    const loopId = await until(() => st().openLoop, 5000, 'mở While');
-    await altPick(page.locator('#next'), 'khi hien');
-    const c1 = await until(() => st().steps.find((x) => x.action === 'case'), 5000, 'trường hợp 1');
+    await setView('Khối');
+    await uiClick(page.locator('.list [data-op=blockWhile]'));
+    const loopId = await until(() => (st().steps.find((x) => x.action === 'loop') || {}).id, 5000, 'tạo While');
+    await condBy(page.locator('#next'));
+    const c1 = await until(() => st().steps.find((x) => x.action === 'case' && x.levels), 5000, 'trường hợp 1');
     assert.strictEqual(c1.cs, undefined); assert.strictEqual(c1.loop, loopId, 'trường hợp 1 nằm trong While');
-    await A.clickEl(page.locator('#next'));
+    await A.clickEl(page.locator('#next')); // thao tác thẳng trên trang khi đang ở trong if -> vào if đó
     await until(() => st().steps.some((x) => x.cs === c1.id && x.action === 'click' && x.effect), 6000, 'gợi ý sau click (effect)');
-    await uiClick(page.locator('.pill [data-op=caseEnd]'));
+    await uiClick(page.locator('.side [data-op=spClose]')); // Xong = ✓ Xong TH
     const sug = st().steps.find((x) => x.id === c1.id).endSug;
     assert.ok(sug && sug.levels && sug.levels[0].alts.some((a) => /doneDialog/.test(a.code)), 'gợi ý Chờ hiện cho hộp thoại vừa hiện: ' + JSON.stringify(sug && sug.label));
     assert.ok(!st().steps.find((x) => x.cs === c1.id && x.action === 'click').effect, 'gợi ý sau click đã chuyển về cuối trường hợp (không trùng 2 chỗ)');
@@ -102,19 +107,22 @@ async function testGuardUnit() { // whileGuard: vòng khớp trường hợp th�
     assert.ok(!st().segOpen && !st().recording, 'xuất xong: đoạn đã đóng');
 
     // ---- việc 1: mở lại While đã xuất (nút ＋ TH ở dòng While trong bảng ☰), ghi thêm trường hợp 2 (Đóng hiện -> click -> break)
+    await setView('Code');
     const line = page.locator(`.ln[data-id="${loopId}"]`).first();
     await A.hoverEl(line);
     await uiClick(page.locator(`.ln[data-id="${loopId}"] [data-op=reopen]`));
     let s = st();
     assert.ok(s.segOpen && s.recording && s.openLoop === loopId && s.cur.par === 'L' + loopId, 'mở lại While: đang ghi, con trỏ ở cuối While');
-    await altPick(page.locator('#close'), 'khi hien');
-    const c2 = await until(() => st().steps.find((x) => x.action === 'case' && x.id !== c1.id), 5000, 'trường hợp 2');
+    await setView('Khối'); // ＋ ở if 1 -> if 2
+    await uiClick(page.locator(`.bif[data-id="${c1.id}"] [data-op=caseAdd]`));
+    await condBy(page.locator('#close'));
+    const c2 = await until(() => st().steps.find((x) => x.action === 'case' && x.id !== c1.id && x.levels), 5000, 'trường hợp 2');
     assert.strictEqual(c2.loop, loopId, 'trường hợp 2 nằm trong While cũ');
     s = st(); assert.ok([loopId, c1.id, c2.id].every((i) => s.segIds.includes(i)), 'có bước mới trong While cũ -> đoạn đang ghi = cả khối While');
     await call({ op: 'update', stepId: c2.id, patch: { end: 'break' } });
     await A.clickEl(page.locator('#close'));
     await until(() => st().steps.some((x) => x.cs === c2.id && x.action === 'click'), 4000, 'click trong trường hợp 2');
-    await uiClick(page.locator('.pill [data-op=caseEnd]'));
+    await uiClick(page.locator('.side [data-op=spClose]'));
     await page.waitForTimeout(2500); // gợi ý sau click về sau ~2s -- sau Đóng không có element mới nào đáng chờ
     assert.ok(!(st().steps.find((x) => x.id === c2.id).endSug || {}).levels, 'không có element mới -> không gợi ý Chờ hiện');
     ok('việc 3: không có element mới hiện ra thì không gợi ý');
