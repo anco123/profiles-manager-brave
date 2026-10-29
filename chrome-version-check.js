@@ -43,9 +43,12 @@ function majorOf(version) {
 // CHROME_PATH người dùng gõ tay hay sai kiểu: có dấu ngoặc kép bao quanh, trỏ vào THƯ MỤC (GoogleChromePortable, Chrome-bin...) thay vì
 // chrome.exe, hoặc trỏ vào GoogleChromePortable.exe (trình khởi động của PortableApps -- mở Chrome rồi thoát, Playwright không dùng được).
 // Thư mục -> tự tìm chrome.exe bên trong; launcher -> chrome.exe tương ứng nếu có. Trả về đường dẫn đã sửa (không có gì để sửa thì giữ nguyên).
+// Đường dẫn TƯƠNG ĐỐI (..\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe) tính từ thư mục project (chỗ có server.js) -- chép cả thư mục cha
+// (project + GoogleChromePortable nằm cạnh nhau) sang máy / ổ khác vẫn chạy, không phải sửa .env.
 function resolveChromePath(p) {
   p = String(p || '').trim().replace(/^(["'])(.*)\1$/, '$2').trim();
   if (!p) return '';
+  if (!path.isAbsolute(p)) p = path.resolve(__dirname, p);
   const tries = (dir) => [path.join(dir, 'App', 'Chrome-bin', 'chrome.exe'), path.join(dir, 'Chrome-bin', 'chrome.exe'), path.join(dir, 'chrome.exe')];
   let st = null; try { st = fs.statSync(p); } catch {}
   if (st && st.isDirectory()) return tries(p).find((f) => fs.existsSync(f)) || p;
