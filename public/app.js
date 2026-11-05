@@ -1184,7 +1184,7 @@ async function openSettingsPanel() {
     const mc = data.machineConfig || {}; // mục máy này ghi trong machines.json -> ô tương ứng khoá lại (sửa ở machines.json)
     settingsDataDirInput.disabled = !!mc.DATA_DIR; settingsDataDirInput.title = mc.DATA_DIR ? `Theo machines.json (${mc.DATA_DIR}) -- sửa trong machines.json` : '';
     settingsChromePathInput.disabled = !!mc.CHROME_PATH; settingsChromePathInput.title = mc.CHROME_PATH ? `Theo machines.json (${mc.CHROME_PATH}) -- sửa trong machines.json` : '';
-    document.getElementById('settingsMachine').innerHTML = `Máy này: <strong>${String(data.machine || '?').replace(/[&<>"]/g, '')}</strong> &mdash; ${data.machineConfig ? 'đang dùng cấu hình của máy này trong <code>machines.json</code> (ưu tiên hơn <code>.env</code>; ô bị khoá = sửa trong machines.json)' : 'chưa có trong <code>machines.json</code> (thêm 1 mục tên này để pull về là tự đúng folder, không cần .env)'}`;
+    document.getElementById('settingsMachine').innerHTML = `Máy này: <strong>${String(data.machine || '?').replace(/[&<>"]/g, '')}</strong> &mdash; ${data.machineConfig ? (data.machineConfig.key === '*' ? 'không có mục riêng, đang dùng mục mặc định <code>"*"</code> trong <code>machines.json</code>' : 'đang dùng cấu hình của máy này trong <code>machines.json</code>') + ' (ưu tiên hơn <code>.env</code>; ô bị khoá = sửa trong machines.json)' : 'chưa có trong <code>machines.json</code> (thêm 1 mục tên này để pull về là tự đúng folder, không cần .env)'}`;
     settingsChromePathInput.value = data.chromePath || '';
     settingsAutoClearCacheInput.checked = Boolean(data.autoClearCacheAfterRun);
   } catch (err) {

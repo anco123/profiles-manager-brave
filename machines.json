@@ -1,6 +1,5 @@
 {
-  "_ghi_chu": "Cấu hình riêng từng máy theo TÊN MÁY (xem ở Settings -> 'Máy này', hoặc dòng 'Máy này: ...' khi npm start). Đường dẫn tương đối tính từ thư mục project. machines.json ưu tiên hơn .env (mục nào ghi ở đây thì .env không đè được).",
-  "DESKTOP-VS5IA8O": { "DATA_DIR": "..\\chromeProfile" },
-  "TEN-MAY-2": { "DATA_DIR": "D:\\Profiles", "CHROME_PATH": "..\\GoogleChromePortable\\App\\Chrome-bin\\chrome.exe" },
-  "TEN-MAY-3": { "DATA_DIR": "E:\\PROJECT\\Profile" }
+  "_ghi_chu": "Cấu hình riêng từng máy theo TÊN MÁY (xem ở Settings -> 'Máy này', hoặc dòng 'Máy này: ...' khi npm start). Máy không có mục riêng dùng mục \"*\". DATA_DIR = folder profile tổng (chứa profiles.json, các profile nằm trong <DATA_DIR>\\profiles); đường dẫn tương đối tính từ thư mục project, chưa có thì tự tạo. machines.json ưu tiên hơn .env.",
+  "DESKTOP-BB2DOCG": { "DATA_DIR": "F:\\AdditionSolfware\\An_AntiDetectTool\\Profile" },
+  "*": { "DATA_DIR": "..\\Profile" }
 }
