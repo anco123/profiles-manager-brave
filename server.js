@@ -94,13 +94,14 @@ const MACHINE = os.hostname();
 let MACHINE_CONFIG = null;
 try {
   const all = JSON.parse(fs.readFileSync(path.join(__dirname, 'machines.json'), 'utf-8'));
-  const mine = Object.entries(all || {}).find(([k]) => k.toLowerCase() === MACHINE.toLowerCase());
+  // không có mục đúng tên máy -> dùng mục "*" (mặc định cho mọi máy khác)
+  const mine = Object.entries(all || {}).find(([k]) => k.toLowerCase() === MACHINE.toLowerCase()) || (all && all['*'] ? ['*', all['*']] : null);
   if (mine && mine[1] && typeof mine[1] === 'object') {
-    MACHINE_CONFIG = mine[1];
-    for (const [k, v] of Object.entries(mine[1])) if (v != null && String(v).trim() !== '') process.env[k] = String(v).trim();
+    MACHINE_CONFIG = { ...mine[1], key: mine[0] };
+    for (const [k, v] of Object.entries(mine[1])) if (k !== 'key' && v != null && String(v).trim() !== '') process.env[k] = String(v).trim();
   }
 } catch (err) { if (err.code !== 'ENOENT') console.warn(`machines.json lỗi, bỏ qua: ${err.message}`); }
-console.log(`Máy này: ${MACHINE}${MACHINE_CONFIG ? ' -- dùng cấu hình trong machines.json' : ' (chưa có trong machines.json)'}`);
+console.log(`Máy này: ${MACHINE}${!MACHINE_CONFIG ? ' (chưa có trong machines.json)' : MACHINE_CONFIG.key === '*' ? ' -- dùng mục mặc định "*" trong machines.json' : ' -- dùng cấu hình trong machines.json'}`);
 // DATA_DIR tương đối (..\\Profile) tính từ thư mục project -- ghi lại đường dẫn đầy đủ vào process.env để scripts/datapaths.js đọc cùng 1 chỗ
 if (process.env.DATA_DIR && process.env.DATA_DIR.trim()) process.env.DATA_DIR = path.resolve(__dirname, process.env.DATA_DIR.trim());
 
@@ -179,6 +180,7 @@ const SNIPPETS_FILE = path.join(DATA_DIR, 'snippets.json');
 
 // --- make sure our data folders exist on first run ---
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(PROFILES_ROOT, { recursive: true }); // <folder profile>\profiles -- chưa có thì tạo luôn (máy mới, folder Profile chưa từng dùng)
 if (!fs.existsSync(PROFILES_ROOT)) fs.mkdirSync(PROFILES_ROOT, { recursive: true });
 if (!fs.existsSync(PROFILES_FILE)) fs.writeFileSync(PROFILES_FILE, '[]');
 if (!fs.existsSync(SCRIPTS_DIR)) fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
