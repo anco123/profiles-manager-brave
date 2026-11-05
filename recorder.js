@@ -35,6 +35,10 @@
  *   ✓ Xong TH mà trường hợp chưa kết thúc bằng 1 bước chờ -> gợi ý thêm "Chờ hiện" cho element vừa hiện ra sau bước cuối (xem caseSug).
  * - Mở lại While / trường hợp đã ghi (kể cả đã ⏹ Xuất): nút ＋ ở dòng While / trường hợp trong bảng ☰ -> ghi thêm trường hợp vào đó;
  *   lần xuất sau ra CẢ khối While đã cập nhật (không phải mỗi phần mới) -- xem segSteps.
+ * - Cửa sổ KHỐI (phải, ↵ vào 1 khối): đường dẫn khối (bấm để nhảy, ↰ ra 1 cấp) + thao tác + ô Element + "Chèn khối tại ▸" (◆ if, ↳ else if,
+ *   ↳ else, ⟳ While lồng, ƒ mọi hàm -- hàm có { } thì đi vào khối của nó) + CODE của cả khối ngoài cùng: bấm dòng if / else / While / hàm =
+ *   vào khối đó, bấm dòng bước = bước mới chèn sau dòng đó (▸). Lồng bao nhiêu tầng cũng được (if trong if, While trong else...).
+ *   Cửa sổ KHO ELEMENT (trái): tự động (chỉ hiện khi sửa khối) / 📌 ghim (luôn hiện) / « thu gọn (tắt, mở lại bằng 📦 ở cửa sổ khối).
  * - ▦ Dạng khối (bảng ☰): While = các if (trường hợp) + else. ＋ ở cuối if = if mới cùng cấp, ↵ = vào if / else -> bảng 2 ô bên phải: ô trên
  *   thao tác phổ biến (Click, Gõ, Chờ hiện...) + ô Element (bấm 1 dòng trong kho, giữ Alt chọn trên trang, hoặc gõ tay #id / .class /
  *   //xpath / page.getBy... -- đếm số khớp) + ＋ Thêm bước (Enter); ô dưới kho element. "◆ Làm điều kiện if" + element = điều kiện của if. Xong / Esc = đóng bảng (như ✓ Xong TH). Thao tác thẳng trên trang lúc đang ở trong if cũng vào if đó.
@@ -63,7 +67,7 @@ const AND_FNS = [{ act: 'andShow', name: 'VÀ element này hiện', desc: 'thêm
 // Bảng ☰ "Gọi hàm": mọi hàm trong danh sách (While / Nhánh dùng lệnh ghi riêng của recorder thay cho whileTrue / waitAny). Mỗi hàm gọi ở ☰
 // thành 1 bước action 'fn': code mẫu (tpl -- sửa được) + các ô element (page.locator('SELECTOR...')) chọn bằng nút 🎯 Pick rồi giữ Alt
 const CAT = Object.fromEntries(CATALOG.map((f) => [f.id, f]));
-const CALL_FNS = CATALOG.filter((f) => !['whileTrue', 'waitAny'].includes(f.id)).map((f) => ({ fn: f.id, name: f.name, desc: f.desc, keys: `${f.id} ${f.keys}` }));
+const CALL_FNS = CATALOG.filter((f) => !['whileTrue', 'waitAny'].includes(f.id)).map((f) => ({ fn: f.id, name: f.name, desc: f.desc, keys: `${f.id} ${f.keys}`, blk: String(f.code).split('\n').some((l) => /^\s+$/.test(l)) }));
 const fnKeys = (tpl) => [...new Set([...String(tpl || '').matchAll(/\b(?:page|item\w*)\.locator\('(SELECTOR\w*)'\)/g)].map((m) => m[1]))];
 const SLOT_LABEL = (k) => ({ SELECTOR: 'element', SELECTOR_B: 'element B', SELECTOR_DONE: 'element "xong"', SELECTOR_TRONG_ITEM: 'trong mỗi item' }[k] || k.replace(/^SELECTOR_?/, 'element ').toLowerCase());
 const holeN = (s) => String(s.tpl || '').split('\n').filter((l) => /^\s+$/.test(l)).length; // dòng chỉ có khoảng trắng = chỗ để chèn bước vào khối { }
@@ -199,14 +203,14 @@ function loopCode(s, P = 'page') {
 }
 const loopIds = (steps) => new Set(steps.filter((s) => s.action === 'loop').map((s) => s.id));
 // Khối chứa 1 bước: 'F<id>:<k>' (lỗ thứ k -- khối { } -- của 1 hàm gọi ở ☰) > 'C<id>' trường hợp > 'L<id>' While > 'E<id>' else của While
-// > 'B<id>' Nhánh > 'T<tab>' tab mới > '' ngoài cùng
+// > 'X<id>' else của 1 if (trường hợp) lồng > 'B<id>' Nhánh > 'T<tab>' tab mới > '' ngoài cùng
 function parentKeyOf(steps) {
   const vars = tabVars(steps), loops = loopIds(steps), brs = branchIds(steps), fns = new Set(steps.filter((x) => x.action === 'fn').map((x) => x.id));
   const cases = new Set(steps.filter((x) => x.action === 'case').map((x) => x.id));
-  return (x) => (x.blk && fns.has(headOf(x.blk)) ? x.blk : cases.has(x.cs) ? 'C' + x.cs : loops.has(x.loop) ? 'L' + x.loop : loops.has(x.elsOf) ? 'E' + x.elsOf : brs.has(x.br) ? 'B' + x.br : vars[x.tab] ? 'T' + x.tab : '');
+  return (x) => (x.blk && fns.has(headOf(x.blk)) ? x.blk : cases.has(x.cs) ? 'C' + x.cs : cases.has(x.xOf) ? 'X' + x.xOf : loops.has(x.loop) ? 'L' + x.loop : loops.has(x.elsOf) ? 'E' + x.elsOf : brs.has(x.br) ? 'B' + x.br : vars[x.tab] ? 'T' + x.tab : '');
 }
 const headOf = (key) => (key && key[0] !== 'T' ? +key.slice(1).split(':')[0] : 0); // bước mở khối (While / Nhánh / hàm)
-function setParent(s, key) { s.loop = key[0] === 'L' ? headOf(key) : undefined; s.br = key[0] === 'B' ? headOf(key) : undefined; s.blk = key[0] === 'F' ? key : undefined; s.cs = key[0] === 'C' ? headOf(key) : undefined; s.elsOf = key[0] === 'E' ? headOf(key) : undefined; }
+function setParent(s, key) { s.loop = key[0] === 'L' ? headOf(key) : undefined; s.br = key[0] === 'B' ? headOf(key) : undefined; s.blk = key[0] === 'F' ? key : undefined; s.cs = key[0] === 'C' ? headOf(key) : undefined; s.elsOf = key[0] === 'E' ? headOf(key) : undefined; s.xOf = key[0] === 'X' ? headOf(key) : undefined; }
 const branchIds = (steps) => new Set(steps.filter((s) => s.action === 'branch').map((s) => s.id));
 // Việc của 1 nhánh (cái này hiện trước thì...) -- 1 câu lệnh, đứng sau `if (whichN === k)`
 function branchAct(s, P) {
@@ -229,15 +233,15 @@ function bodyLines(steps, opt = {}) {
   const emit = (key, ind) => {
     mark(key, headOf(key), ind);
     const sibs = steps.filter((x) => pk(x) === key), lv = sibs.filter(live);
-    for (const s of sibs) { const i = lv.indexOf(s); one(s, key, ind, key[0] === 'L' && i > 0 ? lv[i - 1] : null, key[0] === 'L' && i >= 0 ? lv[i + 1] || 'else' : null); mark(key, s.id, ind); }
+    for (const s of sibs) { const i = lv.indexOf(s); one(s, key, ind, i > 0 ? lv[i - 1] : null, i >= 0 ? lv[i + 1] || (key[0] === 'L' ? 'else' : null) : null); mark(key, s.id, ind); }
   };
   const one = (s, key, ind, prev, next) => {
     const P = vars[s.tab] || 'page';
     if (s.action === 'fn') { // hàm gọi ở ☰: từng dòng code mẫu; dòng trống trong khối { } = chỗ chứa các bước con
       if (opt.test) push(`${ind}__pmStep = ${s.id};`, s.id);
-      let h = 0;
+      let h = 0, first = true;
       for (const l of fnCode(s, P).split('\n')) {
-        if (!/^\s+$/.test(l)) { push(ind + l, s.id); continue; }
+        if (!/^\s+$/.test(l)) { push(ind + l, s.id, first && holeN(s) ? { open: `F${s.id}:0` } : undefined); first = false; continue; }
         const k = `F${s.id}:${h++}`;
         if (steps.some((x) => pk(x) === k) || (cur && cur.par === k)) emit(k, ind + l);
         else if (opt.view) push(`${ind}${l}// ▸ trống -- bấm để chèn bước vào đây`, s.id, { hole: k, dim: true });
@@ -245,13 +249,27 @@ function bodyLines(steps, opt = {}) {
       return;
     }
     if (s.action === 'case') { // trường hợp: if (điều kiện) { các bước con; continue / break }
-      if (!caseCond(s, P)) { if (opt.view) push(`${ind}// ◆ trường hợp chưa chọn điều kiện -- ▦ dạng khối, ↵ để chọn (chưa xuất ra code)`, s.id, { dim: true }); return; }
-      const lv = s.levels && s.levels[s.level], k = 'C' + s.id, elif = chain(s) && chain(prev), open = chain(s) && (next === 'else' || chain(next)); // open: chưa đóng } -- if sau / else nối tiếp
+      if (!caseCond(s, P)) { // chưa chọn điều kiện: không xuất ra code; xem (bảng ☰ / cửa sổ khối) thì vẫn hiện cả khối, mờ
+        if (!opt.view) return;
+        push(`${ind}if (/* ◆ chưa chọn điều kiện -- chưa xuất ra code */) {`, s.id, { dim: true, open: 'C' + s.id });
+        if (steps.some((x) => pk(x) === 'C' + s.id) || (cur && cur.par === 'C' + s.id)) emit('C' + s.id, ind + '  ');
+        else push(`${ind}  // ▸ trống -- bấm để ghi các bước vào đây`, s.id, { hole: 'C' + s.id, dim: true });
+        push(`${ind}}`, s.id, { dim: true });
+        return;
+      }
+      // Trong While (khối L): trường hợp continue / break nối thành if / else if, else = khối else của While. Khối khác (if lồng trong if...):
+      // trường hợp đánh dấu elif nối vào if đứng trước (} else if), if có khối else riêng (X<id>) -> } else { ... }
+      const inL = key[0] === 'L', isCase = (x) => !!x && x !== 'else' && x.action === 'case' && !!caseCond(x);
+      const lv = s.levels && s.levels[s.level], k = 'C' + s.id, xk = 'X' + s.id, hasElse = !inL && (steps.some((x) => pk(x) === xk) || (cur && cur.par === xk));
+      const prevElse = (x) => steps.some((y) => pk(y) === 'X' + x.id) || (cur && cur.par === 'X' + x.id);
+      const elif = inL ? chain(s) && chain(prev) : !!s.elif && isCase(prev) && !prevElse(prev);
+      const open = inL ? chain(s) && (next === 'else' || chain(next)) : !hasElse && isCase(next) && !!next.elif; // open: chưa đóng } -- if sau / else nối tiếp
       if (opt.test && !elif) push(`${ind}__pmStep = ${s.id};`, s.id);
-      push(`${ind}${elif ? '} else if' : 'if'} (${opt.test && elif ? `(__pmStep = ${s.id}) && ` : ''}${caseCond(s, P)}) { // trường hợp: ${s.textEq ? `chữ ${s.neg ? 'khác' : 'là'} "${s.textEq}"` : s.neg ? 'không hiện' : 'đang hiện'} ${(lv && (lv.label || lv.tag)) || ''}`.trimEnd(), s.id);
+      push(`${ind}${elif ? '} else if' : 'if'} (${opt.test && elif ? `(__pmStep = ${s.id}) && ` : ''}${caseCond(s, P)}) { // trường hợp: ${s.textEq ? `chữ ${s.neg ? 'khác' : 'là'} "${s.textEq}"` : s.neg ? 'không hiện' : 'đang hiện'} ${(lv && (lv.label || lv.tag)) || ''}`.trimEnd(), s.id, { open: k });
       if (steps.some((x) => pk(x) === k) || (cur && cur.par === k)) emit(k, ind + '  ');
       else if (opt.view) push(`${ind}  // ▸ trống -- bấm để ghi các bước vào đây`, s.id, { hole: k, dim: true });
       if (s.end === 'continue' || s.end === 'break') push(`${ind}  ${s.end};${s.end === 'break' ? ' // xong -- thoát While' : ' // quét lại từ đầu'}`, s.id);
+      if (hasElse) { push(`${ind}} else {`, s.id, { open: xk }); emit(xk, ind + '  '); }
       if (!open) push(`${ind}}`, s.id);
       return;
     }
@@ -269,10 +287,10 @@ function bodyLines(steps, opt = {}) {
     }
     push(ind + code, s.id);
     if (s.action === 'loop') {
-      push(`${ind}while (${opt.test ? `(__pmStep = ${s.id}) && ` : ''}await w${s.id}.next()) {`, s.id); // hết giờ -> next() chụp màn hình lạ rồi trả false
+      push(`${ind}while (${opt.test ? `(__pmStep = ${s.id}) && ` : ''}await w${s.id}.next()) {`, s.id, { open: 'L' + s.id }); // hết giờ -> next() chụp màn hình lạ rồi trả false
       emit('L' + s.id, ind + '  ');
       const lv = steps.filter((x) => pk(x) === 'L' + s.id && live(x)), els = chain(lv[lv.length - 1]), ei = ind + (els ? '    ' : '  '); // trường hợp cuối còn mở -> else { }
-      if (els) push(`${ind}  } else { // không khớp trường hợp nào`, s.id);
+      if (els) push(`${ind}  } else { // không khớp trường hợp nào`, s.id, { open: 'E' + s.id });
       emit('E' + s.id, ei); // else: các bước ở đây chạy trước khi nghỉ rồi quét lại
       if (opt.test) push(`${ei}__pmStep = ${s.id};`, s.id);
       push(`${ei}await w${s.id}.idle(${+s.idle > 0 ? +s.idle : 500}); // nghỉ rồi quét lại${missOf(s) ? ` -- ${missOf(s)} vòng liền thế này = màn hình lạ` : ''}`, s.id);
@@ -352,7 +370,7 @@ function stateOf(id) {
     caseInfo: s.action === 'case' ? { kids: r.steps.filter((x) => x.cs === s.id).length, extra: (s.extra || []).map((c) => ({ code: selOf(c), neg: !!c.neg })) } : undefined,
     slotInfo: s.action === 'fn' ? fnKeys(s.tpl).map((k) => ({ key: k, label: SLOT_LABEL(k), code: s.slots && s.slots[k] ? selOf(s.slots[k]) : null })) : undefined, holes: s.action === 'fn' ? holeN(s) : undefined });
   return { enabled: r.enabled, recording: r.recording, segOpen: r.segOpen, openLoop: loops.has(r.openLoop) ? r.openLoop : null, openBranch: brs.has(r.openBranch) ? r.openBranch : null, loopActions: LOOP_ACTIONS, branchActions: BRANCH_ACTIONS,
-    lines: bodyLines(r.steps, { view: true, cur: r.cur }), cur: r.cur || null, armed: r.armed || null, inCase: r.cur && r.cur.par[0] === 'C' ? headOf(r.cur.par) : null, caseFns: CASE_FNS, andFns: AND_FNS, callFns: CALL_FNS, req: reqOf(r.steps), test: r.test || null, canRun: !!r.run, fns: PICK_FNS, segFrom: r.segFrom, segIds: r.segOpen ? segSteps(r).steps.map((x) => x.id) : [], exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), els, actions: ACTIONS, code: buildCode(r.steps) };
+    lines: bodyLines(r.steps, { view: true, cur: r.cur }), cur: r.cur || null, armed: r.armed || null, inCase: r.cur && r.cur.par[0] === 'C' ? headOf(r.cur.par) : null, caseFns: CASE_FNS, andFns: AND_FNS, callFns: CALL_FNS, req: reqOf(r.steps), test: r.test || null, canRun: !!r.run, fns: PICK_FNS, segFrom: r.segFrom, segIds: r.segOpen ? segSteps(r).steps.map((x) => x.id) : [], libMode: r.libMode || 'auto', exportSeq: r.exportSeq, canUndo: !!r.undo, rowNum: r.rowNum, sources: sourceList(r), steps: r.steps.map((s) => ({ ...s, ...extra(s) })), els, actions: ACTIONS, code: buildCode(r.steps) };
 }
 
 // Bước mở khối theo key: 'L5' / 'C5' / 'B5' / 'F5:0' -> bước 5; 'T3' -> bước clickTab mở tab 3
@@ -423,6 +441,7 @@ function libOf(r, src) {
   r.els.push(e);
   return e;
 }
+const BLOCK_KEY = /^([CELX]\d+|F\d+:\d+)$/; // khối mở được ở bảng khối: if / While / else của While / else của if / lỗ { } của hàm
 const link = (r, s) => { if (s.levels && !s.el && !['clickTab', 'gotoLink', 'gotoUrl'].includes(s.action)) s.el = libOf(r, s); return s; };
 // Thêm bước vào CUỐI khối `key` (trường hợp 'C5' / else 'E5' -- dạng khối) và con trỏ đứng sau bước đó
 function appendTo(r, key, step) {
@@ -664,7 +683,9 @@ async function handle(id, page, msg, frame) {
   else if (msg.op === 'branchStart' && r.segOpen) { r.openLoop = null; const s = onEvent(r, { kind: 'branch' }, page); r.openBranch = s.id; if (r.cur) r.cur = { after: s.id, par: 'B' + s.id }; }
   else if (msg.op === 'branchEnd') leaveBlock(r, 'B' + r.openBranch);
   else if (msg.op === 'fnAdd' && CAT[msg.fn]) { // gọi hàm ở ☰: thêm bước ở con trỏ chèn; hàm có khối { } -> con trỏ vào trong khối
-    const f = CAT[msg.fn], st = insertStep(r, { id: ++r.seq, at: Date.now(), action: 'fn', fn: f.id, name: f.name, tpl: f.code, slots: {}, loop: r.openLoop || undefined });
+    const f = CAT[msg.fn], e = msg.elId && (r.els || []).find((x) => x.id === msg.elId); // elId: element ở ô Element (bảng khối) -> điền vào mọi ô element của hàm
+    const st = insertStep(r, { id: ++r.seq, at: Date.now(), action: 'fn', fn: f.id, name: f.name, tpl: f.code, slots: e ? Object.fromEntries(fnKeys(f.code).map((k) => [k, { el: e }])) : {}, loop: r.openLoop || undefined });
+    r.segOpen = true;
     if (holeN(st)) { r.cur = { after: st.id, par: `F${st.id}:0` }; syncOpen(r); }
     return { ...stateOf(id), added: st.id };
   }
@@ -718,7 +739,7 @@ async function handle(id, page, msg, frame) {
       return { ...stateOf(id), added: c.id };
     }
   }
-  else if (msg.op === 'enter' && /^[CE]\d+$/.test(msg.key || '') && headStep(r.steps, msg.key)) { // ↵ vào 1 if / else: con trỏ cuối khối, bật ghi -- thao tác trên trang cũng vào khối này
+  else if (msg.op === 'enter' && BLOCK_KEY.test(msg.key || '') && headStep(r.steps, msg.key)) { // ↵ vào 1 khối (if / else / While / hàm có { }): con trỏ cuối khối, bật ghi -- thao tác trên trang cũng vào khối này
     const pk = parentKeyOf(r.steps), kids = r.steps.filter((x) => pk(x) === msg.key);
     r.cur = { after: kids.length ? kids[kids.length - 1].id : headOf(msg.key), par: msg.key }; syncOpen(r);
     if (!r.segOpen) { r.segOpen = true; r.segFrom = r.seq + 1; }
@@ -728,12 +749,29 @@ async function handle(id, page, msg, frame) {
     const c = r.steps.find((x) => x.id === msg.stepId && x.action === 'case'), e = (r.els || []).find((x) => x.id === msg.elId);
     if (c && e) { c.el = e; c.levels = e.levels; c.level = e.level; c.alt = e.alt; c.frame = e.frame; if (c.end == null) c.end = 'continue'; }
   }
-  else if (msg.op === 'libStep') { // bấm 1 element trong kho (bảng 2 ô): thêm bước "thao tác + element" vào cuối if / else đang mở
-    const e = (r.els || []).find((x) => x.id === msg.elId), key = /^[CE]\d+$/.test(msg.key || '') && headStep(r.steps, msg.key) ? msg.key : null;
-    if (key && msg.action === 'pause') appendTo(r, key, { id: ++r.seq, at: Date.now(), action: 'fn', fn: 'pause', name: CAT.pause.name, tpl: CAT.pause.code, slots: {} });
-    else if (key && e && ACTIONS[msg.action]) appendTo(r, key, { id: ++r.seq, at: Date.now(), action: msg.action, el: e, levels: e.levels, level: e.level, alt: e.alt, frame: e.frame, tab: e.tab, text: msg.text, enter: !!msg.enter });
+  else if (msg.op === 'libStep') { // ＋ Thêm bước (bảng khối): "thao tác + element" vào khối đang mở, tại chỗ con trỏ (▸) -- con trỏ không ở khối đó thì cuối khối
+    const e = (r.els || []).find((x) => x.id === msg.elId), key = BLOCK_KEY.test(msg.key || '') && headStep(r.steps, msg.key) ? msg.key : null;
+    const put = (step) => (r.cur && r.cur.par === key ? insertStep(r, step) : appendTo(r, key, link(r, step)));
+    if (key && msg.action === 'pause') put({ id: ++r.seq, at: Date.now(), action: 'fn', fn: 'pause', name: CAT.pause.name, tpl: CAT.pause.code, slots: {} });
+    else if (key && e && ACTIONS[msg.action]) put({ id: ++r.seq, at: Date.now(), action: msg.action, el: e, levels: e.levels, level: e.level, alt: e.alt, frame: e.frame, tab: e.tab, text: msg.text, enter: !!msg.enter });
     r.segOpen = true;
   }
+  else if (msg.op === 'blockAdd' && BLOCK_KEY.test(msg.key || '') && headStep(r.steps, msg.key)) { // chèn khối tại chỗ con trỏ của khối đang mở rồi đi vào khối đó
+    const key = msg.key, pk = parentKeyOf(r.steps);
+    if (!r.cur || r.cur.par !== key) { const kids = r.steps.filter((x) => pk(x) === key); r.cur = { after: kids.length ? kids[kids.length - 1].id : headOf(key), par: key }; }
+    const prev = r.steps.find((x) => x.id === r.cur.after && x.action === 'case' && pk(x) === key); // if đứng ngay trước con trỏ (cho else if / else)
+    const nc = (more) => ({ id: ++r.seq, at: Date.now(), action: 'case', end: key[0] === 'L' ? 'continue' : 'none', extra: [], ...more });
+    let to = null;
+    if (msg.kind === 'if') { const c = insertStep(r, nc()); to = 'C' + c.id; }
+    else if (msg.kind === 'elif' && prev && key[0] !== 'L') { const c = insertStep(r, nc({ elif: true })); to = 'C' + c.id; }
+    else if (msg.kind === 'else' && prev && key[0] !== 'L') to = 'X' + prev.id;
+    else if (msg.kind === 'while') { const L = insertStep(r, { id: ++r.seq, at: Date.now(), action: 'loop', timeout: 0 }), c = { id: ++r.seq, at: Date.now(), action: 'case', end: 'continue', extra: [] }; appendTo(r, 'L' + L.id, c); to = 'C' + c.id; }
+    if (to) { const kids = r.steps.filter((x) => parentKeyOf(r.steps)(x) === to); r.cur = { after: kids.length ? kids[kids.length - 1].id : headOf(to), par: to }; syncOpen(r); }
+    r.segOpen = true;
+    if (r.enabled) r.recording = true;
+    return { ...stateOf(id), entered: to };
+  }
+  else if (msg.op === 'libMode' && ['auto', 'pin', 'off'].includes(msg.mode)) r.libMode = msg.mode; // cửa sổ kho element: tự động (chỉ khi sửa khối) / ghim / thu gọn
   else if (msg.op === 'libAdd' && (Array.isArray(msg.levels) || /^page\./.test(msg.custom || ''))) { // Alt chọn / gõ tay ở ô Element -> vào kho (cùng selector thì dùng cái cũ)
     const name = String(msg.name || msg.custom).slice(0, 40), levels = Array.isArray(msg.levels) ? msg.levels : [{ tag: '', label: name, size: '', css: '', alts: [{ kind: 'gõ tay', code: msg.custom, base: msg.custom, unique: true }] }];
     const e = libOf(r, { levels, level: msg.level || 0, alt: msg.alt || 0, custom: msg.custom || null });
@@ -743,7 +781,7 @@ async function handle(id, page, msg, frame) {
   else if (msg.op === 'libRename') { const e = (r.els || []).find((x) => x.id === msg.elId); if (e && String(msg.name || '').trim()) e.name = String(msg.name).trim().slice(0, 40); }
   else if (msg.op === 'libCustom') { const e = (r.els || []).find((x) => x.id === msg.elId); if (e) e.custom = String(msg.custom || '').trim() || null; }
   else if (msg.op === 'cursor') { const x = r.steps.find((y) => y.id === msg.stepId); if (x) { r.cur = { after: x.id, par: parentKeyOf(r.steps)(x) }; syncOpen(r); } }
-  else if (msg.op === 'cursorHole' && /^[LBFCE]\d+(:\d+)?$/.test(msg.key || '')) { r.cur = { after: headOf(msg.key), par: msg.key }; syncOpen(r); }
+  else if (msg.op === 'cursorHole' && /^[LBFCEX]\d+(:\d+)?$/.test(msg.key || '')) { r.cur = { after: headOf(msg.key), par: msg.key }; syncOpen(r); }
   else if (msg.op === 'cursorOff') { r.cur = null; r.openLoop = null; r.openBranch = null; }
   else if (msg.op === 'effect') { // nhận / bỏ gợi ý "Chờ hiện" sau click
     const i = r.steps.findIndex((x) => x.id === msg.stepId), s = r.steps[i];
@@ -767,7 +805,7 @@ async function handle(id, page, msg, frame) {
   else if (msg.op === 'delete') { // xoá While / Nhánh / hàm có khối -> các bước bên trong ra ngoài, vào khối chứa bước bị xoá
     const pk = parentKeyOf(r.steps), d = r.steps.find((s) => s.id === msg.stepId);
     if (d) {
-      const out = pk(d), inside = (s) => s.loop === d.id || s.elsOf === d.id || s.br === d.id || s.cs === d.id || (s.blk && headOf(s.blk) === d.id);
+      const out = pk(d), inside = (s) => s.loop === d.id || s.elsOf === d.id || s.xOf === d.id || s.br === d.id || s.cs === d.id || (s.blk && headOf(s.blk) === d.id);
       for (const s of r.steps) if (inside(s)) setParent(s, out);
       if (r.cur && (r.cur.after === d.id || headOf(r.cur.par) === d.id)) { const i = r.steps.indexOf(d); const prev = r.steps.slice(0, i).reverse().find((x) => pk(x) === out); r.cur = { after: prev ? prev.id : headOf(out), par: out }; }
       r.steps = r.steps.filter((s) => s !== d);
@@ -1178,7 +1216,7 @@ function pageRecorder() {
     return rows;
   }
   function startPick() {
-    if (ui) ui.side.classList.add('mini'); // bảng 2 ô mờ + không chặn chuột khi đang chọn element
+    if (ui) { ui.side.classList.add('mini'); ui.lib.classList.add('mini'); } // cửa sổ khối / kho mờ + không chặn chuột khi đang chọn element
     pick = { live: true, rows: [], sel: 0, moved: false, t0: Date.now() };
     updatePick();
   }
@@ -1220,7 +1258,7 @@ function pageRecorder() {
       if (pick && pick.rows[pick.sel] === r) { if (!pick.altTouched) pick.altObj = r.alts[0]; drawAltSelect(); }
     });
   }
-  function closePick() { pick = null; xMark(null); if (ui) { ui.pick.hidden = true; ui.side.classList.remove('mini'); } boxEl(null); }
+  function closePick() { pick = null; xMark(null); if (ui) { ui.pick.hidden = true; ui.side.classList.remove('mini'); ui.lib.classList.remove('mini'); } boxEl(null); }
   const altLabel = (a) => `${a.count == null ? (a.unique ? '' : '⚠ ') : a.unique ? '✓1 ' : `⚠${a.count} `}${isLang(a.code) ? '🌐 ' : ''}${a.kind}: ${a.code}${a.note && a.count == null ? ' (' + a.note + ')' : ''}`; // 🌐 = dựa vào chữ, đổi theo ngôn ngữ
   function drawAltSelect() {
     const r = pick.rows[pick.sel], s = ui.pick.querySelector('[data-f=palt]');
@@ -1457,7 +1495,7 @@ function pageRecorder() {
     .codev{font-family:Consolas,monospace;font-size:12px;line-height:1.55;color:#d4d4d4}
     .ln{display:flex;gap:8px;align-items:flex-start;padding:1px 4px;border-radius:4px;cursor:pointer;white-space:pre-wrap;word-break:break-all}.ln:hover{background:#1a1d27}.ln.on{background:#e8a33d26}
     .ln .no{color:#5a6070;min-width:22px;text-align:right;user-select:none;flex:none}.ln code{flex:1;font-family:inherit}.ln.dim code{opacity:.4}.ln.bad{background:#ef444426;outline:1px solid #ef4444}
-    .ln .lt{display:none;gap:2px;flex:none}.ln:hover .lt{display:flex}.ln .lt button{padding:0 5px;font-size:11px}.ln.lang .no::after{content:'🌐';font-size:9px;margin-left:2px}
+    .ln{position:relative}.ln .lt{display:none;gap:2px;position:absolute;right:2px;top:0;background:#1a1d27;border-radius:4px}.ln:hover .lt{display:flex}.ln .lt button{padding:0 5px;font-size:11px}.ln.lang .no::after{content:'🌐';font-size:9px;margin-left:2px}
     .codev i{font-style:normal}.codev .k{color:#c586c0}.codev .s{color:#ce9178}.codev .c{color:#6a9955}.codev .n{color:#b5cea8}
     .ghost{margin:1px 0 3px 30px;font-size:11px;color:#7ee2a8;display:flex;gap:6px;align-items:center;flex-wrap:wrap}.ghost button{font-size:11px;padding:1px 6px;border-color:#3fb95066;color:#7ee2a8}.ghost.err{color:#fca5a5}
     .edp{position:absolute;bottom:56px;right:min(652px,calc(100vw - 452px));width:420px;max-width:calc(100vw - 32px);max-height:72vh;overflow:auto;background:#12141c;color:#e8e9ed;border:1px solid #e8a33d;border-radius:12px;box-shadow:0 10px 40px #000a;padding:8px}
@@ -1490,6 +1528,13 @@ function pageRecorder() {
     .xa:hover,.xg:hover,.xs:hover,.xj:hover{background:#1a1d27;outline:1px solid #e8a33d88}.xa.on,.xg.on{background:#e8a33d40;color:#f5b455}.xa.weak{opacity:.45}.xa.weak.on{opacity:1}
     .xs{color:#c586c0;cursor:pointer;margin-right:4px;padding:0 2px;border-radius:3px}.xs.on{color:#f5b455}.xj{color:#c586c0;cursor:pointer;border:1px solid #c586c066;border-radius:4px;padding:0 4px}
     .xr{display:flex;gap:6px;align-items:center;margin-top:4px;font-family:Consolas,monospace;font-size:11px;color:#9cdcfe;word-break:break-all}.xr code{flex:1}.xc{color:#7ee2a8;white-space:nowrap}.xw{color:#fbbf24;font-size:11px;margin-top:2px}
+    .libw{position:fixed;left:0;top:0;bottom:0;width:min(32vw,460px);min-width:300px;display:flex;flex-direction:column;gap:6px;padding:10px;background:#12141c;color:#e8e9ed;border-right:2px solid #e8a33d;box-shadow:10px 0 40px #000a;overflow:hidden}
+    .libw[hidden]{display:none}.libw.mini{opacity:.12;pointer-events:none}.lh{display:flex;gap:6px;align-items:center}.lh b{color:#f5b455;font-size:14px}.libw input,.libw button{font-size:13px}.elr.on{border-color:#e8a33d;background:#e8a33d22}
+    .crumb{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:13px}.crumb a{cursor:pointer;color:#9ca3af;padding:1px 4px;border-radius:4px}.crumb a:hover{background:#1a1d27;color:#e8e9ed}.crumb a.on{color:#6ee7b7;font-weight:600}.crumb i{opacity:.5;font-style:normal}
+    .scode{flex:1;min-height:0;overflow:auto;border:1px solid #2a2e3a;border-radius:10px;background:#0d0f15;padding:6px;font-family:Consolas,monospace;font-size:12px;line-height:1.6}
+    .sl{position:relative;display:flex;gap:6px;align-items:flex-start;padding:0 4px;border-radius:4px;cursor:pointer}.scode *{font-family:Consolas,monospace}.sl>code{flex:1;white-space:pre-wrap;word-break:break-all}.sl:hover{background:#1a1d27}.sl.in{background:#34d39912}
+    .sl.op>code{text-decoration:underline dotted #6ee7b788}.sl.dim>code{opacity:.45}.sl.cur{color:#7ee2a8;outline:1px dashed #3fb950;cursor:default}.sl .lt{display:none;gap:2px;position:absolute;right:2px;top:0;background:#1a1d27;border-radius:4px}.sl:hover .lt{display:flex}.sl .lt button{padding:0 5px;font-size:11px}
+    .scode i{font-style:normal}.scode .k{color:#c586c0}.scode .s{color:#ce9178}.scode .c{color:#6a9955}.scode .n{color:#b5cea8}
     .toast{position:absolute;right:0;bottom:56px;background:#1a1d27;color:#e8e9ed;border:1px solid #e8a33d;border-radius:8px;padding:6px 10px;white-space:nowrap;box-shadow:0 4px 16px #0006}`;
 
   function mount() {
@@ -1499,9 +1544,9 @@ function pageRecorder() {
     host.style.cssText = 'all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647';
     window.__pmRecUI = host;
     root = host.attachShadow({ mode: 'closed' });
-    setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="edp" hidden></div><div class="side" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
+    setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="edp" hidden></div><div class="side" hidden></div><div class="libw" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
       <div class="pill" title="Bấm: ghi / tạm dừng / ghi tiếp (cùng 1 đoạn). ⏹: xuất code cả đoạn. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="caseEnd" title="Xong trường hợp đang ghi -- bước sau ra ngoài khối" hidden>✓ Xong TH</button><button data-op="export" title="Kết thúc đoạn + xuất code (editor + clipboard)" hidden>⏹ Xuất</button><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
-    ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast'), side: root.querySelector('.side'), edp: root.querySelector('.edp') };
+    ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast'), side: root.querySelector('.side'), edp: root.querySelector('.edp'), lib: root.querySelector('.libw') };
     document.documentElement.appendChild(host);
     for (const t of ['input', 'change']) root.addEventListener(t, (e) => uiEvent(e, e.composedPath()[0]));
     for (const t of ['input', 'change']) host.addEventListener(t, (e) => e.stopPropagation()); // trang web không nhận sự kiện của panel
@@ -1539,7 +1584,7 @@ function pageRecorder() {
       if (!inPick && el.dataset.f === 'fq') { fq = el.value; fqi = 0; drawCallList(); }
       if (sp && el.dataset.f === 'stext') sp.text = el.value;
       if (sp && el.dataset.f === 'sel') { sp.sel = el.value; sp.cnt = null; const e = (st.els || []).find((x) => x.id === sp.elId); if (!e || e.code !== el.value) sp.elId = null; const x = ui.side.querySelector('.ef .xc'); if (x) x.textContent = selCount(); countSel(); }
-      if (sp && el.dataset.f === 'sq') { sp.q = el.value; setHTML(ui.side.querySelector('.els'), elsHTML(st)); }
+      if (el.dataset.f === 'lq') { libQ = el.value; setHTML(ui.lib.querySelector('.els'), libRows(st)); }
     }
     else if (t === 'click' || t === 'change') (inPick ? (pick && onPick(e, el)) : onPanel(e, el));
   }
@@ -1714,7 +1759,7 @@ function pageRecorder() {
   const condText = (c) => (!c.levels ? '<i>chưa chọn điều kiện -- ↵ rồi "◆ Làm điều kiện if"</i>' : `${c.textEq ? `chữ ${c.neg ? 'khác' : 'là'} "${esc(c.textEq)}" ·` : c.neg ? 'KHÔNG hiện' : 'hiện'} <b>${esc(elName(c))}</b>${(c.extra || []).length ? ` VÀ ${c.extra.length} điều kiện` : ''}`);
   function blocksView(s) {
     const byId = new Map(s.steps.map((x) => [x.id, x])), acts = s.actions || {};
-    const up = (x) => byId.get(x.cs || x.loop || x.elsOf || x.br || (x.blk ? +x.blk.slice(1).split(':')[0] : 0));
+    const up = (x) => byId.get(x.cs || x.loop || x.elsOf || x.xOf || x.br || (x.blk ? +x.blk.slice(1).split(':')[0] : 0));
     const topLoop = (x) => { let t = null; for (let y = x, d = 0; y && d < 50; y = up(y), d++) if (y.action === 'loop') t = y; return t; };
     const loopBlock = (L) => {
       const idx = s.steps.indexOf(L), kids = s.steps.filter((x) => x.loop === L.id), els = s.steps.filter((x) => x.elsOf === L.id), miss = L.miss == null || L.miss === '' ? 20 : +L.miss;
@@ -1732,47 +1777,106 @@ function pageRecorder() {
     }
     return html + '<button data-op="blockWhile" class="bnew" title="While mới: 1 if + else -- ↵ vào if để chọn điều kiện và thêm thao tác">＋ While (dạng khối)</button>';
   }
-  const elsHTML = (s) => { const q = foldVi(sp.q || '').trim(), els = (s.els || []).filter((e) => !q || foldVi(`${e.name} ${e.code}`).includes(q));
-    return els.length ? els.map((e) => `<div class="elr" data-el="${e.id}"${e.css ? ` data-css="${esc(e.css)}"` : ''} ${sp.elId === e.id ? ' style="border-color:#e8a33d;background:#e8a33d22"' : ''} title="Bấm: điền vào ô Element"><b>${esc(e.name)}</b><code>${esc(e.code)}</code><span class="lv">${e.lang ? '🌐 ' : ''}${e.uses} bước</span></div>`).join('')
-      : `<div class="fnh">${(s.els || []).length ? 'Không có element nào khớp' : 'Chưa có element -- thao tác trên trang (click, gõ...) hoặc bấm 🎯 Element mới'}</div>`; };
+  // ---------------- cửa sổ KHỐI (phải): đường dẫn khối + thao tác + ô Element + chèn khối (if / else if / else / While lồng / hàm có { })
+  // + CODE của cả khối ngoài cùng (bấm dòng if / else / While / hàm = đi vào khối đó, bấm dòng bước = chèn sau bước đó, ▸ = chỗ bước mới vào).
+  // sp.key: khối đang sửa -- 'C<id>' if, 'X<id>' else của if, 'L<id>' While, 'E<id>' else của While, 'F<id>:<k>' lỗ { } thứ k của hàm.
+  const BK = /^([CELX]\d+|F\d+:\d+)$/, headId = (k) => +String(k).slice(1).split(':')[0];
+  const keyOfStep = (x) => x.blk || (x.cs ? 'C' + x.cs : x.xOf ? 'X' + x.xOf : x.loop ? 'L' + x.loop : x.elsOf ? 'E' + x.elsOf : x.br ? 'B' + x.br : '');
+  function keyLabel(s, k) {
+    const h = s.steps.find((x) => x.id === headId(k)), nm = h && h.action === 'case' ? (h.levels ? elName(h) : 'chưa điều kiện') : '';
+    if (!h) return k;
+    return { C: `if ${nm}`, X: `else (if ${nm})`, L: `While ${h.id}`, E: `else (While ${h.id})`, F: `ƒ ${h.name}${h.holes > 1 ? ` {${+k.split(':')[1] + 1}}` : ''}` }[k[0]] || k;
+  }
+  function crumbs(s, k) { // khối ngoài cùng -> khối đang sửa
+    const out = [];
+    for (let d = 0; BK.test(k || '') && d < 30; d++) { out.unshift(k); const h = s.steps.find((x) => x.id === headId(k)); k = h ? keyOfStep(h) : ''; }
+    return out;
+  }
+  function codeHTML(s) { // code của khối ngoài cùng chứa khối đang sửa; dòng thuộc khối đang sửa tô xanh
+    const cr = crumbs(s, sp.key), byId = new Map(s.steps.map((x) => [x.id, x])), root = byId.get(headId(cr[0])), cur = byId.get(headId(sp.key));
+    const up = (x) => byId.get(x.cs || x.loop || x.elsOf || x.xOf || x.br || (x.blk ? headId(x.blk) : 0));
+    const under = (id, h) => { for (let x = byId.get(id), d = 0; x && d < 50; x = up(x), d++) if (x === h) return true; return false; };
+    return s.lines.map((ln, k) => {
+      if (!root || !under(ln.id, root)) return '';
+      if (ln.cursor) return `<div class="sl cur"><code>${esc(ln.t)}</code></div>`;
+      const first = s.lines.findIndex((l) => l.id === ln.id && !l.cursor) === k, x = byId.get(ln.id);
+      const tools = first && x && x !== root ? `<span class="lt"><button data-op="sup" data-id="${x.id}" title="Lên">↑</button><button data-op="sdown" data-id="${x.id}" title="Xuống">↓</button><button data-op="sdel" data-id="${x.id}" title="Xoá${x.action === 'case' || x.action === 'loop' ? ' (các bước bên trong ra ngoài)' : ''}">✕</button></span>` : '';
+      return `<div class="sl${ln.open || ln.hole ? ' op' : ''}${cur && under(ln.id, cur) ? ' in' : ''}${ln.dim ? ' dim' : ''}" data-k="${k}" title="${ln.open || ln.hole ? 'Bấm: vào khối này' : 'Bấm: bước mới chèn SAU dòng này'}"><code>${hlJs(ln.t)}</code>${tools}</div>`;
+    }).join('');
+  }
   function sideHTML(s) {
-    const id = +sp.key.slice(1), isCase = sp.key[0] === 'C', h = s.steps.find((x) => x.id === id);
+    const k = sp.key, t = k[0], h = s.steps.find((x) => x.id === headId(k));
     if (!h) return '';
-    const kids = s.steps.filter((x) => (isCase ? x.cs === id : x.elsOf === id)), acts = isCase ? [['cond', '◆ Làm điều kiện if'], ...SP_ACTS] : SP_ACTS, arm = st.armed && st.armed.lib;
-    return `<div class="sh"><b>${isCase ? `◆ if #${id}` : `else của While ${id}`}</b><span class="lv">${isCase ? 'bấm thao tác, rồi bấm element bên dưới' : 'không khớp if nào thì làm các bước này'}</span><span class="grow"></span><button data-op="spClose" class="pri" title="Xong (Esc)">Xong ✕</button></div>
-      ${isCase ? `<div class="cbar" data-id="${id}"><span class="lv">Điều kiện:</span><span class="grow">${condText(h)}</span><select data-f="neg"><option value="0">đang hiện</option><option value="1" ${h.neg ? 'selected' : ''}>KHÔNG hiện</option></select><select data-f="end"><option value="continue" ${h.end === 'continue' ? 'selected' : ''}>→ quét lại</option><option value="break" ${h.end === 'break' ? 'selected' : ''}>→ thoát While</option><option value="none" ${!h.end || h.end === 'none' ? 'selected' : ''}>→ đi tiếp</option></select></div>` : ''}
-      <div class="sk"><div class="bt">Các bước trong ${isCase ? 'if' : 'else'} (${kids.length})</div>${kids.length ? kids.map((k) => kidRow(k, s.actions || {})).join('') : '<div class="fnh">Chưa có bước -- bấm thao tác rồi bấm element, hoặc thao tác thẳng trên trang</div>'}</div>
-      <div class="box"><div class="bt">Thao tác</div><div class="acts2">${acts.map(([a, n]) => `<button data-sact="${a}" class="${sp.act === a ? 'on' : ''}">${n}</button>`).join('')}</div>
-        ${sp.act === 'pause' ? '' : `<div class="r ef"><span class="lv">${sp.act === 'cond' ? 'Điều kiện' : 'Element'}</span><input class="grow" data-f="sel" value="${esc(sp.sel)}" placeholder="bấm 1 dòng trong kho bên dưới, giữ Alt chọn trên trang, hoặc gõ: #id · .class · //xpath · page.getBy..." autocomplete="off" spellcheck="false"><span class="xc" title="Số chỗ khớp trên trang này">${selCount()}</span></div>`}
+    const isCase = t === 'C', inLoop = t === 'L', cr = crumbs(s, k), prev = s.cur && s.cur.par === k && s.steps.find((x) => x.id === s.cur.after && x.action === 'case' && keyOfStep(x) === k);
+    const acts = isCase ? [['cond', '◆ Làm điều kiện if'], ...SP_ACTS] : SP_ACTS, libOff = (s.libMode || 'auto') === 'off';
+    const fns = (s.callFns || []).filter((f) => f.fn !== 'pause');
+    return `<div class="sh"><span class="crumb">${cr.map((c, i) => `${i ? '<i>›</i>' : ''}<a data-key="${c}" class="${c === k ? 'on' : ''}">${esc(keyLabel(s, c))}</a>`).join('')}</span><span class="grow"></span>${cr.length > 1 ? `<button data-op="sup1" title="Ra khối ngoài 1 cấp">↰</button>` : ''}${libOff ? '<button data-op="lshow" title="Mở lại cửa sổ kho element">📦</button>' : ''}<button data-op="spClose" class="pri" title="Xong (Esc)">Xong ✕</button></div>
+      ${isCase ? `<div class="cbar" data-id="${h.id}"><span class="lv">Điều kiện:</span><span class="grow">${condText(h)}</span><select data-f="neg"><option value="0">đang hiện</option><option value="1" ${h.neg ? 'selected' : ''}>KHÔNG hiện</option></select><select data-f="end"><option value="continue" ${h.end === 'continue' ? 'selected' : ''}>→ quét lại While</option><option value="break" ${h.end === 'break' ? 'selected' : ''}>→ thoát While</option><option value="none" ${!h.end || h.end === 'none' ? 'selected' : ''}>→ đi tiếp</option></select></div>` : ''}
+      ${inLoop ? '<div class="fnh">While: mỗi nhánh là 1 if -- bấm ◆ if để thêm nhánh, hoặc bấm dòng if trong code để vào nhánh đó</div>' : `<div class="box"><div class="bt">Thao tác</div><div class="acts2">${acts.map(([a, n]) => `<button data-sact="${a}" class="${sp.act === a ? 'on' : ''}">${n}</button>`).join('')}</div>
+        ${sp.act === 'pause' ? '' : `<div class="r ef"><span class="lv">${sp.act === 'cond' ? 'Điều kiện' : 'Element'}</span><input class="grow" data-f="sel" value="${esc(sp.sel)}" placeholder="bấm 1 dòng trong kho (trái), giữ Alt chọn trên trang, hoặc gõ: #id · .class · //xpath · page.getBy..." autocomplete="off" spellcheck="false"><span class="xc" title="Số chỗ khớp trên trang này">${selCount()}</span></div>`}
         ${sp.act === 'type' ? `<div class="r"><span class="lv">Chữ</span><input class="grow" data-f="stext" value="${esc(sp.text)}" placeholder="Chữ cần gõ (= để dùng biểu thức JS, VD: = row.D)"><label class="lv"><input type="checkbox" data-f="senter" ${sp.enter ? 'checked' : ''}> Enter</label></div>${srcSelect('ssrc')}` : ''}
-        <div class="r"><button data-op="sadd" class="pri grow" title="Enter">${sp.act === 'cond' ? '◆ Đặt làm điều kiện if' : '＋ Thêm bước'}</button></div></div>
-      <div class="box big"><div class="bt">Element đã add (${(s.els || []).length})<input data-f="sq" class="grow" value="${esc(sp.q)}" placeholder="tìm element..." autocomplete="off"><button data-op="libNew" class="${arm ? 'pri' : ''}" title="Giữ Alt chọn element trên trang -> vào kho">${arm ? '⏳ giữ Alt chọn… (bấm để huỷ)' : '🎯 Element mới'}</button></div><div class="els">${elsHTML(s)}</div></div>`;
+        <div class="r"><button data-op="sadd" class="pri grow" title="Enter">${sp.act === 'cond' ? '◆ Đặt làm điều kiện if' : '＋ Thêm bước'}</button></div></div>`}
+      <div class="box"><div class="bt">Chèn khối tại ▸</div><div class="acts2"><button data-blk="if" title="if (element hiện) { ... } -- rồi đi vào trong">◆ if</button>${prev && !inLoop ? (s.steps.some((x) => x.xOf === prev.id) ? '<button data-blk="else" title="Vào khối else đã có của if ngay trước ▸">↳ vào else</button>' : '<button data-blk="elif" title="} else if (...) { -- nối vào if ngay trước ▸">↳ else if</button><button data-blk="else" title="} else { -- của if ngay trước ▸">↳ else</button>') : ''}<button data-blk="while" title="While lồng: 1 if + else, vào luôn if đầu">⟳ While lồng</button>
+        <select data-f="sfn" title="Chèn 1 hàm tại ▸ -- hàm có { } thì đi vào khối của nó; ô Element đang có element thì điền vào hàm"><option value="">ƒ Hàm / khối khác…</option>${fns.map((f) => `<option value="${esc(f.fn)}">${f.blk ? '{ } ' : ''}${esc(f.name)}</option>`).join('')}</select></div></div>
+      <div class="scode">${codeHTML(s)}</div>`;
   }
   function drawSide(s, force) {
     if (!ui) return;
+    if (sp && s.cur && BK.test(s.cur.par || '') && s.cur.par !== sp.key) { sp.key = s.cur.par; force = true; } // con trỏ chèn đổi khối (bấm code, chèn khối, thao tác trên trang) -> cửa sổ theo khối đó
     ui.side.hidden = !sp; ui.panel.hidden = !open || !!sp;
+    drawLib(s);
     if (!sp) { lastSide = ''; return; }
     const a = ui.root.activeElement;
     if (!force && (held || (a && ui.side.contains(a) && ['INPUT', 'SELECT'].includes(a.tagName) && a.type !== 'checkbox'))) return; // đang gõ / đang nhấn chuột -- không vẽ lại
     const html = sideHTML(s);
-    if (!html) { sp = null; ui.side.hidden = true; ui.panel.hidden = !open; return; } // if / While vừa bị xoá
+    if (!html) { sp = null; ui.side.hidden = true; ui.panel.hidden = !open; drawLib(s); return; } // khối vừa bị xoá
     if (html === lastSide && !force) return;
     lastSide = html;
-    const sc = ui.side.querySelector('.els'), top = sc ? sc.scrollTop : 0;
+    const sc = ui.side.querySelector('.scode'), top = sc ? sc.scrollTop : null;
     setHTML(ui.side, html);
-    const sc2 = ui.side.querySelector('.els'); if (sc2) sc2.scrollTop = top;
+    const sc2 = ui.side.querySelector('.scode'), c = sc2 && sc2.querySelector('.sl.cur');
+    if (sc2) { if (top != null && !force) sc2.scrollTop = top; else if (c) c.scrollIntoView({ block: 'center' }); }
   }
-  function openSide(key) { // ↵: con trỏ vào cuối if / else (thao tác trên trang cũng vào đó), mở bảng 2 ô
-    const h = st && st.steps.find((x) => x.id === +key.slice(1));
-    sp = { key, act: key[0] === 'C' && h && !h.levels ? 'cond' : 'click', text: '', enter: false, q: '', sel: '', elId: null, cnt: null };
-    call({ op: 'enter', key }).then((s) => { render(s); drawSide(s, true); toast(key[0] === 'C' ? (sp && sp.act === 'cond' ? '◆ Chọn element làm điều kiện cho if này' : '◆ Bấm thao tác rồi bấm element -- thêm vào if') : 'Thêm bước vào else'); });
+  // ---------------- cửa sổ KHO ELEMENT (trái): tự động = chỉ hiện khi đang sửa khối, 📌 ghim = luôn hiện, « thu gọn = tắt (📦 ở cửa sổ khối để mở lại)
+  let libQ = '', lastLib = '';
+  const libRows = (s) => { const q = foldVi(libQ).trim(), all = s.els || [], els = all.filter((e) => !q || foldVi(`${e.name} ${e.code}`).includes(q));
+    return els.length ? els.map((e) => `<div class="elr${sp && sp.elId === e.id ? ' on' : ''}" data-el="${e.id}"${e.css ? ` data-css="${esc(e.css)}"` : ''} title="${sp ? 'Bấm: điền vào ô Element' : 'Bấm: chép selector'}"><b>${esc(e.name)}</b><code>${esc(e.code)}</code><span class="lv">${e.lang ? '🌐 ' : ''}${e.uses} bước</span></div>`).join('')
+      : `<div class="fnh">${all.length ? 'Không có element nào khớp' : 'Chưa có element -- thao tác trên trang (click, gõ...) hoặc giữ Alt chọn element'}</div>`; };
+  function drawLib(s) {
+    if (!ui) return;
+    const mode = s.libMode || 'auto', show = mode === 'pin' || (mode === 'auto' && !!sp);
+    ui.lib.hidden = !show;
+    if (!show) { lastLib = ''; return; }
+    const a = ui.root.activeElement;
+    if (held || (a && ui.lib.contains(a) && a.tagName === 'INPUT')) return;
+    const arm = s.armed && s.armed.lib, html = `<div class="lh"><b>📦 Kho element (${(s.els || []).length})</b><span class="grow"></span><button data-op="lpin" class="${mode === 'pin' ? 'pri' : ''}" title="${mode === 'pin' ? 'Bỏ ghim (chỉ hiện khi sửa khối)' : 'Ghim: luôn hiện, kể cả khi không sửa khối'}">📌</button><button data-op="loff" title="Thu gọn: tắt cửa sổ kho (mở lại bằng 📦 ở cửa sổ khối)">«</button></div>
+      <div class="r"><input data-f="lq" class="grow" value="${esc(libQ)}" placeholder="tìm element..." autocomplete="off"><button data-op="libNew" class="${arm ? 'pri' : ''}" title="Chờ chọn element: giữ Alt rê lên trang, nhả Alt, Enter">${arm ? '⏳ giữ Alt…' : '🎯'}</button></div>
+      <div class="fnh">${sp ? 'Bấm 1 dòng: điền vào ô Element ở cửa sổ khối' : 'Bấm 1 dòng: chép selector'} · giữ Alt trên trang để thêm element</div><div class="els">${libRows(s)}</div>`;
+    if (html === lastLib) return;
+    lastLib = html;
+    const sc = ui.lib.querySelector('.els'), top = sc ? sc.scrollTop : 0;
+    setHTML(ui.lib, html);
+    const sc2 = ui.lib.querySelector('.els'); if (sc2) sc2.scrollTop = top;
   }
-  function closeSide() { // Xong: if -> như ✓ Xong TH (con trỏ ra sau if + gợi ý Chờ hiện); else -> con trỏ ra sau While
+  function onLib(e, el) {
+    if (e.type !== 'click') return;
+    const b = el.closest('button'), row = el.closest('.elr');
+    if (b && (b.dataset.op === 'lpin' || b.dataset.op === 'loff')) { const mode = b.dataset.op === 'loff' ? 'off' : (st.libMode || 'auto') === 'pin' ? 'auto' : 'pin'; call({ op: 'libMode', mode }).then((s) => { render(s); toast({ pin: '📌 Đã ghim kho element', auto: 'Kho element: chỉ hiện khi sửa khối', off: 'Đã thu gọn kho element -- mở lại bằng 📦 ở cửa sổ khối' }[mode]); }); return; }
+    if (b && b.dataset.op === 'libNew') { const on = st.armed && st.armed.lib; call({ op: 'arm', lib: !on }).then((s) => { render(s); toast(on ? 'Đã huỷ chờ chọn element' : '🎯 Giữ Alt + rê chuột lên element, nhả Alt rồi Enter (✓ Thêm vào kho)'); }); return; }
+    if (!row) return;
+    const x = (st.els || []).find((y) => y.id === +row.dataset.el);
+    if (sp) pickEl(+row.dataset.el); else if (x) { copyText(x.code); toast('Đã chép: ' + x.code); }
+  }
+  function openSide(key) { // vào 1 khối: con trỏ chèn ở cuối khối (thao tác trên trang cũng vào đó), mở cửa sổ khối + kho
+    const h = st && st.steps.find((x) => x.id === headId(key));
+    sp = { key, act: key[0] === 'C' && h && !h.levels ? 'cond' : 'click', text: '', enter: false, sel: '', elId: null, cnt: null };
+    call({ op: 'enter', key }).then((s) => { render(s); drawSide(s, true); toast(key[0] === 'C' ? (sp && sp.act === 'cond' ? '◆ Chọn element làm điều kiện cho if này' : '◆ Chọn thao tác + element để thêm bước') : `Đang sửa: ${keyLabel(s, key)}`); });
+  }
+  function closeSide() { // Xong: if -> như ✓ Xong TH (con trỏ ra sau if + gợi ý Chờ hiện); khối khác -> con trỏ ra sau khối
     const k = sp && sp.key; sp = null; drawSide(st);
     if (!k) return;
-    if (k[0] === 'C') caseEnd(); else call({ op: 'cursor', stepId: +k.slice(1) }).then(render);
+    if (k[0] === 'C') caseEnd(); else call({ op: 'cursor', stepId: headId(k) }).then(render);
   }
-  // Ô Element: chọn từ kho (sp.elId) hoặc gõ tay -- #id / .class / css -> page.locator('...'), //xpath -> page.locator('xpath=...'), page.getBy... giữ nguyên
   const normSel = (t) => { t = String(t || '').trim(); return !t ? '' : /^page\./.test(t) ? t : /^\(?\/\//.test(t) ? `page.locator(${sq('xpath=' + t)})` : `page.locator(${sq(t)})`; };
   let selTimer = 0;
   const selCount = () => (!sp || !sp.sel ? '' : sp.cnt == null ? '…' : sp.cnt === false ? '✗ không đọc được' : sp.cnt.all === 1 ? '✓1' : `⚠${sp.cnt.all}${sp.cnt.vis !== sp.cnt.all ? ` (hiện ${sp.cnt.vis})` : ''}`);
@@ -1789,7 +1893,7 @@ function pageRecorder() {
   function pickEl(elId) { // bấm 1 dòng trong kho: điền vào ô Element
     const e = (st.els || []).find((x) => x.id === elId);
     if (!sp || !e) return;
-    sp.elId = e.id; sp.sel = e.code; sp.cnt = null; drawSide(st, true); countSel();
+    sp.elId = e.id; sp.sel = e.code; sp.cnt = null; lastLib = ''; drawSide(st, true); countSel();
   }
   function sideAdd() { // ＋ Thêm bước / ◆ Đặt làm điều kiện: thao tác đang chọn + element trong ô (gõ tay thì thêm vào kho trước)
     if (!sp) return;
@@ -1812,24 +1916,48 @@ function pageRecorder() {
     const f = el.dataset && el.dataset.f;
     if (!sp) return;
     if (e.type === 'change') {
-      if (f === 'neg' || f === 'end') upd(+sp.key.slice(1), f === 'neg' ? { neg: el.value === '1' } : { end: el.value });
+      if (f === 'neg' || f === 'end') upd(headId(sp.key), f === 'neg' ? { neg: el.value === '1' } : { end: el.value });
       else if (f === 'senter') sp.enter = el.checked;
       else if (f === 'stext') sp.text = el.value;
       else if (f === 'ssrc' && el.value) { sp.text = '= ' + el.value; drawSide(st, true); }
+      else if (f === 'sfn' && el.value) { // chèn hàm tại ▸ (hàm có { } -> con trỏ vào khối của nó, drawSide tự theo)
+        const fn = el.value, x = (st.callFns || []).find((y) => y.fn === fn);
+        el.blur();
+        call({ op: 'fnAdd', fn, elId: sp.elId || undefined }).then((s) => { render(s); drawSide(s, true); toast(`+ ${x ? x.name : fn}${x && x.blk ? ' -- đang ở trong khối của hàm' : ''}`); });
+      }
       return;
     }
     if (e.type !== 'click') return;
-    const b = el.closest('button'), row = el.closest('.elr'), bk = el.closest('.bk');
+    const b = el.closest('button'), crumb = el.closest('.crumb a'), line = el.closest('.sl');
+    if (crumb) return openSide(crumb.dataset.key);
     if (b && b.dataset.sact) {
       sp.act = b.dataset.sact; drawSide(st, true);
       const i = ui.side.querySelector(sp.act === 'type' && sp.sel ? '[data-f=stext]' : '[data-f=sel]'); if (i) i.focus(); // chọn thao tác -> con trỏ vào ô Element (Gõ có element rồi thì vào ô Chữ)
       return;
     }
+    if (b && b.dataset.blk) { // chèn khối tại ▸ rồi đi vào khối đó
+      call({ op: 'blockAdd', key: sp.key, kind: b.dataset.blk }).then((s) => {
+        if (s && s.entered && sp) { sp.key = s.entered; sp.act = s.entered[0] === 'C' ? 'cond' : 'click'; }
+        render(s); drawSide(s, true);
+        toast({ if: '◆ if mới -- chọn element làm điều kiện', elif: '↳ else if -- chọn element làm điều kiện', else: '↳ else -- thêm bước cho trường hợp còn lại', while: '⟳ While lồng -- chọn điều kiện cho if đầu tiên' }[b.dataset.blk]);
+      });
+      return;
+    }
     if (b && b.dataset.op === 'spClose') return closeSide();
-    if (b && b.dataset.op === 'libNew') { const on = st.armed && st.armed.lib; call({ op: 'arm', lib: !on }).then((s) => { render(s); drawSide(s, true); toast(on ? 'Đã huỷ chờ chọn element' : '🎯 Giữ Alt + rê chuột lên element, nhả Alt rồi bấm ✓ Thêm vào kho (Enter)'); }); return; }
-    if (b && b.dataset.op === 'del' && bk) { call({ op: 'delete', stepId: +bk.dataset.id }).then((s) => { render(s); drawSide(s, true); }); return; }
+    if (b && b.dataset.op === 'sup1') { const cr = crumbs(st, sp.key); return openSide(cr[cr.length - 2]); }
+    if (b && b.dataset.op === 'lshow') { call({ op: 'libMode', mode: 'auto' }).then(render); return; }
+    if (b && b.dataset.op === 'sdel') { call({ op: 'delete', stepId: +b.dataset.id }).then((s) => { render(s); drawSide(s, true); }); return; }
+    if (b && (b.dataset.op === 'sup' || b.dataset.op === 'sdown')) { call({ op: 'move', stepId: +b.dataset.id, dir: b.dataset.op === 'sup' ? -1 : 1 }).then((s) => { render(s); drawSide(s, true); }); return; }
     if (b && b.dataset.op === 'sadd') return sideAdd();
-    if (row) pickEl(+row.dataset.el);
+    if (line && !b) { // bấm dòng code: if / else / While / hàm -> vào khối đó; dòng bước -> chèn sau bước đó (trong khối chứa nó)
+      const ln = st.lines[+line.dataset.k];
+      if (!ln || ln.cursor) return;
+      if (ln.open || ln.hole) return openSide(ln.open || ln.hole);
+      call({ op: 'cursor', stepId: ln.id }).then((s) => {
+        if (s && s.cur && !BK.test(s.cur.par || '')) { toast('Dòng này nằm ngoài khối -- chọn dòng trong khối'); return; }
+        render(s); drawSide(s, true); toast('▸ Bước mới chèn sau dòng này');
+      });
+    }
   }
   function draw(s) {
     const segN = s.steps.filter((x) => x.id >= s.segFrom).length;
@@ -1900,6 +2028,7 @@ function pageRecorder() {
   const upd = (stepId, patch) => call({ op: 'update', stepId, patch }).then((s) => { render(s); const x = s && s.steps.find((y) => y.id === stepId); highlight(x && x.levels ? x.levels[x.level].css : null); });
   function onPanel(e, el) {
     if (el.closest('.side')) return onSide(e, el);
+    if (el.closest('.libw')) return onLib(e, el);
     if (el.closest('.pill')) {
       if (e.type !== 'click' || (drag && drag.moved)) return;
       if (el.closest('[data-op=menu]')) { if (sp) closeSide(); open = !open; ui.panel.hidden = !open; ui.toast.hidden = true; if (!open) highlight(null); refresh(); }

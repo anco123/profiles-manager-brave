@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "check-chrome": "node update-chrome-portable.js",
-    "test:recorder": "node test/recorder.test.js && node test/recorder.blocks.test.js"
+    "test:recorder": "node test/recorder.test.js && node test/recorder.blocks.test.js && node test/recorder.nested.test.js"
   },
   "license": "MIT",
   "dependencies": {

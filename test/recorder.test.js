@@ -44,7 +44,9 @@ async function altAdd(loc) {
 // Bảng ☰ sang dạng 'Khối' / 'Code' (bấm ▦ Khối / { } Code, bấm lại nếu lần bấm chưa ăn)
 async function setView(name) { for (let i = 0; i < 3 && (await page.locator('.hd b').first().innerText()) !== name; i++) { await uiClick(page.locator('.hd [data-op=vblocks]')); await page.waitForTimeout(300); } assert.strictEqual(await page.locator('.hd b').first().innerText(), name); }
 // Bảng 2 ô: chọn element bằng Alt rồi ◆ Đặt làm điều kiện if
-async function condBy(loc) { await altAdd(loc); await uiClick(page.locator('.side [data-op=sadd]')); }
+async function condBy(loc) { await libOff(); await altAdd(loc); await uiClick(page.locator('.side [data-op=sadd]')); }
+// Cửa sổ kho element (trái) che nút sát mép trái của trang thử -> thu gọn (« = tắt) trước khi thao tác trên trang
+async function libOff() { if (await page.locator('.libw').isVisible()) await uiClick(page.locator('.libw [data-op=loff]')); }
 const ok = (name) => { done++; console.log('  ✓ ' + name); };
 
 async function testGuardUnit() { // whileGuard: vòng khớp trường hợp thì đếm lại; miss vòng LIỀN không khớp = màn hình lạ
