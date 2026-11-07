@@ -79,6 +79,24 @@
 
 </div>
 
+<!-- Bảng 🧬 các tầng fingerprint của 1 profile -->
+<aside class="panel" id="fpPanel" hidden aria-hidden="true">
+  <div class="panel-head">
+    <h2 id="fpPanelTitle">Các tầng fingerprint</h2>
+    <button class="icon-btn" id="closeFpPanelBtn" aria-label="Close">&times;</button>
+  </div>
+  <div class="panel-body">
+    <p class="field-note" id="fpPanelInfo"></p>
+    <div id="fpLayerList" class="fp-layer-list"></div>
+    <p class="field-note is-warning">Lưu xong: profile đang mở thì <strong>Close rồi Launch lại</strong> mới áp dụng. Dữ liệu fingerprint không đổi khi tắt / bật tầng.</p>
+    <div class="panel-actions">
+      <button class="btn btn-ghost" id="fpAllOnBtn" type="button">Bật hết</button>
+      <button class="btn btn-ghost" id="fpCheckBtn" type="button" title="Mở trang kiểm tra trong profile đang chạy">&#128269; Kiểm tra</button>
+      <button class="btn btn-primary" id="fpSaveBtn" type="button">Lưu</button>
+    </div>
+  </div>
+</aside>
+
 <!-- Slide-over panel for creating a profile -->
 <div class="overlay" id="overlay" hidden></div>
 <aside class="panel" id="createPanel" hidden aria-hidden="true">
@@ -487,7 +505,7 @@
       <div><dt>Timezone</dt><dd class="meta-timezone"></dd></div>
       <div><dt>Proxy</dt><dd class="meta-proxy"></dd></div>
       <div><dt>Engine</dt><dd class="meta-engine"></dd></div>
-      <div><dt>Fingerprint</dt><dd class="fp-cell"><button class="fp-toggle" hidden></button><span class="meta-fingerprint"></span></dd></div>
+      <div><dt>Fingerprint</dt><dd class="fp-cell"><button class="fp-toggle" hidden></button><button class="fp-layers" hidden title="Các tầng fingerprint: bật / tắt từng tầng, 🔍 kiểm tra">&#129516;</button><span class="meta-fingerprint"></span></dd></div>
     </dl>
     <div class="card-actions">
       <button class="btn btn-launch">Launch</button>
