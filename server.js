@@ -74,6 +74,7 @@ const PORT = process.env.PORT || 3000;
 // environment variables") -- .env is just a file-based way to set them
 // without exporting anything in your actual shell.
 const ENV_FILE = path.join(__dirname, '.env');
+const FROM_DOTENV = new Set(); // biến lấy từ .env (machines.json thắng được) -- biến đặt thẳng khi chạy lệnh (DATA_DIR=... npm start) thì không
 if (fs.existsSync(ENV_FILE)) {
   fs.readFileSync(ENV_FILE, 'utf-8').split('\n').forEach((line) => {
     const trimmed = line.trim();
@@ -82,7 +83,7 @@ if (fs.existsSync(ENV_FILE)) {
     if (eq === -1) return;
     const key = trimmed.slice(0, eq).trim();
     const value = trimmed.slice(eq + 1).trim().replace(/^(["'])(.*)\1$/, '$2'); // KEY="giá trị" (kiểu .env.example) -> bỏ dấu ngoặc
-    if (!(key in process.env)) process.env[key] = value;
+    if (!(key in process.env)) { process.env[key] = value; FROM_DOTENV.add(key); }
   });
 }
 
@@ -98,7 +99,7 @@ try {
   const mine = Object.entries(all || {}).find(([k]) => k.toLowerCase() === MACHINE.toLowerCase()) || (all && all['*'] ? ['*', all['*']] : null);
   if (mine && mine[1] && typeof mine[1] === 'object') {
     MACHINE_CONFIG = { ...mine[1], key: mine[0] };
-    for (const [k, v] of Object.entries(mine[1])) if (k !== 'key' && v != null && String(v).trim() !== '') process.env[k] = String(v).trim();
+    for (const [k, v] of Object.entries(mine[1])) if (k !== 'key' && v != null && String(v).trim() !== '' && (!(k in process.env) || FROM_DOTENV.has(k))) process.env[k] = String(v).trim();
   }
 } catch (err) { if (err.code !== 'ENOENT') console.warn(`machines.json lỗi, bỏ qua: ${err.message}`); }
 console.log(`Máy này: ${MACHINE}${!MACHINE_CONFIG ? ' (chưa có trong machines.json)' : MACHINE_CONFIG.key === '*' ? ' -- dùng mục mặc định "*" trong machines.json' : ' -- dùng cấu hình trong machines.json'}`);
@@ -167,7 +168,7 @@ function autoDetectDataDir() {
   return fs.existsSync(path.join(sibling, 'profiles.json')) ? sibling : path.join(__dirname, 'data');
 }
 const DATA_DIR = process.env.DATA_DIR || autoDetectDataDir();
-console.log(`Folder profile: ${DATA_DIR} (${MACHINE_CONFIG && MACHINE_CONFIG.DATA_DIR ? 'machines.json' : process.env.DATA_DIR ? '.env' : 'mặc định'})`);
+console.log(`Folder profile: ${DATA_DIR} (${MACHINE_CONFIG && MACHINE_CONFIG.DATA_DIR && process.env.DATA_DIR === path.resolve(__dirname, String(MACHINE_CONFIG.DATA_DIR).trim()) ? 'machines.json' : process.env.DATA_DIR ? (FROM_DOTENV.has('DATA_DIR') ? '.env' : 'biến môi trường lúc chạy') : 'mặc định'})`);
 const PROFILES_FILE = path.join(DATA_DIR, 'profiles.json');
 const PROFILES_ROOT = path.join(DATA_DIR, 'profiles'); // one sub-folder per profile = one persistent browser profile
 const SCRIPTS_DIR = path.join(__dirname, 'scripts'); // your own helper .js files live here
@@ -1290,6 +1291,16 @@ app.delete('/api/profiles/:id/fingerprint', (req, res) => {
   res.json({ success: true });
 });
 
+// Bật / tắt fingerprint (nút ở thẻ profile): chỉ đổi cờ fingerprintOff -- dữ liệu fingerprint KHÔNG bị xoá / tạo mới. Áp dụng từ lần Launch sau.
+app.post('/api/profiles/:id/fingerprint-toggle', (req, res) => {
+  const profiles = readProfiles(), profile = profiles.find((p) => p.id === req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  if (!profile.fingerprint) return res.status(400).json({ error: 'Profile này chưa có fingerprint -- bấm ↻ để tạo' });
+  profile.fingerprintOff = typeof req.body.on === 'boolean' ? !req.body.on : !profile.fingerprintOff;
+  writeProfiles(profiles);
+  res.json({ success: true, on: !profile.fingerprintOff, running: Boolean(runningContexts[profile.id]) });
+});
+
 
 // -------------------------------------------------------------------
 // A small "which profile is this?" badge pinned to the corner of every
@@ -1383,6 +1394,32 @@ function buildProfileTitleInitScript(name) {
 // right below) and the queue system (further down). Throws httpError
 // on failure; on success it populates runningContexts[id] itself.
 // -------------------------------------------------------------------
+// ---------------- Sao lưu / khôi phục phiên đăng nhập trong CHÍNH folder profile (<profile>\\session-backup.json, không mã hoá)
+// Chrome trên Windows khoá cookie bằng DPAPI của TÀI KHOẢN WINDOWS -> cài lại Win / chép profile sang máy khác là Chrome không đọc được cookie
+// cũ (bị out hết tài khoản) dù folder profile còn nguyên. Lúc profile đang mở, Playwright đọc được cookie đã giải mã -> ghi ra file thường cạnh
+// profile: mỗi lần tool đóng profile (mọi nút Close / queue / xoá cache... đều qua context.close) + định kỳ SESSION_EVERY_MS lúc đang mở.
+// Lần Launch sau: cookie nào Chrome không còn (hoặc còn mà rỗng -- không giải mã được) thì nạp lại từ file; cookie đang có thì giữ nguyên.
+const SESSION_FILE = 'session-backup.json', SESSION_EVERY_MS = 3 * 60 * 1000;
+async function backupSession(id, context) {
+  const cookies = await context.cookies();
+  if (!cookies.length) return 0; // không ghi đè bản sao lưu tốt bằng bản rỗng
+  const file = path.join(PROFILES_ROOT, id, SESSION_FILE), tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify({ savedAt: new Date().toISOString(), machine: MACHINE, count: cookies.length, cookies }));
+  fs.renameSync(tmp, file); // ghi file tạm rồi đổi tên -- tắt máy giữa chừng không làm hỏng bản cũ
+  return cookies.length;
+}
+async function restoreSession(id, context) {
+  let data;
+  try { data = JSON.parse(fs.readFileSync(path.join(PROFILES_ROOT, id, SESSION_FILE), 'utf-8')); } catch { return 0; }
+  const now = Date.now() / 1000, key = (c) => `${c.name}|${c.domain}|${c.path}`, have = new Map((await context.cookies()).map((c) => [key(c), c.value]));
+  const missing = (data.cookies || []).filter((c) => (!have.has(key(c)) || (have.get(key(c)) === '' && c.value !== '')) && !(c.expires > 0 && c.expires < now));
+  if (!missing.length) return 0;
+  let n = 0;
+  try { await context.addCookies(missing); n = missing.length; } catch { for (const c of missing) { try { await context.addCookies([c]); n++; } catch {} } } // 1 cookie lỗi không làm hỏng cả lượt
+  console.log(`[session] ${id}: khôi phục ${n} cookie từ ${SESSION_FILE} (sao lưu lúc ${data.savedAt}${data.machine ? ' trên ' + data.machine : ''})`);
+  return n;
+}
+
 async function launchProfileById(id) {
   if (runningContexts[id]) {
     throw httpError(400, 'This profile is already running');
@@ -1565,7 +1602,11 @@ async function launchProfileById(id) {
 
   if (profile.userAgent) launchOptions.userAgent = profile.userAgent;
 
-  if (profile.fingerprint) {
+  // Nút bật / tắt fingerprint ở Home: tắt = KHÔNG áp lớp giả lập (canvas / WebGL / audio / font, màn hình, tỉ lệ điểm ảnh, vị trí) ở lần Launch
+  // này, nhưng profile.fingerprint giữ nguyên -- bật lại là dùng đúng bộ cũ
+  const fp = profile.fingerprint && !profile.fingerprintOff ? profile.fingerprint : null;
+
+  if (fp) {
     // Emulates window.screen separately from viewport -- a real
     // un-maximized (or taskbar-shrunk) browser window has a SMALLER
     // viewport than the physical screen; viewport === screen is a subtler
@@ -1580,8 +1621,8 @@ async function launchProfileById(id) {
     // launch instead, seeded by the profile's own id so the SAME
     // profile gets the SAME screen size on every relaunch (deterministic,
     // not re-rolled each time you open it).
-    if (profile.fingerprint.screenWidth && profile.fingerprint.screenHeight) {
-      launchOptions.screen = { width: profile.fingerprint.screenWidth, height: profile.fingerprint.screenHeight };
+    if (fp.screenWidth && fp.screenHeight) {
+      launchOptions.screen = { width: fp.screenWidth, height: fp.screenHeight };
     } else {
       // Truyền hostPlatform của CHÍNH fingerprint này -- không phải
       // os.platform() của máy chạy server (fallback mặc định nếu bỏ
@@ -1590,7 +1631,7 @@ async function launchProfileById(id) {
       // gán độ phân giải theo danh sách CHỈ DÀNH CHO Windows -- mâu
       // thuẫn nội tại giữa "khai báo là Mac" và "màn hình là màn hình
       // Windows", một dấu hiệu fingerprint không hợp lệ.
-      launchOptions.screen = screenForViewport(profile.viewportWidth, profile.viewportHeight, profile.id, profile.fingerprint.hostPlatform);
+      launchOptions.screen = screenForViewport(profile.viewportWidth, profile.viewportHeight, profile.id, fp.hostPlatform);
     }
 
     // window.devicePixelRatio -- previously never set at all, so every
@@ -1601,16 +1642,16 @@ async function launchProfileById(id) {
     // contradiction of exactly the kind this whole layer exists to
     // avoid -- just one signal deeper than canvas/WebGL. See each
     // preset's deviceScaleFactor in fingerprint.js.
-    if (profile.fingerprint.deviceScaleFactor) {
-      launchOptions.deviceScaleFactor = profile.fingerprint.deviceScaleFactor;
+    if (fp.deviceScaleFactor) {
+      launchOptions.deviceScaleFactor = fp.deviceScaleFactor;
     }
 
     // Only set if explicitly provided (import JSON) -- see fingerprint.js's
     // generateFingerprint(): never auto-populated, no IP-geolocation
     // lookup happens here. Unset behaves exactly like a real unconfigured
     // browser (site asks, browser has nothing to offer/prompts normally).
-    if (profile.fingerprint.geolocation) {
-      launchOptions.geolocation = profile.fingerprint.geolocation;
+    if (fp.geolocation) {
+      launchOptions.geolocation = fp.geolocation;
       launchOptions.permissions = ['geolocation'];
     }
   }
@@ -1754,8 +1795,8 @@ async function launchProfileById(id) {
       // Deep fingerprint layer stays opt-in: profiles with `fingerprint: null`
       // launch exactly as before, just with the base stealth patch above.
       // Only profiles with a `fingerprint` object pay the extra cost of this one.
-      if (profile.fingerprint) {
-        await context.addInitScript(buildFingerprintInitScript(profile.fingerprint, profile.userAgent));
+      if (fp) {
+        await context.addInitScript(buildFingerprintInitScript(fp, profile.userAgent));
       }
 
       // Không tự mở sẵn trang nào ở đây nữa -- main.js (script được chọn
@@ -1766,8 +1807,13 @@ async function launchProfileById(id) {
       // (hoặc trống), đợi bấm Run.
       const page = context.pages()[0] || (await context.newPage());
 
+      await restoreSession(id, context).catch((e) => console.warn(`[session] ${id}: không khôi phục được phiên đăng nhập: ${e.message}`));
+      const realClose = context.close.bind(context); // mọi chỗ tool đóng profile đều qua đây -> sao lưu phiên đăng nhập trước khi đóng
+      context.close = async (...a) => { await backupSession(id, context).catch(() => {}); return realClose(...a); };
+      const sessionTimer = setInterval(() => backupSession(id, context).catch(() => {}), SESSION_EVERY_MS); // tắt cửa sổ bằng nút X / tắt máy đột ngột vẫn còn bản gần nhất
       runningContexts[id] = { context, page };
       context.on('close', () => {
+        clearInterval(sessionTimer);
         delete runningContexts[id];
         // If this profile was part of the queue's active batch, freeing its
         // slot is what lets the next pending profile launch -- see fillQueue().
