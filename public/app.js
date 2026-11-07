@@ -247,9 +247,16 @@ function buildCard(profile) {
   setMetaValue(card.querySelector('.meta-proxy'), profile.proxyServer ? 'configured' : '\u2014');
   setMetaValue(card.querySelector('.meta-engine'), ENGINE_LABELS[profile.effectiveEngineMode] || 'Chromium');
 
-  const fingerprintEl = card.querySelector('.meta-fingerprint');
-  setMetaValue(fingerprintEl, profile.fingerprint ? profile.fingerprint.label : 'off');
-  fingerprintEl.classList.toggle('is-spoofed', Boolean(profile.fingerprint));
+  const fingerprintEl = card.querySelector('.meta-fingerprint'), fpOn = Boolean(profile.fingerprint) && !profile.fingerprintOff;
+  setMetaValue(fingerprintEl, profile.fingerprint ? `${profile.fingerprint.label}${fpOn ? '' : ' (đang tắt)'}` : 'off');
+  fingerprintEl.classList.toggle('is-spoofed', fpOn);
+  // Nút bật / tắt fingerprint: chỉ đổi cờ, dữ liệu fingerprint giữ nguyên (bật lại là đúng bộ cũ). Chưa có fingerprint thì ẩn (bấm ↻ để tạo)
+  const fpBtn = card.querySelector('.fp-toggle');
+  fpBtn.hidden = !profile.fingerprint;
+  fpBtn.textContent = fpOn ? 'ON' : 'OFF';
+  fpBtn.classList.toggle('is-on', fpOn);
+  fpBtn.title = fpOn ? 'Fingerprint đang BẬT -- bấm để tắt (giữ nguyên dữ liệu fingerprint, áp dụng lần Launch sau)' : 'Fingerprint đang TẮT -- bấm để bật lại đúng bộ fingerprint cũ (áp dụng lần Launch sau)';
+  fpBtn.addEventListener('click', () => toggleFingerprint(profile.id, profile.name, !fpOn));
 
   const statusText = card.querySelector('.status-text');
   const launchBtn = card.querySelector('.btn-launch');
@@ -300,6 +307,19 @@ async function openProfileFolder(id) {
     showToast(`Đã mở folder (đường dẫn đã chép): ${data.path}`);
   } catch (err) {
     showToast(err.message, true);
+  }
+}
+
+async function toggleFingerprint(id, name, on) {
+  try {
+    const res = await fetch(`/api/profiles/${id}/fingerprint-toggle`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Không đổi được fingerprint');
+    showToast(`"${name}": fingerprint ${data.on ? 'BẬT' : 'TẮT'} (giữ nguyên dữ liệu)${data.running ? ' -- đang mở: Close rồi Launch lại để áp dụng' : ' -- áp dụng lần Launch sau'}`);
+  } catch (err) {
+    showToast(err.message, true);
+  } finally {
+    loadProfiles();
   }
 }
 
@@ -458,7 +478,7 @@ function autoScrollTick() {
 
 grid.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return; // left button only
-  if (e.target.closest('.card-actions, .btn-folder') || e.target.classList.contains('card-select')) return; // let buttons/checkbox handle their own clicks
+  if (e.target.closest('.card-actions, .btn-folder, .fp-toggle') || e.target.classList.contains('card-select')) return; // let buttons/checkbox handle their own clicks
 
   if (!e.shiftKey) clearSelection(); // fresh drag replaces the old selection unless Shift extends it
 

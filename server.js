@@ -1291,6 +1291,16 @@ app.delete('/api/profiles/:id/fingerprint', (req, res) => {
   res.json({ success: true });
 });
 
+// Bật / tắt fingerprint (nút ở thẻ profile): chỉ đổi cờ fingerprintOff -- dữ liệu fingerprint KHÔNG bị xoá / tạo mới. Áp dụng từ lần Launch sau.
+app.post('/api/profiles/:id/fingerprint-toggle', (req, res) => {
+  const profiles = readProfiles(), profile = profiles.find((p) => p.id === req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  if (!profile.fingerprint) return res.status(400).json({ error: 'Profile này chưa có fingerprint -- bấm ↻ để tạo' });
+  profile.fingerprintOff = typeof req.body.on === 'boolean' ? !req.body.on : !profile.fingerprintOff;
+  writeProfiles(profiles);
+  res.json({ success: true, on: !profile.fingerprintOff, running: Boolean(runningContexts[profile.id]) });
+});
+
 
 // -------------------------------------------------------------------
 // A small "which profile is this?" badge pinned to the corner of every
@@ -1592,7 +1602,11 @@ async function launchProfileById(id) {
 
   if (profile.userAgent) launchOptions.userAgent = profile.userAgent;
 
-  if (profile.fingerprint) {
+  // Nút bật / tắt fingerprint ở Home: tắt = KHÔNG áp lớp giả lập (canvas / WebGL / audio / font, màn hình, tỉ lệ điểm ảnh, vị trí) ở lần Launch
+  // này, nhưng profile.fingerprint giữ nguyên -- bật lại là dùng đúng bộ cũ
+  const fp = profile.fingerprint && !profile.fingerprintOff ? profile.fingerprint : null;
+
+  if (fp) {
     // Emulates window.screen separately from viewport -- a real
     // un-maximized (or taskbar-shrunk) browser window has a SMALLER
     // viewport than the physical screen; viewport === screen is a subtler
@@ -1607,8 +1621,8 @@ async function launchProfileById(id) {
     // launch instead, seeded by the profile's own id so the SAME
     // profile gets the SAME screen size on every relaunch (deterministic,
     // not re-rolled each time you open it).
-    if (profile.fingerprint.screenWidth && profile.fingerprint.screenHeight) {
-      launchOptions.screen = { width: profile.fingerprint.screenWidth, height: profile.fingerprint.screenHeight };
+    if (fp.screenWidth && fp.screenHeight) {
+      launchOptions.screen = { width: fp.screenWidth, height: fp.screenHeight };
     } else {
       // Truyền hostPlatform của CHÍNH fingerprint này -- không phải
       // os.platform() của máy chạy server (fallback mặc định nếu bỏ
@@ -1617,7 +1631,7 @@ async function launchProfileById(id) {
       // gán độ phân giải theo danh sách CHỈ DÀNH CHO Windows -- mâu
       // thuẫn nội tại giữa "khai báo là Mac" và "màn hình là màn hình
       // Windows", một dấu hiệu fingerprint không hợp lệ.
-      launchOptions.screen = screenForViewport(profile.viewportWidth, profile.viewportHeight, profile.id, profile.fingerprint.hostPlatform);
+      launchOptions.screen = screenForViewport(profile.viewportWidth, profile.viewportHeight, profile.id, fp.hostPlatform);
     }
 
     // window.devicePixelRatio -- previously never set at all, so every
@@ -1628,16 +1642,16 @@ async function launchProfileById(id) {
     // contradiction of exactly the kind this whole layer exists to
     // avoid -- just one signal deeper than canvas/WebGL. See each
     // preset's deviceScaleFactor in fingerprint.js.
-    if (profile.fingerprint.deviceScaleFactor) {
-      launchOptions.deviceScaleFactor = profile.fingerprint.deviceScaleFactor;
+    if (fp.deviceScaleFactor) {
+      launchOptions.deviceScaleFactor = fp.deviceScaleFactor;
     }
 
     // Only set if explicitly provided (import JSON) -- see fingerprint.js's
     // generateFingerprint(): never auto-populated, no IP-geolocation
     // lookup happens here. Unset behaves exactly like a real unconfigured
     // browser (site asks, browser has nothing to offer/prompts normally).
-    if (profile.fingerprint.geolocation) {
-      launchOptions.geolocation = profile.fingerprint.geolocation;
+    if (fp.geolocation) {
+      launchOptions.geolocation = fp.geolocation;
       launchOptions.permissions = ['geolocation'];
     }
   }
@@ -1781,8 +1795,8 @@ async function launchProfileById(id) {
       // Deep fingerprint layer stays opt-in: profiles with `fingerprint: null`
       // launch exactly as before, just with the base stealth patch above.
       // Only profiles with a `fingerprint` object pay the extra cost of this one.
-      if (profile.fingerprint) {
-        await context.addInitScript(buildFingerprintInitScript(profile.fingerprint, profile.userAgent));
+      if (fp) {
+        await context.addInitScript(buildFingerprintInitScript(fp, profile.userAgent));
       }
 
       // Không tự mở sẵn trang nào ở đây nữa -- main.js (script được chọn

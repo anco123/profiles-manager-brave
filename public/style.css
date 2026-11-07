@@ -417,7 +417,7 @@ h1, h2, h3 { font-family: var(--font-display); margin: 0; letter-spacing: -0.01e
 .field-checkbox input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
 .field-checkbox span { color: var(--text); font-size: 0.85rem; }
 
-.meta dd.meta-fingerprint.is-spoofed { color: var(--accent-strong); }
+.meta .meta-fingerprint.is-spoofed { color: var(--accent-strong); }
 
 .chip-groups { display: flex; flex-direction: column; gap: 10px; }
 .chip-group-label {
@@ -620,3 +620,10 @@ button:focus-visible, input:focus-visible {
 .proxy-target-row .rename-new.is-same { color: var(--text-faint); }
 .rename-summary.is-warning, #suspendedSummary.is-warning { color: var(--warning-strong); }
 .field.field-compact { flex: 0 0 auto; } /* .field mặc định flex:1 -- ô chọn cột không được phình ra đẩy danh sách xuống đáy */
+
+/* Nút bật / tắt fingerprint trên thẻ profile (ô Fingerprint) */
+.fp-cell { display: flex; align-items: center; gap: 6px; }
+.fp-toggle { flex: none; font: 600 10px/1 inherit; padding: 3px 6px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-faint); cursor: pointer; }
+.fp-toggle.is-on { border-color: var(--accent); color: var(--accent-strong); }
+.fp-toggle:hover { border-color: var(--text-faint); color: var(--text); }
+.fp-cell .meta-fingerprint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
