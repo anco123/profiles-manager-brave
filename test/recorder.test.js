@@ -7,6 +7,7 @@
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
 const { chromium } = require('playwright');
 process.env.PM_NO_CLIPBOARD = '1'; // test không ghi đè clipboard của máy
+process.env.PM_REC_OPEN_SHADOW = '1'; // giao diện recorder dùng shadow DOM mở để locator thấy nút (chạy trong thế giới cách ly nên không vá attachShadow được)
 const rec = require('../recorder');
 const A = require('../scripts/xlv1_actions');
 const helpers = require('../scripts/helpers');
@@ -30,7 +31,7 @@ async function runCode(code) {
 }
 const st = () => rec.recorderState(ID);
 const until = async (fn, ms = 8000, what = 'điều kiện') => { for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 150))) { const v = fn(); if (v) return v; } throw new Error('Hết giờ chờ: ' + what); };
-const call = (msg) => page.evaluate((m) => window.__pmRec(m), msg);
+const call = (msg) => rec.recorderHandle(ID, page, msg); // gửi lệnh như giao diện recorder (từ phía server)
 const shotOf = (t) => { const m = /ảnh: (\S+\.png)/.exec(t || ''); if (m) shots.add(m[1]); return m && m[1]; };
 // Bấm nút trong giao diện recorder (shadow DOM): đi chuột thật + nhấn (clickVisibly theo toạ độ -- clickEl kiểm tra "bị đè" bằng
 // document.elementFromPoint, với phần tử trong shadow DOM luôn ra thẻ host nên báo bị đè oan)

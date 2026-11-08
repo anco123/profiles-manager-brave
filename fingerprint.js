@@ -364,20 +364,34 @@ function normalizeFingerprint(input, seed) {
   };
 }
 
+// User-Agent riêng -> bộ Client Hints khớp với nó (Emulation.setUserAgentOverride userAgentMetadata): header Sec-CH-UA* + navigator.userAgentData
+// cùng báo đúng version / hệ điều hành ghi trong UA (không có thì Chrome gửi version THẬT -> lệch, web phía server thấy)
+function uaMetadataFor(ua) {
+  const s = String(ua || ''), full = (s.match(/Chrome\/([\d.]+)/) || [])[1] || '130.0.0.0', major = full.split('.')[0];
+  const platform = /Windows/.test(s) ? 'Windows' : /Mac OS X|Macintosh/.test(s) ? 'macOS' : /Android/.test(s) ? 'Android' : /CrOS/.test(s) ? 'Chrome OS' : 'Linux';
+  const brands = [{ brand: 'Not_A Brand', version: '8' }, { brand: 'Chromium', version: major }, { brand: 'Google Chrome', version: major }];
+  return {
+    navPlatform: platform === 'Windows' ? 'Win32' : platform === 'macOS' ? 'MacIntel' : platform === 'Android' ? 'Linux armv8l' : 'Linux x86_64',
+    metadata: { brands, fullVersionList: brands.map((b) => ({ brand: b.brand, version: b.brand === 'Not_A Brand' ? '8.0.0.0' : full })), fullVersion: full, platform,
+      platformVersion: platform === 'Windows' ? '10.0.0' : platform === 'macOS' ? '14.0.0' : platform === 'Android' ? '14.0.0' : '6.5.0',
+      architecture: platform === 'Android' ? 'arm' : 'x86', model: '', mobile: platform === 'Android', bitness: '64', wow64: false },
+  };
+}
+
 // Các TẦNG của fingerprint -- bật / tắt riêng từng tầng cho từng profile (profile.fpOffLayers = ['fonts', ...]) để tìm tầng làm hỏng web.
 // kind 'script': đoạn giả lập trong init script; 'launch': tuỳ chọn lúc mở Chrome; 'base': áp cho MỌI profile, kể cả không có / đang OFF fingerprint
 const FP_LAYERS = [
   { key: 'stealth', kind: 'base', name: 'Ẩn dấu vết tự động hoá', desc: 'navigator.webdriver = false (áp cho mọi profile, kể cả không có fingerprint)' },
-  { key: 'badge', kind: 'base', name: 'Nhãn tên profile trên trang', desc: 'thẻ <div id="__profile_badge__"> ghi tên profile ở góc trên phải MỌI trang -- web tìm được trong DOM (áp cả khi fingerprint OFF)' },
-  { key: 'title', kind: 'base', name: 'Tên profile ở tiêu đề tab', desc: 'document.title của trang bị thêm "[tên profile] " + thuộc tính lạ trên document (áp cả khi fingerprint OFF)' },
-  { key: 'ua', kind: 'base', name: 'User-Agent riêng của profile', desc: 'dùng UA đặt riêng cho profile; tắt = UA thật của Chrome (UA, Client Hints, header khớp nhau) -- áp cả khi fingerprint OFF'},
+  { key: 'badge', kind: 'base', def: false, name: 'Nhãn tên profile trên trang', desc: 'thẻ <div id="__profile_badge__"> ghi tên profile ở góc trên phải MỌI trang -- web tìm được trong DOM (áp cả khi fingerprint OFF)' },
+  { key: 'title', kind: 'base', def: false, name: 'Tên profile ở tiêu đề tab', desc: 'document.title của trang bị thêm "[tên profile] " + thuộc tính lạ trên document (áp cả khi fingerprint OFF)' },
+  { key: 'ua', kind: 'base', name: 'User-Agent riêng của profile', desc: 'dùng UA đặt riêng cho profile + Client Hints khớp UA đó (header Sec-CH-UA và navigator.userAgentData cùng version / hệ điều hành); tắt = UA thật của Chrome -- áp cả khi fingerprint OFF'},
   { key: 'tostring', kind: 'script', name: 'Che toString', desc: 'các hàm bị sửa vẫn trả "[native code]" khi trang soi Function.toString' },
   { key: 'nav', kind: 'script', name: 'Navigator', desc: 'navigator.platform / hardwareConcurrency (số nhân CPU) / deviceMemory (RAM)' },
   { key: 'canvas', kind: 'script', name: 'Canvas', desc: 'nhiễu nhẹ ảnh canvas 2D (getImageData / toDataURL / toBlob) -- đổi canvas hash' },
   { key: 'webgl', kind: 'script', name: 'WebGL', desc: 'GPU vendor / renderer giả, lọc danh sách extension, nhiễu readPixels' },
   { key: 'audio', kind: 'script', name: 'Audio', desc: 'nhiễu nhẹ AudioBuffer -- đổi audio hash' },
   { key: 'fonts', kind: 'script', name: 'Font', desc: 'document.fonts giả: chỉ báo có các font trong danh sách của fingerprint' },
-  { key: 'uadata', kind: 'script', name: 'User-Agent Client Hints', desc: 'navigator.userAgentData khớp User-Agent riêng của profile (chỉ khi profile có UA riêng)' },
+  { key: 'uadata', kind: 'script', name: 'User-Agent Client Hints (JS, cũ)', desc: 'không còn dùng: profile có UA riêng thì Chrome tự báo Client Hints khớp UA (header + navigator.userAgentData) theo tầng "User-Agent riêng"' },
   { key: 'media', kind: 'script', name: 'Thiết bị media', desc: 'mediaDevices.enumerateDevices: mic / loa / camera giả, id cố định theo profile' },
   { key: 'avail', kind: 'script', name: 'Thanh taskbar', desc: 'screen.availHeight nhỏ hơn screen.height (giống có taskbar)' },
   { key: 'conn', kind: 'script', name: 'Mạng', desc: 'navigator.connection: 4g / wifi / rtt 50 / downlink 10' },
@@ -386,10 +400,11 @@ const FP_LAYERS = [
   { key: 'dpr', kind: 'launch', name: 'Tỉ lệ điểm ảnh', desc: 'devicePixelRatio (deviceScaleFactor) theo fingerprint' },
   { key: 'geo', kind: 'launch', name: 'Vị trí', desc: 'geolocation theo fingerprint (chỉ khi fingerprint có vị trí)' },
 ];
-// Tầng đang bật của 1 profile: mặc định bật hết, trừ các tầng trong profile.fpOffLayers
+// Tầng đang bật của 1 profile: tầng mặc định bật (def !== false) bật trừ khi có trong profile.fpOffLayers; tầng mặc định TẮT (def: false --
+// nhãn tên, tiêu đề tab: dấu vết web nhìn thấy) chỉ bật khi có trong profile.fpOnLayers
 function fpLayersOf(profile) {
-  const off = new Set((profile && profile.fpOffLayers) || []);
-  return Object.fromEntries(FP_LAYERS.map((l) => [l.key, !off.has(l.key)]));
+  const off = new Set((profile && profile.fpOffLayers) || []), on = new Set((profile && profile.fpOnLayers) || []);
+  return Object.fromEntries(FP_LAYERS.map((l) => [l.key, l.def === false ? on.has(l.key) : !off.has(l.key)]));
 }
 
 function buildFingerprintInitScript(fp, customUserAgent, layers) {
@@ -1064,5 +1079,5 @@ function buildBaseStealthInitScript() {
 }
 
 module.exports = {
-  FP_LAYERS,
+  FP_LAYERS, uaMetadataFor,
   fpLayersOf, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, PRESETS, presetsForHost, pickWeighted, extractMajorVersionFromUA, screenForViewport, STANDARD_SCREEN_RESOLUTIONS, plausibleViewport };

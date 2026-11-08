@@ -7,6 +7,7 @@
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
 const { chromium } = require('playwright');
 process.env.PM_NO_CLIPBOARD = '1'; // test không ghi đè clipboard của máy
+process.env.PM_REC_OPEN_SHADOW = '1'; // giao diện recorder dùng shadow DOM mở để locator thấy nút (chạy trong thế giới cách ly nên không vá attachShadow được)
 const rec = require('../recorder');
 const helpers = require('../scripts/helpers');
 
@@ -112,10 +113,10 @@ const ok = (name) => { done++; console.log('  ✓ ' + name); };
     await page.waitForTimeout(400);
     assert.ok(/ƒ try \/ catch/.test(await crumbText()) && (await side('.scode').innerText()).includes('try {'), 'ƒ try / catch: chèn + đi vào khối { } của nó (hiện trong code, if chưa điều kiện hiện mờ)');
     assert.ok(!/try \{/.test(code()), 'if chưa có điều kiện -> chưa xuất ra code');
-    for (const id of st().steps.map((x) => x.id).filter((i) => !before.includes(i)).reverse()) await page.evaluate((m) => window.__pmRec(m), { op: 'delete', stepId: id });
+    for (const id of st().steps.map((x) => x.id).filter((i) => !before.includes(i)).reverse()) await rec.recorderHandle(ID, page, { op: 'delete', stepId: id });
     assert.ok((code().match(/whileGuard\(/g) || []).length === 1 && !/try \{/.test(code()));
     // else if: if Đồng ý nối else if (#later) -- thử ở mức code rồi bỏ
-    await page.evaluate((m) => window.__pmRec(m), { op: 'cursor', stepId: n1.id });
+    await rec.recorderHandle(ID, page, { op: 'cursor', stepId: n1.id });
     await page.waitForTimeout(1700); // cửa sổ khối theo con trỏ mới (làm mới định kỳ)
     await side('[data-blk=else]').waitFor({ timeout: 4000 });
     assert.strictEqual(await side('[data-blk=elif]').count(), 0, 'if #agree đã có else -> không nối else if được, chỉ "vào else"');
@@ -126,7 +127,7 @@ const ok = (name) => { done++; console.log('  ✓ ' + name); };
     await uiClick(side(`.crumb a[data-key="C${c1.id}"]`));
     await blk('elif'); await typeSel('#later');
     assert.ok(/if \(await isShown\(page\.locator\('#ok'\)\)\) \{[^]*?\n\s+\} else if \(await isShown\(page\.locator\('#later'\)\)\) \{/.test(code()), '↳ else if nối vào if ngay trước:\n' + code());
-    for (const id of st().steps.map((x) => x.id).filter((i) => !before2.includes(i)).reverse()) await page.evaluate((m) => window.__pmRec(m), { op: 'delete', stepId: id });
+    for (const id of st().steps.map((x) => x.id).filter((i) => !before2.includes(i)).reverse()) await rec.recorderHandle(ID, page, { op: 'delete', stepId: id });
     ok('↳ else if (nối vào if ngay trước ▸; if đã có else thì chỉ "vào else"); bấm dòng } else { vào else; ⟳ While lồng + ƒ try/catch chèn đúng chỗ và đi vào khối');
 
     // ---- if 2 của While: #done -> thoát; else của While: nghỉ
