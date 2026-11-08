@@ -627,3 +627,9 @@ button:focus-visible, input:focus-visible {
 .fp-toggle.is-on { border-color: var(--accent); color: var(--accent-strong); }
 .fp-toggle:hover { border-color: var(--text-faint); color: var(--text); }
 .fp-cell .meta-fingerprint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-layers { flex: none; font-size: 12px; line-height: 1; padding: 2px 5px; border-radius: 6px; border: 1px solid var(--border); background: transparent; cursor: pointer; }
+.fp-layers.has-off { border-color: var(--danger); }
+.fp-layer-list { display: flex; flex-direction: column; gap: 4px; }
+.fp-layer { align-items: flex-start; padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.fp-layer small { color: var(--text-faint); }
+.fp-kind { color: var(--text-faint); font-size: 0.78rem; }

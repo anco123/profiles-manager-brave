@@ -44,7 +44,7 @@ const fs = require('fs');
 const os = require('os');
 const { exec, spawn } = require('child_process');
 const { chromium } = require('playwright');
-const { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
+const { FP_LAYERS, fpLayersOf, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
 const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode, recorderExports, recorderHeader } = require('./recorder');
 
@@ -1291,6 +1291,33 @@ app.delete('/api/profiles/:id/fingerprint', (req, res) => {
   res.json({ success: true });
 });
 
+// Bảng 🧬 các tầng fingerprint: danh sách tầng + tầng đang tắt của profile; lưu = profile.fpOffLayers (dữ liệu fingerprint giữ nguyên)
+app.get('/api/fp-layers', (req, res) => res.json(FP_LAYERS));
+app.post('/api/profiles/:id/fp-layers', (req, res) => {
+  const profiles = readProfiles(), profile = profiles.find((p) => p.id === req.params.id);
+  if (!profile) return res.status(404).json({ error: 'Profile not found' });
+  const keys = new Set(FP_LAYERS.map((l) => l.key));
+  profile.fpOffLayers = [...new Set((Array.isArray(req.body.off) ? req.body.off : []).filter((k) => keys.has(k)))];
+  writeProfiles(profiles);
+  res.json({ success: true, off: profile.fpOffLayers, running: Boolean(runningContexts[profile.id]) });
+});
+// Trang kiểm tra hỏi lại header mà CHÍNH trình duyệt gửi lên (Sec-CH-UA... -- web server đọc thẳng, JS không che được)
+app.get('/api/echo-headers', (req, res) => {
+  res.set('Accept-CH', 'Sec-CH-UA-Full-Version-List, Sec-CH-UA-Platform-Version');
+  res.json(Object.fromEntries(['user-agent', 'sec-ch-ua', 'sec-ch-ua-platform', 'sec-ch-ua-full-version-list', 'accept-language'].map((k) => [k, req.headers[k] || null])));
+});
+// 🔍 Kiểm tra: mở trang fp-check.html (giá trị từng tầng) trong tab mới của CHÍNH profile đang chạy
+app.post('/api/profiles/:id/fp-check', async (req, res) => {
+  const running = runningContexts[req.params.id];
+  if (!running) return res.status(400).json({ error: 'Launch profile trước rồi mới kiểm tra' });
+  try {
+    const p = await running.context.newPage();
+    await p.goto(`http://127.0.0.1:${PORT}/fp-check.html`);
+    await p.bringToFront().catch(() => {});
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Bật / tắt fingerprint (nút ở thẻ profile): chỉ đổi cờ fingerprintOff -- dữ liệu fingerprint KHÔNG bị xoá / tạo mới. Áp dụng từ lần Launch sau.
 app.post('/api/profiles/:id/fingerprint-toggle', (req, res) => {
   const profiles = readProfiles(), profile = profiles.find((p) => p.id === req.params.id);
@@ -1605,6 +1632,7 @@ async function launchProfileById(id) {
   // Nút bật / tắt fingerprint ở Home: tắt = KHÔNG áp lớp giả lập (canvas / WebGL / audio / font, màn hình, tỉ lệ điểm ảnh, vị trí) ở lần Launch
   // này, nhưng profile.fingerprint giữ nguyên -- bật lại là dùng đúng bộ cũ
   const fp = profile.fingerprint && !profile.fingerprintOff ? profile.fingerprint : null;
+  const lay = fpLayersOf(profile); // từng tầng bật / tắt riêng (bảng 🧬 ở thẻ profile) -- xem FP_LAYERS trong fingerprint.js
 
   if (fp) {
     // Emulates window.screen separately from viewport -- a real
@@ -1621,7 +1649,7 @@ async function launchProfileById(id) {
     // launch instead, seeded by the profile's own id so the SAME
     // profile gets the SAME screen size on every relaunch (deterministic,
     // not re-rolled each time you open it).
-    if (fp.screenWidth && fp.screenHeight) {
+    if (!lay.screen) { /* tầng "Kích thước màn hình" đang tắt */ } else if (fp.screenWidth && fp.screenHeight) {
       launchOptions.screen = { width: fp.screenWidth, height: fp.screenHeight };
     } else {
       // Truyền hostPlatform của CHÍNH fingerprint này -- không phải
@@ -1642,7 +1670,7 @@ async function launchProfileById(id) {
     // contradiction of exactly the kind this whole layer exists to
     // avoid -- just one signal deeper than canvas/WebGL. See each
     // preset's deviceScaleFactor in fingerprint.js.
-    if (fp.deviceScaleFactor) {
+    if (lay.dpr && fp.deviceScaleFactor) {
       launchOptions.deviceScaleFactor = fp.deviceScaleFactor;
     }
 
@@ -1650,7 +1678,7 @@ async function launchProfileById(id) {
     // generateFingerprint(): never auto-populated, no IP-geolocation
     // lookup happens here. Unset behaves exactly like a real unconfigured
     // browser (site asks, browser has nothing to offer/prompts normally).
-    if (fp.geolocation) {
+    if (lay.geo && fp.geolocation) {
       launchOptions.geolocation = fp.geolocation;
       launchOptions.permissions = ['geolocation'];
     }
@@ -1777,7 +1805,7 @@ async function launchProfileById(id) {
       // Base stealth (navigator.webdriver) is unconditional -- every profile
       // launched by this app goes through CDP automation, whether or not it
       // also wants the deep canvas/WebGL/audio/font layer below.
-      await context.addInitScript(buildBaseStealthInitScript());
+      if (lay.stealth) await context.addInitScript(buildBaseStealthInitScript());
 
       // A small "which profile is this?" badge pinned to the corner of
       // every page this profile's window ever shows -- also unconditional.
@@ -1796,7 +1824,7 @@ async function launchProfileById(id) {
       // launch exactly as before, just with the base stealth patch above.
       // Only profiles with a `fingerprint` object pay the extra cost of this one.
       if (fp) {
-        await context.addInitScript(buildFingerprintInitScript(fp, profile.userAgent));
+        await context.addInitScript(buildFingerprintInitScript(fp, profile.userAgent, lay));
       }
 
       // Không tự mở sẵn trang nào ở đây nữa -- main.js (script được chọn

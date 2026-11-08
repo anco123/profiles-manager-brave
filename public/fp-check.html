@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiểm tra fingerprint</title>
+<style>
+  :root { --bg: #0f1117; --fg: #e8e9ed; --muted: #8b90a0; --line: #2a2e3a; --ok: #34d399; --bad: #f87171; --warn: #fbbf24; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 4px; } p { color: var(--muted); margin: 0 0 16px; }
+  table { width: 100%; border-collapse: collapse; } td, th { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; } td.k { white-space: nowrap; color: #f5b455; font-family: Consolas, monospace; font-size: 12px; }
+  td.v { font-family: Consolas, monospace; font-size: 12px; word-break: break-all; } .ok { color: var(--ok); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+  button { background: #1a1d27; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>🔍 Kiểm tra fingerprint của profile này</h1>
+<p>Mỗi dòng ghi tầng nó thuộc về (bảng 🧬 ở thẻ profile). Tắt 1 tầng → Close + Launch lại → bấm 🔍 lần nữa và so sánh. Dòng đỏ = phép thử web hay dùng bị hỏng / treo.</p>
+<p><button id="copy">Chép kết quả</button> <span id="st">Đang đo…</span></p>
+<table><thead><tr><th>Tầng</th><th>Mục</th><th>Giá trị</th></tr></thead><tbody id="rows"></tbody></table>
+<script>
+const rows = document.getElementById('rows'), out = [], errs = [];
+window.addEventListener('error', (e) => errs.push(e.message));
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const add = (layer, name, value, cls) => { out.push(`${layer}\t${name}\t${value}`); rows.insertAdjacentHTML('beforeend', `<tr><td class="k">${esc(layer)}</td><td>${esc(name)}</td><td class="v ${cls || ''}">${esc(value)}</td></tr>`); };
+const hash = (str) => { let h = 2166136261; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619); return (h >>> 0).toString(16); };
+const timeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('treo quá ' + ms + 'ms')), ms))]);
+const isNative = (fn) => { try { return /\[native code\]/.test(Function.prototype.toString.call(fn)); } catch (e) { return false; } };
+(async () => {
+  add('stealth', 'navigator.webdriver', String(navigator.webdriver), navigator.webdriver ? 'bad' : 'ok');
+  add('tostring', 'toDataURL / getParameter trông như hàm gốc', `${isNative(HTMLCanvasElement.prototype.toDataURL)} / ${isNative(WebGLRenderingContext.prototype.getParameter)}`, isNative(HTMLCanvasElement.prototype.toDataURL) ? 'ok' : 'warn');
+  add('nav', 'navigator.platform', navigator.platform);
+  add('nav', 'hardwareConcurrency (nhân CPU)', navigator.hardwareConcurrency);
+  add('nav', 'deviceMemory (RAM GB)', navigator.deviceMemory);
+  try { const c = document.createElement('canvas'); c.width = 240; c.height = 60; const x = c.getContext('2d'); x.textBaseline = 'top'; x.font = '16px Arial'; x.fillStyle = '#f60'; x.fillRect(0, 0, 120, 30); x.fillStyle = '#069'; x.fillText('Fingerprint ✓ 123', 4, 8); add('canvas', 'canvas hash', hash(c.toDataURL())); } catch (e) { add('canvas', 'canvas', 'LỖI ' + e.message, 'bad'); }
+  try {
+    const g = document.createElement('canvas').getContext('webgl'), d = g && g.getExtension('WEBGL_debug_renderer_info');
+    add('webgl', 'vendor', g ? (d ? g.getParameter(d.UNMASKED_VENDOR_WEBGL) : g.getParameter(g.VENDOR)) : 'không có WebGL', g ? '' : 'warn');
+    add('webgl', 'renderer (GPU)', g ? (d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)) : '-');
+    add('webgl', 'số extension', g ? (g.getSupportedExtensions() || []).length : '-');
+  } catch (e) { add('webgl', 'WebGL', 'LỖI ' + e.message, 'bad'); }
+  try {
+    const ac = new OfflineAudioContext(1, 5000, 44100), o = ac.createOscillator(), comp = ac.createDynamicsCompressor();
+    o.type = 'triangle'; o.frequency.value = 1000; o.connect(comp); comp.connect(ac.destination); o.start(0);
+    const buf = await timeout(ac.startRendering(), 3000), data = buf.getChannelData(0); let s = 0; for (let i = 4500; i < 5000; i++) s += Math.abs(data[i]);
+    add('audio', 'audio hash', s.toFixed(10));
+  } catch (e) { add('audio', 'audio', 'LỖI ' + e.message, 'bad'); }
+  try { add('fonts', 'document.fonts.size', document.fonts.size); add('fonts', 'check("12px Arial") / check("12px Roboto")', `${document.fonts.check('12px Arial')} / ${document.fonts.check('12px Roboto')}`); } catch (e) { add('fonts', 'document.fonts', 'LỖI ' + e.message, 'bad'); }
+  try { await timeout(document.fonts.ready, 3000); add('fonts', 'document.fonts.ready (web chờ font tải xong)', 'OK', 'ok'); } catch (e) { add('fonts', 'document.fonts.ready (web chờ font tải xong)', 'HỎNG: ' + e.message, 'bad'); }
+  try { const f = new FontFace('PmTest', 'local("Arial")'); document.fonts.add(f); await timeout(f.load(), 3000); add('fonts', 'nạp font mới (icon font / web font)', 'OK -- fonts.has: ' + document.fonts.has(f), 'ok'); } catch (e) { add('fonts', 'nạp font mới (icon font / web font)', 'HỎNG: ' + e.message, 'bad'); }
+  try { const u = navigator.userAgentData; add('uadata', 'userAgentData', u ? `${u.platform} | ${u.brands.map((b) => b.brand + ' ' + b.version).join(', ')}` : 'không có'); } catch (e) { add('uadata', 'userAgentData', 'LỖI ' + e.message, 'bad'); }
+  add('uadata', 'userAgent', navigator.userAgent);
+  try { // header mà web server nhận được (gọi 2 lần: lần 2 có thêm full-version-list sau khi server đòi qua Accept-CH)
+    await fetch('/api/echo-headers'); const h = await (await fetch('/api/echo-headers')).json(), uaMaj = (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1], hMaj = ((h['sec-ch-ua'] || '').match(/"(?:Google Chrome|Chromium)";v="(\d+)"/) || [])[1];
+    add('uadata', 'header Sec-CH-UA (web server thấy)', h['sec-ch-ua'] || '-', uaMaj && hMaj && uaMaj !== hMaj ? 'bad' : '');
+    add('uadata', 'header Sec-CH-UA-Platform / full-version-list', `${h['sec-ch-ua-platform'] || '-'} / ${h['sec-ch-ua-full-version-list'] || '-'}`);
+    if (uaMaj && hMaj && uaMaj !== hMaj) add('uadata', '⚠ LỆCH', `User-Agent ghi Chrome ${uaMaj} nhưng header gửi lên là ${hMaj} -- web phía server thấy được`, 'bad');
+    add('uadata', 'header Accept-Language', h['accept-language'] || '-');
+  } catch (e) { add('uadata', 'header', 'LỖI ' + e.message, 'bad'); }
+  try { const ds = await timeout(navigator.mediaDevices.enumerateDevices(), 3000); add('media', 'thiết bị media', ds.map((d) => d.kind + (d.deviceId ? ':' + d.deviceId.slice(0, 8) : '')).join(', ') || '(không có)'); } catch (e) { add('media', 'enumerateDevices', 'LỖI ' + e.message, 'bad'); }
+  add('screen', 'screen width × height', `${screen.width} × ${screen.height}`);
+  add('avail', 'screen.availHeight', screen.availHeight);
+  add('dpr', 'devicePixelRatio', devicePixelRatio);
+  try { const c = navigator.connection; add('conn', 'navigator.connection', c ? `${c.effectiveType} / ${c.type} / rtt ${c.rtt} / downlink ${c.downlink}` : 'không có'); } catch (e) { add('conn', 'connection', 'LỖI ' + e.message, 'bad'); }
+  try {
+    const src = 'onmessage = () => postMessage([navigator.hardwareConcurrency, navigator.platform || "-"].join(" / "))';
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    const r = await timeout(new Promise((ok, bad) => { w.onmessage = (e) => ok(e.data); w.onerror = (e) => bad(new Error(e.message || 'worker lỗi')); w.postMessage(1); }), 3000);
+    add('workers', 'Worker chạy được (CPU / platform trong worker)', 'OK -- ' + r, 'ok'); w.terminate();
+  } catch (e) { add('workers', 'Worker chạy được', 'HỎNG: ' + e.message, 'bad'); }
+  add('geo', 'geolocation', 'xem bằng cách cho phép vị trí trên trang cần kiểm tra');
+  add('—', 'lỗi JS trên trang này', errs.length ? errs.join(' | ') : 'không có', errs.length ? 'bad' : 'ok');
+  document.getElementById('st').textContent = 'Xong ✓';
+})();
+document.getElementById('copy').onclick = () => navigator.clipboard.writeText(out.join('\n')).then(() => { document.getElementById('st').textContent = 'Đã chép ✓'; });
+</script>
+</body>
+</html>

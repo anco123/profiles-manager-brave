@@ -364,7 +364,33 @@ function normalizeFingerprint(input, seed) {
   };
 }
 
-function buildFingerprintInitScript(fp, customUserAgent) {
+// Các TẦNG của fingerprint -- bật / tắt riêng từng tầng cho từng profile (profile.fpOffLayers = ['fonts', ...]) để tìm tầng làm hỏng web.
+// kind 'script': đoạn giả lập trong init script; 'launch': tuỳ chọn lúc mở Chrome; 'base': lớp stealth chung (cả profile không có fingerprint)
+const FP_LAYERS = [
+  { key: 'stealth', kind: 'base', name: 'Ẩn dấu vết tự động hoá', desc: 'navigator.webdriver = false (áp cho mọi profile, kể cả không có fingerprint)' },
+  { key: 'tostring', kind: 'script', name: 'Che toString', desc: 'các hàm bị sửa vẫn trả "[native code]" khi trang soi Function.toString' },
+  { key: 'nav', kind: 'script', name: 'Navigator', desc: 'navigator.platform / hardwareConcurrency (số nhân CPU) / deviceMemory (RAM)' },
+  { key: 'canvas', kind: 'script', name: 'Canvas', desc: 'nhiễu nhẹ ảnh canvas 2D (getImageData / toDataURL / toBlob) -- đổi canvas hash' },
+  { key: 'webgl', kind: 'script', name: 'WebGL', desc: 'GPU vendor / renderer giả, lọc danh sách extension, nhiễu readPixels' },
+  { key: 'audio', kind: 'script', name: 'Audio', desc: 'nhiễu nhẹ AudioBuffer -- đổi audio hash' },
+  { key: 'fonts', kind: 'script', name: 'Font', desc: 'document.fonts giả: chỉ báo có các font trong danh sách của fingerprint' },
+  { key: 'uadata', kind: 'script', name: 'User-Agent Client Hints', desc: 'navigator.userAgentData khớp User-Agent riêng của profile (chỉ khi profile có UA riêng)' },
+  { key: 'media', kind: 'script', name: 'Thiết bị media', desc: 'mediaDevices.enumerateDevices: mic / loa / camera giả, id cố định theo profile' },
+  { key: 'avail', kind: 'script', name: 'Thanh taskbar', desc: 'screen.availHeight nhỏ hơn screen.height (giống có taskbar)' },
+  { key: 'conn', kind: 'script', name: 'Mạng', desc: 'navigator.connection: 4g / wifi / rtt 50 / downlink 10' },
+  { key: 'workers', kind: 'script', name: 'Worker', desc: 'bọc Worker / SharedWorker / ServiceWorker để áp các tầng trên vào trong worker' },
+  { key: 'screen', kind: 'launch', name: 'Kích thước màn hình', desc: 'screen.width / height giả (theo fingerprint hoặc suy từ viewport)' },
+  { key: 'dpr', kind: 'launch', name: 'Tỉ lệ điểm ảnh', desc: 'devicePixelRatio (deviceScaleFactor) theo fingerprint' },
+  { key: 'geo', kind: 'launch', name: 'Vị trí', desc: 'geolocation theo fingerprint (chỉ khi fingerprint có vị trí)' },
+];
+// Tầng đang bật của 1 profile: mặc định bật hết, trừ các tầng trong profile.fpOffLayers
+function fpLayersOf(profile) {
+  const off = new Set((profile && profile.fpOffLayers) || []);
+  return Object.fromEntries(FP_LAYERS.map((l) => [l.key, !off.has(l.key)]));
+}
+
+function buildFingerprintInitScript(fp, customUserAgent, layers) {
+  const L = layers || fpLayersOf(null);
   const uaMajor = customUserAgent ? extractMajorVersionFromUA(customUserAgent) : null;
 
   return `
@@ -387,7 +413,8 @@ function buildFingerprintInitScript(fp, customUserAgent) {
   const MEDIA_SEED = ${JSON.stringify(fp.mediaDeviceSeed || 1)};
   const CUSTOM_UA = ${JSON.stringify(customUserAgent || null)};
   const UA_MAJOR = ${JSON.stringify(uaMajor)};
-  const WORKER_PATCH_SOURCE = ${JSON.stringify(buildWorkerPatchSource(fp, customUserAgent))};
+  const WORKER_PATCH_SOURCE = ${JSON.stringify(buildWorkerPatchSource(fp, customUserAgent, L))};
+  const L = ${JSON.stringify(L)}; // tầng đang bật (xem FP_LAYERS)
 
   function mulberry32(seed) {
     let a = seed | 0;
@@ -412,7 +439,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     try { nativeStrings.set(fn, 'function ' + name + '() { [native code] }'); } catch (e) {}
     return fn;
   }
-  try {
+  if (L.tostring) try {
     const origFunctionToString = Function.prototype.toString;
     function patchedToString() {
       if (nativeStrings.has(this)) return nativeStrings.get(this);
@@ -422,7 +449,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     Object.defineProperty(Function.prototype, 'toString', { value: patchedToString, writable: true, configurable: true, enumerable: false });
   } catch (e) { /* everything below still works, just without toString cover */ }
 
-  try {
+  if (L.nav) try {
     Object.defineProperty(Navigator.prototype, 'platform', { get: markNative(() => PLATFORM, 'get platform'), configurable: true, enumerable: true });
     Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: markNative(() => HARDWARE_CONCURRENCY, 'get hardwareConcurrency'), configurable: true, enumerable: true });
     if ('deviceMemory' in Navigator.prototype) {
@@ -433,7 +460,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
   // Bisect vong 2: BAT LAI canvas, GIU WebGL tat -- xac dinh xem canvas
   // co vo toi hay khong. Da xac nhan Nhom A (canvas+webgl gop lai) la
   // thu pham, Worker-wrapping va prototype fix deu vo toi.
-  try {
+  if (L.canvas) try {
     function noiseUint8ClampedArray(data, seedMix) {
       let hash = (CANVAS_SEED ^ seedMix) | 0;
       const step = Math.max(1, Math.floor(data.length / 256));
@@ -485,7 +512,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
       return origToBlob.call(this, callback, ...rest);
     }, 'toBlob');
   } catch (e) {}
-  try {
+  if (L.webgl) try {
     // Da xac nhan qua bisect: WebGL VO TOI, khong lien quan loi chan
     // dang nhap -- bat lai binh thuong.
     function patchWebGL(proto) {
@@ -539,7 +566,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     if (window.WebGL2RenderingContext) patchWebGL(WebGL2RenderingContext.prototype);
   } catch (e) {}
 
-  try {
+  if (L.audio) try {
     const noisedChannels = new WeakMap(); // AudioBuffer -> Set<channel index>
     function noiseChannelInPlace(buffer, channel, data) {
       let seen = noisedChannels.get(buffer);
@@ -579,7 +606,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     }
   } catch (e) {}
 
-  try {
+  if (L.fonts) try {
     const fakeFontFaces = FONTS.map((name) => new FontFace(name, 'local("' + name + '")'));
     const fontNamesLower = new Set(FONTS.map((f) => f.toLowerCase()));
     const GENERIC_FONT_FAMILIES = new Set([
@@ -654,7 +681,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     });
   } catch (e) {}
 
-  if (CUSTOM_UA) {
+  if (CUSTOM_UA && L.uadata) {
     try {
       const version = String(UA_MAJOR || 130);
       const brands = [
@@ -673,7 +700,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
       // ở đây đang THAY THẾ hẳn dữ liệu (customUserAgent), không có bản
       // gốc nào đáng tin để mượn.
       const uaProto = (typeof NavigatorUAData !== 'undefined') ? NavigatorUAData.prototype : Object.prototype;
-      const fakeUAData = Object.assign(Object.create(uaProto), {
+      const fakeUAData = ((o, props) => { for (const k of Object.keys(props)) Object.defineProperty(o, k, { value: props[k], enumerable: true, configurable: true, writable: true }); return o; })(Object.create(uaProto), { // defineProperty, KHÔNG Object.assign: brands / platform / mobile ở NavigatorUAData.prototype là getter chỉ đọc -> assign ném lỗi, cả tầng này bị bỏ qua
         brands: brands, mobile: false, platform: uaPlatform,
         getHighEntropyValues: markNative(function () {
           return Promise.resolve({
@@ -688,7 +715,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     } catch (e) {}
   }
 
-  try {
+  if (L.media) try {
     function hashHex(salt) {
       // Real Chrome deviceIds are 64 hex chars (a salted SHA-256 digest);
       // matching the length (not just the shape) avoids an easy tell.
@@ -725,7 +752,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     }
   } catch (e) {}
 
-  try {
+  if (L.avail) try {
     if (screen.availHeight === screen.height) {
       let hash = (CANVAS_SEED ^ (screen.width * 2654435761) ^ screen.height) | 0;
       const rng = mulberry32(hash >>> 0);
@@ -740,7 +767,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
     }
   } catch (e) {}
 
-  try {
+  if (L.conn) try {
     if (navigator.connection) {
       const fakeConnection = new EventTarget();
       // Cùng lỗi với FontFaceSet phía trên -- navigator.connection
@@ -767,7 +794,7 @@ function buildFingerprintInitScript(fp, customUserAgent) {
 
   // Đã bisect và loại trừ: KHÔNG phải nguyên nhân chặn đăng nhập (test
   // thực tế xác nhận). Giữ nguyên hoạt động bình thường.
-  try {
+  if (L.workers) try {
     const OriginalWorker = window.Worker;
     const OriginalSharedWorker = window.SharedWorker;
 
@@ -847,7 +874,8 @@ function buildFingerprintInitScript(fp, customUserAgent) {
 `;
 }
 
-function buildWorkerPatchSource(fp, customUserAgent) {
+function buildWorkerPatchSource(fp, customUserAgent, layers) {
+  const L = layers || fpLayersOf(null); // cùng các tầng đang bật như ở trang
   const uaMajor = customUserAgent ? extractMajorVersionFromUA(customUserAgent) : null;
   return `
 const nativeStrings = new WeakMap();
@@ -855,7 +883,7 @@ function markNative(fn, name) {
   try { nativeStrings.set(fn, 'function ' + name + '() { [native code] }'); } catch (e) {}
   return fn;
 }
-try {
+if (${!!L.tostring}) try {
   const origFunctionToString = Function.prototype.toString;
   function patchedToString() {
     if (nativeStrings.has(this)) return nativeStrings.get(this);
@@ -876,7 +904,7 @@ function mulberry32(seed) {
 }
 const CANVAS_SEED = ${JSON.stringify(fp.canvasNoiseSeed)};
 
-try {
+if (${!!L.nav}) try {
   const proto = (typeof WorkerNavigator !== 'undefined') ? WorkerNavigator.prototype : Object.getPrototypeOf(navigator);
   Object.defineProperty(proto, 'hardwareConcurrency', { get: markNative(() => ${JSON.stringify(fp.hardwareConcurrency)}, 'get hardwareConcurrency'), configurable: true, enumerable: true });
   if ('deviceMemory' in proto) {
@@ -888,12 +916,12 @@ try {
 } catch (e) {}
 
 ${customUserAgent ? `
-try {
+if (${!!L.uadata}) try {
   const version = String(${JSON.stringify(uaMajor || 130)});
   const brands = [{ brand: 'Not_A Brand', version: '8' }, { brand: 'Chromium', version: version }, { brand: 'Google Chrome', version: version }];
   const uaPlatform = ${JSON.stringify(fp.platform)} === 'MacIntel' ? 'macOS' : String(${JSON.stringify(fp.platform)}).indexOf('Linux') === 0 ? 'Linux' : 'Windows';
   const uaProto = (typeof NavigatorUAData !== 'undefined') ? NavigatorUAData.prototype : Object.prototype;
-  const fakeUAData = Object.assign(Object.create(uaProto), {
+  const fakeUAData = ((o, props) => { for (const k of Object.keys(props)) Object.defineProperty(o, k, { value: props[k], enumerable: true, configurable: true, writable: true }); return o; })(Object.create(uaProto), { // defineProperty, KHÔNG Object.assign: brands / platform / mobile ở NavigatorUAData.prototype là getter chỉ đọc -> assign ném lỗi, cả tầng này bị bỏ qua
     brands: brands, mobile: false, platform: uaPlatform,
     getHighEntropyValues: markNative(function () { return Promise.resolve({ brands: brands, mobile: false, platform: uaPlatform, architecture: 'x86', bitness: '64', wow64: false, model: '', uaFullVersion: version + '.0.0.0', fullVersionList: brands }); }, 'getHighEntropyValues'),
     toJSON: markNative(function () { return { brands: brands, mobile: false, platform: uaPlatform }; }, 'toJSON'),
@@ -903,7 +931,7 @@ try {
 } catch (e) {}
 ` : ''}
 
-try {
+if (${!!L.webgl}) try {
   const WEBGL_VENDOR = ${JSON.stringify(fp.webglVendor)};
   const WEBGL_RENDERER = ${JSON.stringify(fp.webglRenderer)};
   const WEBGL_EXTENSIONS = ${JSON.stringify(GENERIC_WEBGL_EXTENSIONS)};
@@ -951,7 +979,7 @@ try {
   if (typeof WebGL2RenderingContext !== 'undefined') patchWebGL(WebGL2RenderingContext.prototype);
 } catch (e) {}
 
-try {
+if (${!!L.canvas}) try {
   // OffscreenCanvas 2D fingerprinting inside a worker was previously
   // untouched -- getImageData/convertToBlob noise only existed on the
   // main thread. This mirrors that defense for the worker context.
@@ -1032,4 +1060,6 @@ function buildBaseStealthInitScript() {
 `;
 }
 
-module.exports = { generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, PRESETS, presetsForHost, pickWeighted, extractMajorVersionFromUA, screenForViewport, STANDARD_SCREEN_RESOLUTIONS, plausibleViewport };
+module.exports = {
+  FP_LAYERS,
+  fpLayersOf, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, PRESETS, presetsForHost, pickWeighted, extractMajorVersionFromUA, screenForViewport, STANDARD_SCREEN_RESOLUTIONS, plausibleViewport };
