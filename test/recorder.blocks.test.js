@@ -7,6 +7,7 @@
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert');
 const { chromium } = require('playwright');
 process.env.PM_NO_CLIPBOARD = '1'; // test không ghi đè clipboard của máy
+process.env.PM_REC_OPEN_SHADOW = '1'; // giao diện recorder dùng shadow DOM mở để locator thấy nút (chạy trong thế giới cách ly nên không vá attachShadow được)
 const rec = require('../recorder');
 const A = require('../scripts/xlv1_actions');
 const helpers = require('../scripts/helpers');
@@ -27,7 +28,7 @@ async function runCode(code) {
 }
 const st = () => rec.recorderState(ID);
 const until = async (fn, ms = 8000, what = 'điều kiện') => { for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 150))) { const v = fn(); if (v) return v; } throw new Error('Hết giờ chờ: ' + what); };
-const call = (msg) => page.evaluate((m) => window.__pmRec(m), msg);
+const call = (msg) => rec.recorderHandle(ID, page, msg); // gửi lệnh như giao diện recorder (từ phía server)
 // Bấm trong giao diện recorder (shadow DOM -- clickEl báo "bị đè" oan vì document.elementFromPoint ra thẻ host): đi chuột thật + nhấn theo toạ độ
 async function uiClick(loc) { await loc.waitFor({ state: 'visible', timeout: 8000 }); await helpers.clickVisibly(page, await loc.boundingBox()); await page.waitForTimeout(350); }
 const side = (sel) => page.locator('.side ' + sel);

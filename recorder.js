@@ -1,7 +1,7 @@
 /**
  * recorder.js -- ghi lại thao tác tay trên cửa sổ profile đang mở rồi sinh code dùng scripts/xlv1_actions.js (clickEl, typeEl, ...).
  * -----------------------------------------------------------------------
- * - startRecorder(id, context): gắn binding window.__pmRec + init script vẽ nút "⏺ REC" (góc dưới phải, kéo được) vào mọi trang.
+ * - startRecorder(id, context): chạy recorder (nút "⏺ REC" góc dưới phải, kéo được) trong THẾ GIỚI JS CÁCH LY của mọi trang / iframe (xem attachTarget).
  *   Bấm nút REC = bắt đầu ghi 1 ĐOẠN; đang ghi bấm lại = TẠM DỪNG (bấm nữa = ghi TIẾP vào cùng đoạn, nối nhiều lần ghi thành 1 đoạn);
  *   nút ⏹ Xuất = kết thúc đoạn + xuất code cả đoạn (editor đang mở tự chèn vào chỗ con trỏ, kèm copy clipboard).
  *   Nút ☰ cạnh đó -> bảng các bước đã ghi: đổi hành động, đổi selector, ⬆ cha / ⬇ con, sửa chữ gõ, xoá bước, xem code.
@@ -49,7 +49,9 @@
  * - Màn hình lạ: While sinh ra dùng whileGuard (scripts/xlv1_actions.js) -- N vòng liền không khớp trường hợp nào / hết giờ -> chụp màn hình
  *   + log "màn hình lạ, chưa có trường hợp cho nó" (▶ Chạy thử lẫn code xuất ra chạy thật đều vậy).
  * - Bước + trạng thái giữ ở server (recorders[id]) nên chuyển trang / reload không mất.
- * - Lưu ý: lúc đang ghi, trang có thêm window.__pmRec + 1 thẻ div (shadow DOM) -- trang web có thể thấy. Chỉ bật khi cần ghi.
+ * - Bảo mật: giao diện + đường truyền chạy trong thế giới cách ly -- JS của trang web không thấy / không gọi được lệnh (trước đây gọi được testRun
+ *   = chạy code trên máy); iframe chỉ gửi được sự kiện ghi; đã dừng ghi thì không nhận lệnh; click / phím giả do trang tạo ra bị bỏ qua.
+ *   Trang chỉ thấy 1 thẻ div (shadow DOM đóng) của giao diện lúc đang ghi.
  * -----------------------------------------------------------------------
  */
 
@@ -522,7 +524,7 @@ function onEvent(r, ev, page) {
   if (ev.kind === 'select') return add({ ...base, action: 'select', text: ev.value });
 }
 
-// Dựng locator từ chuỗi code KHÔNG dùng eval: chuỗi đến từ trang web (trang nào cũng gọi được window.__pmRec), eval = trang chạy code trên máy.
+// Dựng locator từ chuỗi code KHÔNG dùng eval: chuỗi do người dùng gõ / nhận từ giao diện trong trang, eval = trang chạy code trên máy.
 // Chỉ nhận dạng page.<hàm>(<chuỗi / số / true / false / {object}>).<hàm>(...)... với các hàm locator trong LOC_FNS.
 const LOC_FNS = new Set(['locator', 'getByRole', 'getByText', 'getByTestId', 'getByPlaceholder', 'getByLabel', 'getByTitle', 'getByAltText', 'filter', 'first', 'last', 'nth', 'or', 'and', 'frameLocator']);
 function locOf(page, code) {
@@ -591,13 +593,12 @@ async function perform(r, page, s) {
 }
 
 // iframe chứa bước -> chuỗi frameLocator(...) từ khung chính xuống (iframe lồng nhau thì nối nhiều cái). Selector của thẻ <iframe> do
-// recorder ở khung cha tính (window.__pmRecSel -- móc ngắn); không có thì lấy id / name / title, cuối cùng là thứ tự iframe.
+// lấy name / title / id của thẻ <iframe> (chạy ở khung cha -- không tin hàm nào của trang), cuối cùng là thứ tự iframe.
 async function framePrefix(frame) {
   const parts = [];
   for (let f = frame; f && f.parentFrame(); f = f.parentFrame()) {
     const h = await f.frameElement().catch(() => null);
     const css = h && await h.evaluate((el) => {
-      if (window.__pmRecSel) { const c = window.__pmRecSel(el); if (c) return c; }
       const t = el.tagName.toLowerCase(), a = (k) => el.getAttribute(k) && document.querySelectorAll(`${t}[${k}="${el.getAttribute(k)}"]`).length === 1 ? `${t}[${k}="${el.getAttribute(k)}"]` : null;
       return a('name') || a('title') || a('id') || `${t} >> nth=${[...document.querySelectorAll(t)].indexOf(el)}`;
     }).catch(() => null);
@@ -672,10 +673,13 @@ function moveStep(r, id, dir) {
 async function handle(id, page, msg, frame) {
   const r = recorders[id];
   if (!r) return { enabled: false };
+  const sub = frame === false || (!!frame && !!page && frame !== page.mainFrame());
+  if (sub && msg.op !== 'event') return { enabled: r.enabled }; // iframe chỉ được gửi sự kiện ghi thao tác (click / gõ...), không được ra lệnh
+  if (!r.enabled && msg.op !== 'state') return stateOf(id); // đã dừng ghi: không nhận lệnh nào nữa
   if (msg.op === 'count') return { counts: await countLocs(page, msg.codes) };
   let exported = null;
   if (msg.op === 'event' && r.recording) {
-    if (frame && page && frame !== page.mainFrame()) { const fp = await framePrefix(frame); if (!fp) return stateOf(id); msg.ev.frame = fp; } // sự kiện trong iframe
+    if (sub) { const fp = frame && await framePrefix(frame); if (!fp) return stateOf(id); msg.ev.frame = fp; } // sự kiện trong iframe
     const s = onEvent(r, msg.ev, page); if (s && msg.ev.perform) await perform(r, page, s);
   }
   else if (msg.op === 'testRun') { r.test = { running: true }; r.test = await testRun(r); }
@@ -873,14 +877,10 @@ async function startRecorder(id, context, data) {
   r.enabled = true; r.recording = true; r.segOpen = true;
   if (!context.__pmRecorder) {
     context.__pmRecorder = true;
-    await context.exposeBinding('__pmRec', (src, msg) => handle(id, src.page, msg, src.frame));
-    await context.addInitScript(`(${pageRecorder.toString()})()`);
-    context.on('page', (p) => onNewTab(id, p));
+    context.on('page', (p) => { onNewTab(id, p); attachPage(id, p); });
     context.on('close', () => { delete recorders[id]; });
   }
-  for (const page of context.pages()) watchPage(id, page);
-  // Trang đang mở sẵn: init script chỉ chạy cho lần tải trang SAU, nên chèn tay ngay bây giờ
-  for (const page of context.pages()) for (const f of page.frames()) await f.evaluate(`(${pageRecorder.toString()})()`).catch(() => {}); // cả iframe đang có
+  for (const page of context.pages()) { watchPage(id, page); await attachPage(id, page); }
   const pg = context.pages()[0];
   if (!r.steps.length && pg && /^https?:/.test(pg.url())) onEvent(r, { kind: 'nav', url: pg.url() });
   return stateOf(id);
@@ -890,16 +890,81 @@ async function stopRecorder(id, context) {
   const r = recorders[id];
   let exported = null;
   if (r) { if (r.segOpen) exported = exportSeg(r); r.enabled = false; r.recording = false; }
-  if (context) for (const page of context.pages()) await page.evaluate(() => window.__pmRecUI && window.__pmRecUI.remove()).catch(() => {});
+  if (context) for (const page of context.pages()) for (const { cdp, ctxs } of page.__pmRecSessions || []) for (const contextId of ctxs.keys()) {
+    await cdp.send('Runtime.evaluate', { contextId, expression: 'window.__pmRecUI && window.__pmRecUI.remove(); window.__pmRecUI = null;' }).catch(() => {}); // gỡ giao diện ngay (không chờ lượt làm mới)
+  }
   return { ...stateOf(id), exported };
 }
 
+// ---------------- Đường truyền trang <-> server: THẾ GIỚI JS CÁCH LY (isolated world, như content script của extension) qua CDP.
+// Giao diện recorder + binding chỉ tồn tại trong thế giới 'pmrec': dùng chung DOM với trang nhưng biến / hàm tách hẳn -> JS của trang web
+// không thấy, không gọi được binding, không ghi đè được hàm recorder dùng (trước đây exposeBinding nằm chung thế giới với trang: trang gọi
+// được lệnh testRun = chạy code trên máy). Iframe cùng tiến trình đi qua phiên CDP của trang; iframe khác tiến trình (OOPIF) có phiên riêng.
+const REC_WORLD = 'pmrec', REC_BIND = 'pmRecB';
+const recSource = () => `(${pageRecorder.toString()})(${JSON.stringify({ bind: REC_BIND, openShadow: process.env.PM_REC_OPEN_SHADOW === '1' })})`;
+async function attachPage(id, page) {
+  if (page.__pmRecAttached) return;
+  page.__pmRecAttached = true;
+  await attachTarget(id, page, page);
+  page.on('frameattached', (f) => attachTarget(id, page, f)); // iframe khác tiến trình: phiên CDP riêng (iframe cùng tiến trình -> newCDPSession báo lỗi, bỏ qua)
+  page.on('framenavigated', (f) => { if (f !== page.mainFrame()) attachTarget(id, page, f); });
+  for (const f of page.frames()) if (f !== page.mainFrame()) await attachTarget(id, page, f);
+}
+async function attachTarget(id, page, target) {
+  if (target.__pmRecCdp) return;
+  let cdp;
+  try { cdp = await page.context().newCDPSession(target); } catch { return; }
+  target.__pmRecCdp = cdp;
+  const ctxs = new Map(); // executionContextId (thế giới pmrec) -> frameId CDP
+  (page.__pmRecSessions = page.__pmRecSessions || []).push({ cdp, ctxs });
+  let rootId = null;
+  cdp.on('Runtime.executionContextCreated', ({ context: c }) => { if (c.name === REC_WORLD) ctxs.set(c.id, c.auxData && c.auxData.frameId); });
+  cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }) => ctxs.delete(executionContextId));
+  cdp.on('Runtime.executionContextsCleared', () => ctxs.clear());
+  cdp.on('Runtime.bindingCalled', async ({ name, payload, executionContextId }) => {
+    if (name !== REC_BIND) return;
+    let m;
+    try { m = JSON.parse(payload); } catch { return; }
+    let res = null;
+    try {
+      const fid = ctxs.get(executionContextId);
+      // khung gửi lệnh -> Frame của Playwright: khung gốc của phiên = page.mainFrame() / chính iframe khác tiến trình; iframe cùng tiến trình
+      // tìm theo url + name trong cây khung của CDP (không tìm được = false: chỉ bỏ qua sự kiện của khung đó)
+      let frame = target === page ? page.mainFrame() : target;
+      if (fid && fid !== rootId) {
+        const { frameTree } = await cdp.send('Page.getFrameTree');
+        const find = (n) => (n.frame.id === fid ? n.frame : (n.childFrames || []).map(find).find(Boolean));
+        const fr = find(frameTree);
+        frame = (fr && page.frames().find((f) => f !== page.mainFrame() && f.url() === fr.url && f.name() === (fr.name || ''))) || false;
+      }
+      res = await handle(id, page, (m && m.msg) || {}, frame);
+    } catch (e) { res = null; }
+    await cdp.send('Runtime.evaluate', { contextId: executionContextId, expression: `window.__pmRecResolve && window.__pmRecResolve(${JSON.stringify(m && m.seq)}, ${JSON.stringify(res === undefined ? null : res)})` }).catch(() => {});
+  });
+  try {
+    await cdp.send('Page.enable'); await cdp.send('Runtime.enable');
+    await cdp.send('Runtime.addBinding', { name: REC_BIND, executionContextName: REC_WORLD });
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: recSource(), worldName: REC_WORLD });
+    const { frameTree } = await cdp.send('Page.getFrameTree');
+    rootId = frameTree.frame.id;
+    const walk = async (n) => { // tài liệu đang mở sẵn: tạo thế giới cách ly + chạy recorder ngay (script ở trên chỉ chạy cho lần tải SAU)
+      try { const { executionContextId } = await cdp.send('Page.createIsolatedWorld', { frameId: n.frame.id, worldName: REC_WORLD }); await cdp.send('Runtime.evaluate', { contextId: executionContextId, expression: recSource() }); } catch {}
+      for (const c of n.childFrames || []) await walk(c);
+    };
+    await walk(frameTree);
+  } catch {}
+}
+
 // ===================================================================== chạy TRONG trang (được toString() rồi chèn vào)
-function pageRecorder() {
+function pageRecorder(cfg) { // chạy trong THẾ GIỚI CÁCH LY 'pmrec' (xem attachTarget) -- biến window.* ở đây trang web không thấy
+  cfg = cfg || {};
   const isTop = window.top === window.self; // trong iframe: chỉ ghi click / gõ / chọn (không nút REC, không bảng Alt, không ghi chuyển trang)
   if (window.__pmRecInstalled) { if (isTop && window.__pmRecMount) window.__pmRecMount(); return; } // đã gắn listener rồi (bật ghi lại lần 2) -- chỉ hiện lại nút
   window.__pmRecInstalled = true;
-  const call = (msg) => (typeof window.__pmRec === 'function' ? window.__pmRec(msg) : Promise.resolve(null));
+  const B = window[cfg.bind], waits = new Map(); // binding CDP chỉ có trong thế giới cách ly này
+  let callSeq = 0;
+  window.__pmRecResolve = (seq, res) => { const w = waits.get(seq); if (w) { waits.delete(seq); w(res); } }; // server trả kết quả qua đây
+  const call = (msg) => (typeof B === 'function' ? new Promise((ok) => { const seq = ++callSeq; waits.set(seq, ok); B(JSON.stringify({ seq, msg })); }) : Promise.resolve(null));
   const sq = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
   const clean = (s) => String(s || '').replace(/\s+/g, ' ').trim();
   const cssEsc = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : String(s).replace(/["\\]/g, '\\$&'));
@@ -1024,9 +1089,7 @@ function pageRecorder() {
     }
     return [...new Set(found)].sort((a, b) => a.length - b.length).slice(0, 3).map((c) => ({ kind: 'kết hợp', code: `page.locator(${sq(c)})`, base: `page.locator(${sq(c)})`, unique: true, css: c }));
   }
-  // css ngắn cho 1 phần tử -- server dùng cho thẻ <iframe> chứa bước (page.frameLocator(...)), xem framePrefix ở server
-  window.__pmRecSel = (el) => { const cs = comboAlts(el), c = cs.find((x) => x.css !== el.tagName.toLowerCase()) || cs[0]; return c ? c.css : null; }; // có móc (title / name / id...) trước thẻ trơn
-  // Phần tử nằm trong 1 "item" lặp lại (bài viết, dòng danh sách...): danh sách item + selector của phần tử TRONG item -- server gom các
+    // Phần tử nằm trong 1 "item" lặp lại (bài viết, dòng danh sách...): danh sách item + selector của phần tử TRONG item -- server gom các
   // click giống nhau trên nhiều item để gợi ý gộp thành vòng `for (const item of ...all())`
   function itemOf(el) {
     const { tag, out: hs } = hooks(el), own = [...hs.map((h) => tag + h), ...hs.flatMap((h, i) => hs.slice(i + 1).map((x) => tag + h + x))];
@@ -1156,7 +1219,7 @@ function pageRecorder() {
   let lastUrl = location.href;
   const navTick = () => { if (location.href !== lastUrl) { lastUrl = location.href; send({ kind: 'nav', url: location.href }); } };
   addEventListener('pagehide', flushAll); // rời trang (Enter submit form...) -- gửi nốt chữ đang gõ dở
-  const hello = () => (typeof window.__pmRec === 'function' ? send({ kind: 'nav', url: location.href }) : setTimeout(hello, 200)); // vừa tải trang mới
+  const hello = () => (typeof B === 'function' ? send({ kind: 'nav', url: location.href }) : setTimeout(hello, 200)); // vừa tải trang mới
   if (isTop) { setInterval(navTick, 500); hello(); }
 
   // ---------------- chặn sự kiện của giao diện recorder ngay ở window (capture -- gắn trước script của trang) để trang không thấy:
@@ -1166,6 +1229,7 @@ function pageRecorder() {
   for (const t of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'dblclick', 'auxclick', 'contextmenu', 'mouseover', 'keydown', 'keyup', 'keypress']) addEventListener(t, (e) => {
     if (!root || !ours(e) || (t.startsWith('key') && e.key === 'Alt')) return; // Alt: để bộ chọn element nhận cả khi đang gõ trong bảng
     e.stopImmediatePropagation();
+    if (!e.isTrusted) return; // click / phím GIẢ do JS của trang tạo ra lên giao diện recorder -> bỏ qua (chỉ người dùng thật mới bấm được)
     const el = t.startsWith('key') || (t === 'click' && e.detail === 0) ? root.activeElement : root.elementFromPoint(e.clientX, e.clientY);
     if (el && el.closest) uiEvent(e, el);
   }, true);
@@ -1543,7 +1607,7 @@ function pageRecorder() {
     host = document.createElement('div');
     host.style.cssText = 'all:initial;position:fixed;right:16px;bottom:16px;z-index:2147483647';
     window.__pmRecUI = host;
-    root = host.attachShadow({ mode: 'closed' });
+    root = host.attachShadow({ mode: cfg.openShadow ? 'open' : 'closed' }); // open chỉ khi chạy test (PM_REC_OPEN_SHADOW=1) để locator thấy nút
     setHTML(root, `<style>${CSS_UI}</style><div class="panel" hidden></div><div class="edp" hidden></div><div class="side" hidden></div><div class="libw" hidden></div><div class="toast" hidden></div><div class="pick" hidden></div>
       <div class="pill" title="Bấm: ghi / tạm dừng / ghi tiếp (cùng 1 đoạn). ⏹: xuất code cả đoạn. Giữ Alt + rê chuột: chọn đúng phần tử"><span class="dot"></span><span class="lbl">REC</span><button data-op="caseEnd" title="Xong trường hợp đang ghi -- bước sau ra ngoài khối" hidden>✓ Xong TH</button><button data-op="export" title="Kết thúc đoạn + xuất code (editor + clipboard)" hidden>⏹ Xuất</button><button data-op="menu" title="Các bước đã ghi">☰</button></div>`);
     ui = { root, pill: root.querySelector('.pill'), panel: root.querySelector('.panel'), pick: root.querySelector('.pick'), toast: root.querySelector('.toast'), side: root.querySelector('.side'), edp: root.querySelector('.edp'), lib: root.querySelector('.libw') };
@@ -2102,7 +2166,7 @@ function pageRecorder() {
     else if (op === 'child') upd(stepId, { level: step.level - 1 });
     else if (op === 'edit') { editing = editing === stepId ? null : stepId; draw(st); const i = ui.panel.querySelector('[data-f=custom]'); if (i) i.focus(); }
   }
-  const tryMount = window.__pmRecMount = () => (typeof window.__pmRec === 'function' ? call({ op: 'state' }).then((s) => { if (s && s.enabled) mount(); }) : setTimeout(tryMount, 200));
+  const tryMount = window.__pmRecMount = () => (typeof B === 'function' ? call({ op: 'state' }).then((s) => { if (s && s.enabled) mount(); }) : setTimeout(tryMount, 200));
   if (!isTop) return; // iframe: tới đây là đủ (ghi sự kiện); giao diện chỉ ở khung chính
   tryMount();
   // đồng bộ với server (bước ghi từ tab khác, tắt record từ editor...)
@@ -2119,5 +2183,7 @@ function pauseRecorder(id) {
 
 // Code các đoạn đã dừng (bấm REC lần 2) có id > since -- editor tự chèn
 const recorderExports = (id, since = 0) => (recorders[id]?.exports || []).filter((e) => e.id > since);
+// Gửi lệnh như giao diện recorder nhưng từ phía server (đáng tin) -- dùng cho test
+const recorderHandle = (id, page, msg) => handle(id, page, msg, page.mainFrame());
 
-module.exports = { startRecorder, stopRecorder, pauseRecorder, recorderState: stateOf, recorderExports, recorderHeader: HEADER, recorderCode: (id, withRequire) => buildCode(recorders[id]?.steps || [], withRequire) };
+module.exports = { recorderHandle, startRecorder, stopRecorder, pauseRecorder, recorderState: stateOf, recorderExports, recorderHeader: HEADER, recorderCode: (id, withRequire) => buildCode(recorders[id]?.steps || [], withRequire) };
