@@ -29,6 +29,7 @@ const timeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout((
 const isNative = (fn) => { try { return /\[native code\]/.test(Function.prototype.toString.call(fn)); } catch (e) { return false; } };
 (async () => {
   add('stealth', 'navigator.webdriver', String(navigator.webdriver), navigator.webdriver ? 'bad' : 'ok');
+  try { const q = await navigator.permissions.query({ name: 'notifications' }); add('notif', 'Notification.permission / permissions.query', `${Notification.permission} / ${q.state}`, Notification.permission === 'denied' ? 'warn' : ''); } catch (e) { add('notif', 'thông báo', 'LỖI ' + e.message, 'bad'); }
   await new Promise((r) => (document.readyState === 'loading' ? addEventListener('DOMContentLoaded', () => setTimeout(r, 50)) : setTimeout(r, 50))); // nhãn / tiêu đề được chèn lúc trang tải xong
   const badge = document.getElementById('__profile_badge__');
   add('badge', 'nhãn tên profile chèn vào trang', badge ? 'CÓ -- web tìm được: ' + badge.textContent : 'không có', badge ? 'warn' : 'ok');

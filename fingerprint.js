@@ -381,6 +381,8 @@ function uaMetadataFor(ua) {
 // Các TẦNG của fingerprint -- bật / tắt riêng từng tầng cho từng profile (profile.fpOffLayers = ['fonts', ...]) để tìm tầng làm hỏng web.
 // kind 'script': đoạn giả lập trong init script; 'launch': tuỳ chọn lúc mở Chrome; 'base': áp cho MỌI profile, kể cả không có / đang OFF fingerprint
 const FP_LAYERS = [
+  { key: 'pwflags', kind: 'base', name: 'Cờ khởi động của Playwright (~35 cờ)', desc: 'Playwright tự thêm ~35 cờ Chrome thường không có (--enable-automation, --disable-field-trial-config, --disable-component-update, --force-color-profile, --disable-popup-blocking...). TẮT = mở Chrome gần như Chrome thường (webdriver tự là false) -- thử khi web chặn đăng nhập mà trình duyệt thường vẫn vào được' },
+  { key: 'notif', kind: 'base', name: 'Chặn hỏi thông báo', desc: 'Chrome chặn sẵn "Cho phép thông báo?" (không hiện popup) -> trang thấy Notification.permission = "denied"; TẮT = như Chrome mặc định ("default", có hỏi)' },
   { key: 'stealth', kind: 'base', name: 'Ẩn dấu vết tự động hoá', desc: 'navigator.webdriver = false (áp cho mọi profile, kể cả không có fingerprint)' },
   { key: 'badge', kind: 'base', def: false, name: 'Nhãn tên profile trên trang', desc: 'thẻ <div id="__profile_badge__"> ghi tên profile ở góc trên phải MỌI trang -- web tìm được trong DOM (áp cả khi fingerprint OFF)' },
   { key: 'title', kind: 'base', def: false, name: 'Tên profile ở tiêu đề tab', desc: 'document.title của trang bị thêm "[tên profile] " + thuộc tính lạ trên document (áp cả khi fingerprint OFF)' },
