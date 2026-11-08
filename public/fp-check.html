@@ -29,6 +29,11 @@ const timeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout((
 const isNative = (fn) => { try { return /\[native code\]/.test(Function.prototype.toString.call(fn)); } catch (e) { return false; } };
 (async () => {
   add('stealth', 'navigator.webdriver', String(navigator.webdriver), navigator.webdriver ? 'bad' : 'ok');
+  await new Promise((r) => (document.readyState === 'loading' ? addEventListener('DOMContentLoaded', () => setTimeout(r, 50)) : setTimeout(r, 50))); // nhãn / tiêu đề được chèn lúc trang tải xong
+  const badge = document.getElementById('__profile_badge__');
+  add('badge', 'nhãn tên profile chèn vào trang', badge ? 'CÓ -- web tìm được: ' + badge.textContent : 'không có', badge ? 'warn' : 'ok');
+  const tdesc = Object.getOwnPropertyDescriptor(document, 'title');
+  add('title', 'document.title / thuộc tính lạ trên document', `${document.title} / ${tdesc ? 'CÓ (trình duyệt thật không có)' : 'không có'}`, tdesc ? 'warn' : 'ok');
   add('tostring', 'toDataURL / getParameter trông như hàm gốc', `${isNative(HTMLCanvasElement.prototype.toDataURL)} / ${isNative(WebGLRenderingContext.prototype.getParameter)}`, isNative(HTMLCanvasElement.prototype.toDataURL) ? 'ok' : 'warn');
   add('nav', 'navigator.platform', navigator.platform);
   add('nav', 'hardwareConcurrency (nhân CPU)', navigator.hardwareConcurrency);

@@ -321,9 +321,9 @@ let fpLayerDefs = null, fpPanelProfile = null;
 async function openFpPanel(profile) {
   fpPanelProfile = profile;
   if (!fpLayerDefs) fpLayerDefs = await fetch('/api/fp-layers').then((r) => r.json()).catch(() => []);
-  const off = new Set(profile.fpOffLayers || []), f = profile.fingerprint || {}, kindLabel = { base: 'chung', script: 'trong trang', launch: 'lúc mở Chrome' };
+  const off = new Set(profile.fpOffLayers || []), f = profile.fingerprint || {}, kindLabel = { base: 'chung -- chạy cả khi OFF / không có fingerprint', script: 'trong trang', launch: 'lúc mở Chrome' };
   document.getElementById('fpPanelTitle').textContent = `🧬 Fingerprint: ${profile.name}`;
-  document.getElementById('fpPanelInfo').textContent = !profile.fingerprint ? '⚠ Profile này CHƯA có fingerprint -- chỉ tầng "Ẩn dấu vết tự động hoá" (stealth) có tác dụng. Muốn có fingerprint: bấm ↻ ở thẻ profile (LƯU Ý: ↻ xoá cả cookie / đăng nhập của profile).' : `${f.label || ''} · ${f.platform || ''} · ${f.hardwareConcurrency || '?'} nhân · ${f.deviceMemory || '?'} GB · DPR ${f.deviceScaleFactor || '?'} · ${(f.fonts || []).length} font${profile.fingerprintOff ? ' · ⚠ fingerprint đang TẮT (nút OFF) -- các tầng dưới không áp' : ''}`;
+  document.getElementById('fpPanelInfo').textContent = !profile.fingerprint ? '⚠ Profile này CHƯA có fingerprint -- chỉ 4 tầng chung (stealth, nhãn tên, tiêu đề tab, User-Agent riêng) có tác dụng. Muốn có fingerprint: bấm ↻ ở thẻ profile (LƯU Ý: ↻ xoá cả cookie / đăng nhập của profile).' : `${f.label || ''} · ${f.platform || ''} · ${f.hardwareConcurrency || '?'} nhân · ${f.deviceMemory || '?'} GB · DPR ${f.deviceScaleFactor || '?'} · ${(f.fonts || []).length} font${profile.fingerprintOff ? ' · ⚠ fingerprint đang TẮT (nút OFF) -- chỉ 4 tầng chung (stealth, nhãn tên, tiêu đề tab, User-Agent riêng) còn áp' : ''}`;
   const list = document.getElementById('fpLayerList');
   list.innerHTML = '';
   for (const l of fpLayerDefs) {

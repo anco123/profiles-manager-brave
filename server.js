@@ -1627,7 +1627,7 @@ async function launchProfileById(id) {
     ignoreDefaultArgs: ['--disable-extensions'],
   };
 
-  if (profile.userAgent) launchOptions.userAgent = profile.userAgent;
+  if (profile.userAgent && fpLayersOf(profile).ua) launchOptions.userAgent = profile.userAgent; // tầng "User-Agent riêng" (bảng 🧬) tắt -> dùng UA thật của Chrome
 
   // Nút bật / tắt fingerprint ở Home: tắt = KHÔNG áp lớp giả lập (canvas / WebGL / audio / font, màn hình, tỉ lệ điểm ảnh, vị trí) ở lần Launch
   // này, nhưng profile.fingerprint giữ nguyên -- bật lại là dùng đúng bộ cũ
@@ -1814,17 +1814,17 @@ async function launchProfileById(id) {
       // every navigation (new tab, page.goto, back/forward) automatically,
       // for as long as the window stays open, purely so a desk full of
       // open profile windows is identifiable at a glance.
-      await context.addInitScript(buildProfileBadgeInitScript(profile.name));
+      if (lay.badge) await context.addInitScript(buildProfileBadgeInitScript(profile.name)); // tầng "Nhãn tên profile" (bảng 🧬)
 
       // Same idea, but for the OS taskbar/Alt+Tab instead of the on-page
       // view -- prefixes every tab's document.title with the profile name.
-      await context.addInitScript(buildProfileTitleInitScript(profile.name));
+      if (lay.title) await context.addInitScript(buildProfileTitleInitScript(profile.name)); // tầng "Tên profile ở tiêu đề tab" (bảng 🧬)
 
       // Deep fingerprint layer stays opt-in: profiles with `fingerprint: null`
       // launch exactly as before, just with the base stealth patch above.
       // Only profiles with a `fingerprint` object pay the extra cost of this one.
       if (fp) {
-        await context.addInitScript(buildFingerprintInitScript(fp, profile.userAgent, lay));
+        await context.addInitScript(buildFingerprintInitScript(fp, lay.ua ? profile.userAgent : '', lay));
       }
 
       // Không tự mở sẵn trang nào ở đây nữa -- main.js (script được chọn
