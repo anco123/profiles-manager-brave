@@ -258,7 +258,7 @@ function buildCard(profile) {
   fpBtn.title = fpOn ? 'Fingerprint đang BẬT -- bấm để tắt (giữ nguyên dữ liệu fingerprint, áp dụng lần Launch sau)' : 'Fingerprint đang TẮT -- bấm để bật lại đúng bộ fingerprint cũ (áp dụng lần Launch sau)';
   fpBtn.addEventListener('click', () => toggleFingerprint(profile.id, profile.name, !fpOn));
   const layBtn = card.querySelector('.fp-layers'), offN = (profile.fpOffLayers || []).length;
-  layBtn.hidden = !profile.fingerprint;
+  layBtn.hidden = false; // luôn hiện -- profile chưa có fingerprint thì bảng ghi rõ lý do + cách tạo
   layBtn.classList.toggle('has-off', offN > 0);
   layBtn.title = `Các tầng fingerprint${offN ? ` -- đang tắt ${offN} tầng` : ''}: bật / tắt từng tầng, 🔍 kiểm tra`;
   layBtn.addEventListener('click', () => openFpPanel(profile));
@@ -323,7 +323,7 @@ async function openFpPanel(profile) {
   if (!fpLayerDefs) fpLayerDefs = await fetch('/api/fp-layers').then((r) => r.json()).catch(() => []);
   const off = new Set(profile.fpOffLayers || []), f = profile.fingerprint || {}, kindLabel = { base: 'chung', script: 'trong trang', launch: 'lúc mở Chrome' };
   document.getElementById('fpPanelTitle').textContent = `🧬 Fingerprint: ${profile.name}`;
-  document.getElementById('fpPanelInfo').textContent = `${f.label || ''} · ${f.platform || ''} · ${f.hardwareConcurrency || '?'} nhân · ${f.deviceMemory || '?'} GB · DPR ${f.deviceScaleFactor || '?'} · ${(f.fonts || []).length} font${profile.fingerprintOff ? ' · ⚠ fingerprint đang TẮT (nút OFF) -- các tầng dưới không áp' : ''}`;
+  document.getElementById('fpPanelInfo').textContent = !profile.fingerprint ? '⚠ Profile này CHƯA có fingerprint -- chỉ tầng "Ẩn dấu vết tự động hoá" (stealth) có tác dụng. Muốn có fingerprint: bấm ↻ ở thẻ profile (LƯU Ý: ↻ xoá cả cookie / đăng nhập của profile).' : `${f.label || ''} · ${f.platform || ''} · ${f.hardwareConcurrency || '?'} nhân · ${f.deviceMemory || '?'} GB · DPR ${f.deviceScaleFactor || '?'} · ${(f.fonts || []).length} font${profile.fingerprintOff ? ' · ⚠ fingerprint đang TẮT (nút OFF) -- các tầng dưới không áp' : ''}`;
   const list = document.getElementById('fpLayerList');
   list.innerHTML = '';
   for (const l of fpLayerDefs) {
