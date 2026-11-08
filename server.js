@@ -1297,7 +1297,7 @@ app.post('/api/profiles/:id/fp-layers', (req, res) => {
   const profiles = readProfiles(), profile = profiles.find((p) => p.id === req.params.id);
   if (!profile) return res.status(404).json({ error: 'Profile not found' });
   // body.on = các tầng ĐANG TICK (bảng 🧬); body.off (kiểu cũ) = các tầng bỏ tick
-  const on = new Set(Array.isArray(req.body.on) ? req.body.on : FP_LAYERS.map((l) => l.key).filter((k) => !(req.body.off || []).includes(k)));
+  const on = new Set(Array.isArray(req.body.on) ? req.body.on : FP_LAYERS.filter((l) => l.def !== false && !(req.body.off || []).includes(l.key)).map((l) => l.key)); // kiểu cũ { off }: tầng mặc định tắt vẫn tắt
   profile.fpOffLayers = FP_LAYERS.filter((l) => l.def !== false && !on.has(l.key)).map((l) => l.key);
   profile.fpOnLayers = FP_LAYERS.filter((l) => l.def === false && on.has(l.key)).map((l) => l.key);
   writeProfiles(profiles);
@@ -1449,6 +1449,13 @@ async function restoreSession(id, context) {
   return n;
 }
 
+const PW_EXTRA_FLAGS = ['--enable-automation', '--disable-field-trial-config', '--disable-background-networking', '--disable-background-timer-throttling', '--disable-back-forward-cache',
+  '--disable-breakpad', '--disable-client-side-phishing-detection', '--disable-component-extensions-with-background-pages', '--disable-component-update', '--disable-default-apps',
+  '--disable-dev-shm-usage', '--disable-edgeupdater', '--allow-pre-commit-input', '--disable-hang-monitor', '--disable-ipc-flooding-protection', '--disable-popup-blocking',
+  '--disable-prompt-on-repost', '--disable-updater-scheduler', '--force-color-profile=srgb', '--metrics-recording-only', '--password-store=basic', '--use-mock-keychain',
+  '--no-service-autorun', '--export-tagged-pdf', '--unsafely-disable-devtools-self-xss-warnings', '--edge-skip-compat-layer-relaunch', '--disable-infobars', '--disable-sync',
+  '--enable-unsafe-swiftshader', '--enable-features=CDPScreenshotNewSurface'];
+
 async function launchProfileById(id) {
   if (runningContexts[id]) {
     throw httpError(400, 'This profile is already running');
@@ -1510,7 +1517,8 @@ async function launchProfileById(id) {
     prefs.profile.exit_type = 'Normal';
     prefs.profile.exit_cleanly = true;
     prefs.profile.default_content_setting_values = prefs.profile.default_content_setting_values || {};
-    prefs.profile.default_content_setting_values.notifications = 2; // 2 = block, no popup asking
+    if (fpLayersOf(profile).notif) prefs.profile.default_content_setting_values.notifications = 2; // 2 = block, no popup asking
+    else if (prefs.profile.default_content_setting_values.notifications === 2) delete prefs.profile.default_content_setting_values.notifications; // tầng "Chặn hỏi thông báo" tắt -> về mặc định của Chrome (hỏi)
     prefs.autofill = prefs.autofill || {};
     prefs.autofill.credit_card_enabled = false; // "Save card?" bubble
 
@@ -1635,6 +1643,10 @@ async function launchProfileById(id) {
   // này, nhưng profile.fingerprint giữ nguyên -- bật lại là dùng đúng bộ cũ
   const fp = profile.fingerprint && !profile.fingerprintOff ? profile.fingerprint : null;
   const lay = fpLayersOf(profile); // từng tầng bật / tắt riêng (bảng 🧬 ở thẻ profile) -- xem FP_LAYERS trong fingerprint.js
+  // Tầng "Cờ khởi động của Playwright" tắt: bỏ các cờ mặc định Playwright tự thêm (Chrome thường không có -- web soi được: --enable-automation
+  // -> webdriver, --disable-field-trial-config -> thiếu thử nghiệm của Chrome...). Giữ cờ Playwright cần để điều khiển (--remote-debugging-pipe,
+  // --user-data-dir) + vài cờ chỉ tắt hộp thoại lần đầu. Chuỗi phải khớp đúng cờ của Playwright 1.62 -- cờ không có thì Playwright bỏ qua.
+  if (!lay.pwflags) launchOptions.ignoreDefaultArgs = [...new Set([...(launchOptions.ignoreDefaultArgs || []), ...PW_EXTRA_FLAGS])];
 
   if (fp) {
     // Emulates window.screen separately from viewport -- a real
