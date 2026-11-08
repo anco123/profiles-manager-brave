@@ -44,7 +44,7 @@ const fs = require('fs');
 const os = require('os');
 const { exec, spawn } = require('child_process');
 const { chromium } = require('playwright');
-const { FP_LAYERS, fpLayersOf, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
+const { FP_LAYERS, fpLayersOf, uaMetadataFor, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
 const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode, recorderExports, recorderHeader } = require('./recorder');
 
@@ -1296,10 +1296,12 @@ app.get('/api/fp-layers', (req, res) => res.json(FP_LAYERS));
 app.post('/api/profiles/:id/fp-layers', (req, res) => {
   const profiles = readProfiles(), profile = profiles.find((p) => p.id === req.params.id);
   if (!profile) return res.status(404).json({ error: 'Profile not found' });
-  const keys = new Set(FP_LAYERS.map((l) => l.key));
-  profile.fpOffLayers = [...new Set((Array.isArray(req.body.off) ? req.body.off : []).filter((k) => keys.has(k)))];
+  // body.on = các tầng ĐANG TICK (bảng 🧬); body.off (kiểu cũ) = các tầng bỏ tick
+  const on = new Set(Array.isArray(req.body.on) ? req.body.on : FP_LAYERS.map((l) => l.key).filter((k) => !(req.body.off || []).includes(k)));
+  profile.fpOffLayers = FP_LAYERS.filter((l) => l.def !== false && !on.has(l.key)).map((l) => l.key);
+  profile.fpOnLayers = FP_LAYERS.filter((l) => l.def === false && on.has(l.key)).map((l) => l.key);
   writeProfiles(profiles);
-  res.json({ success: true, off: profile.fpOffLayers, running: Boolean(runningContexts[profile.id]) });
+  res.json({ success: true, off: Object.entries(fpLayersOf(profile)).filter(([, v]) => !v).map(([k]) => k), running: Boolean(runningContexts[profile.id]) });
 });
 // Trang kiểm tra hỏi lại header mà CHÍNH trình duyệt gửi lên (Sec-CH-UA... -- web server đọc thẳng, JS không che được)
 app.get('/api/echo-headers', (req, res) => {
@@ -1824,7 +1826,16 @@ async function launchProfileById(id) {
       // launch exactly as before, just with the base stealth patch above.
       // Only profiles with a `fingerprint` object pay the extra cost of this one.
       if (fp) {
-        await context.addInitScript(buildFingerprintInitScript(fp, lay.ua ? profile.userAgent : '', lay));
+        await context.addInitScript(buildFingerprintInitScript(fp, '', lay)); // UA riêng: Client Hints do Chrome báo thẳng (setUserAgentOverride bên dưới) -- không giả bằng JS nữa (tránh lệch)
+      }
+
+      // User-Agent riêng: báo cho Chrome bộ Client Hints khớp UA đó (mỗi tab, cả tab mở sau) -- header Sec-CH-UA* gửi lên web + navigator.userAgentData
+      // cùng version / hệ điều hành với UA. Chỉ đổi UA qua launchOptions.userAgent thì header vẫn báo version Chrome thật (lệch, web thấy được).
+      if (launchOptions.userAgent) {
+        const { metadata, navPlatform } = uaMetadataFor(launchOptions.userAgent);
+        const applyUA = async (p) => { try { const cdp = await context.newCDPSession(p); p.__pmUaCdp = cdp; await cdp.send('Emulation.setUserAgentOverride', { userAgent: launchOptions.userAgent, platform: fp ? fp.platform : navPlatform, userAgentMetadata: metadata }); } catch (e) {} }; // giữ phiên CDP sống: đóng phiên = mất override
+        for (const p of context.pages()) await applyUA(p);
+        context.on('page', applyUA);
       }
 
       // Không tự mở sẵn trang nào ở đây nữa -- main.js (script được chọn

@@ -257,7 +257,7 @@ function buildCard(profile) {
   fpBtn.classList.toggle('is-on', fpOn);
   fpBtn.title = fpOn ? 'Fingerprint đang BẬT -- bấm để tắt (giữ nguyên dữ liệu fingerprint, áp dụng lần Launch sau)' : 'Fingerprint đang TẮT -- bấm để bật lại đúng bộ fingerprint cũ (áp dụng lần Launch sau)';
   fpBtn.addEventListener('click', () => toggleFingerprint(profile.id, profile.name, !fpOn));
-  const layBtn = card.querySelector('.fp-layers'), offN = (profile.fpOffLayers || []).length;
+  const layBtn = card.querySelector('.fp-layers'), offN = (profile.fpOffLayers || []).length; // chỉ đếm tầng mặc định bật đang bị tắt
   layBtn.hidden = false; // luôn hiện -- profile chưa có fingerprint thì bảng ghi rõ lý do + cách tạo
   layBtn.classList.toggle('has-off', offN > 0);
   layBtn.title = `Các tầng fingerprint${offN ? ` -- đang tắt ${offN} tầng` : ''}: bật / tắt từng tầng, 🔍 kiểm tra`;
@@ -321,7 +321,7 @@ let fpLayerDefs = null, fpPanelProfile = null;
 async function openFpPanel(profile) {
   fpPanelProfile = profile;
   if (!fpLayerDefs) fpLayerDefs = await fetch('/api/fp-layers').then((r) => r.json()).catch(() => []);
-  const off = new Set(profile.fpOffLayers || []), f = profile.fingerprint || {}, kindLabel = { base: 'chung -- chạy cả khi OFF / không có fingerprint', script: 'trong trang', launch: 'lúc mở Chrome' };
+  const off = new Set(profile.fpOffLayers || []), onL = new Set(profile.fpOnLayers || []), f = profile.fingerprint || {}, kindLabel = { base: 'chung -- chạy cả khi OFF / không có fingerprint', script: 'trong trang', launch: 'lúc mở Chrome' };
   document.getElementById('fpPanelTitle').textContent = `🧬 Fingerprint: ${profile.name}`;
   document.getElementById('fpPanelInfo').textContent = !profile.fingerprint ? '⚠ Profile này CHƯA có fingerprint -- chỉ 4 tầng chung (stealth, nhãn tên, tiêu đề tab, User-Agent riêng) có tác dụng. Muốn có fingerprint: bấm ↻ ở thẻ profile (LƯU Ý: ↻ xoá cả cookie / đăng nhập của profile).' : `${f.label || ''} · ${f.platform || ''} · ${f.hardwareConcurrency || '?'} nhân · ${f.deviceMemory || '?'} GB · DPR ${f.deviceScaleFactor || '?'} · ${(f.fonts || []).length} font${profile.fingerprintOff ? ' · ⚠ fingerprint đang TẮT (nút OFF) -- chỉ 4 tầng chung (stealth, nhãn tên, tiêu đề tab, User-Agent riêng) còn áp' : ''}`;
   const list = document.getElementById('fpLayerList');
@@ -331,9 +331,9 @@ async function openFpPanel(profile) {
     row.className = 'field field-checkbox fp-layer';
     row.innerHTML = '<input type="checkbox"><span><strong></strong> <em class="fp-kind"></em><br><small></small></span>';
     row.querySelector('input').dataset.key = l.key;
-    row.querySelector('input').checked = !off.has(l.key);
+    row.querySelector('input').checked = l.def === false ? onL.has(l.key) : !off.has(l.key); // def false: mặc định tắt (nhãn tên, tiêu đề tab)
     row.querySelector('strong').textContent = l.name;
-    row.querySelector('.fp-kind').textContent = `(${l.key} · ${kindLabel[l.kind] || l.kind})`;
+    row.querySelector('.fp-kind').textContent = `(${l.key} · ${kindLabel[l.kind] || l.kind}${l.def === false ? ' · mặc định TẮT' : ''})`;
     row.querySelector('small').textContent = l.desc;
     list.appendChild(row);
   }
@@ -344,11 +344,11 @@ async function openFpPanel(profile) {
 function closeFpPanel() { fpPanel.classList.remove('is-open'); setTimeout(() => { overlay.hidden = true; fpPanel.hidden = true; }, 220); }
 document.getElementById('closeFpPanelBtn').addEventListener('click', closeFpPanel);
 overlay.addEventListener('click', () => { if (!fpPanel.hidden) closeFpPanel(); });
-document.getElementById('fpAllOnBtn').addEventListener('click', () => document.querySelectorAll('#fpLayerList input').forEach((i) => { i.checked = true; }));
+document.getElementById('fpAllOnBtn').addEventListener('click', () => document.querySelectorAll('#fpLayerList input').forEach((i) => { const l = (fpLayerDefs || []).find((x) => x.key === i.dataset.key); i.checked = !l || l.def !== false; })); // về mặc định: bật hết trừ nhãn tên / tiêu đề tab
 document.getElementById('fpSaveBtn').addEventListener('click', async () => {
-  const p = fpPanelProfile, off = [...document.querySelectorAll('#fpLayerList input')].filter((i) => !i.checked).map((i) => i.dataset.key);
+  const p = fpPanelProfile, inputs = [...document.querySelectorAll('#fpLayerList input')], off = inputs.filter((i) => !i.checked).map((i) => i.dataset.key), on = inputs.filter((i) => i.checked).map((i) => i.dataset.key);
   try {
-    const res = await fetch(`/api/profiles/${p.id}/fp-layers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ off }) });
+    const res = await fetch(`/api/profiles/${p.id}/fp-layers`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Không lưu được');
     showToast(`"${p.name}": ${off.length ? `tắt ${off.length} tầng (${off.join(', ')})` : 'bật hết các tầng'}${data.running ? ' -- Close rồi Launch lại để áp dụng' : ' -- áp dụng lần Launch sau'}`);
