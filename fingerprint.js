@@ -365,9 +365,12 @@ function normalizeFingerprint(input, seed) {
 }
 
 // Các TẦNG của fingerprint -- bật / tắt riêng từng tầng cho từng profile (profile.fpOffLayers = ['fonts', ...]) để tìm tầng làm hỏng web.
-// kind 'script': đoạn giả lập trong init script; 'launch': tuỳ chọn lúc mở Chrome; 'base': lớp stealth chung (cả profile không có fingerprint)
+// kind 'script': đoạn giả lập trong init script; 'launch': tuỳ chọn lúc mở Chrome; 'base': áp cho MỌI profile, kể cả không có / đang OFF fingerprint
 const FP_LAYERS = [
   { key: 'stealth', kind: 'base', name: 'Ẩn dấu vết tự động hoá', desc: 'navigator.webdriver = false (áp cho mọi profile, kể cả không có fingerprint)' },
+  { key: 'badge', kind: 'base', name: 'Nhãn tên profile trên trang', desc: 'thẻ <div id="__profile_badge__"> ghi tên profile ở góc trên phải MỌI trang -- web tìm được trong DOM (áp cả khi fingerprint OFF)' },
+  { key: 'title', kind: 'base', name: 'Tên profile ở tiêu đề tab', desc: 'document.title của trang bị thêm "[tên profile] " + thuộc tính lạ trên document (áp cả khi fingerprint OFF)' },
+  { key: 'ua', kind: 'base', name: 'User-Agent riêng của profile', desc: 'dùng UA đặt riêng cho profile; tắt = UA thật của Chrome (UA, Client Hints, header khớp nhau) -- áp cả khi fingerprint OFF'},
   { key: 'tostring', kind: 'script', name: 'Che toString', desc: 'các hàm bị sửa vẫn trả "[native code]" khi trang soi Function.toString' },
   { key: 'nav', kind: 'script', name: 'Navigator', desc: 'navigator.platform / hardwareConcurrency (số nhân CPU) / deviceMemory (RAM)' },
   { key: 'canvas', kind: 'script', name: 'Canvas', desc: 'nhiễu nhẹ ảnh canvas 2D (getImageData / toDataURL / toBlob) -- đổi canvas hash' },
