@@ -44,7 +44,7 @@ const fs = require('fs');
 const os = require('os');
 const { exec, spawn } = require('child_process');
 const { chromium } = require('playwright');
-const { FP_LAYERS, fpLayersOf, uaMetadataFor, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
+const { FP_LAYERS, fpLayersOf, fpLayerDef, fpLayersFor, adaptGpuToHost, uaMetadataFor, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
 const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode, recorderExports, recorderHeader } = require('./recorder');
 
@@ -151,6 +151,9 @@ function autoDetectPortableChrome() {
 }
 // resolveChromePath: bỏ dấu ngoặc kép, trỏ vào thư mục / GoogleChromePortable.exe -> tự tìm chrome.exe bên trong (xem chrome-version-check.js)
 const CHROME_PATH = resolveChromePath(process.env.CHROME_PATH) || autoDetectPortableChrome();
+// Profile này mở bằng Brave? (CHROME_PATH luôn thắng; không có thì theo engine riêng của profile) -- Brave: tầng Canvas / Audio / Font mặc định tắt
+const isBraveExe = (p) => /brave.exe$/i.test(String(p || ''));
+const braveOpts = (profile) => ({ brave: isBraveExe(CHROME_PATH || (profile && profile.engineMode === 'custom' ? profile.executablePath : '')) });
 
 // Bật/tắt qua Settings panel (gear icon, topbar) -- xem
 // clearProfileCache()/CACHE_ONLY_DIR_NAMES phía dưới để biết chính xác
@@ -352,6 +355,47 @@ const DEFAULT_SNIPPETS = [
 // This lives in memory only (resets if you restart the server).
 const runningContexts = {};
 
+// ---- GPU THẬT của máy này (để chọn GPU giả hợp máy -- adaptGpuToHost trong fingerprint.js) ----
+// Mở trình duyệt (CHROME_PATH) ẩn 1 lần, đọc UNMASKED_VENDOR / RENDERER -- đúng thứ web nhìn thấy (kể cả mức shader vs_4_1 / vs_5_0, Windows
+// không cho biết). Lưu <DATA_DIR>/gpu-cache.json theo tên máy + trình duyệt (+ ngày sửa file .exe): lần sau khởi động không phải mở lại; đổi máy /
+// đổi bản Brave thì tự dò lại. Dò lỗi -> null -> GPU giả giữ nguyên như cũ (không thích nghi).
+const GPU_CACHE_FILE = path.join(DATA_DIR, 'gpu-cache.json');
+let REAL_GPU = null;
+const realGpuReady = (async () => {
+  if (!CHROME_PATH) return null;
+  let mtime = 0; try { mtime = fs.statSync(CHROME_PATH).mtimeMs; } catch {}
+  const key = `${MACHINE}|${CHROME_PATH}|${mtime}`;
+  let cache = {}; try { cache = JSON.parse(fs.readFileSync(GPU_CACHE_FILE, 'utf-8')) || {}; } catch {}
+  if (cache[key] && cache[key].renderer) { REAL_GPU = cache[key]; console.log(`GPU thật của máy: ${REAL_GPU.renderer}`); return REAL_GPU; }
+  let browser = null;
+  try {
+    browser = await chromium.launch({ executablePath: CHROME_PATH, headless: true });
+    const page = await browser.newPage();
+    const gpu = await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl'); if (!gl) return null;
+      const ext = gl.getExtension('WEBGL_debug_renderer_info'); if (!ext) return null;
+      return { vendor: gl.getParameter(ext.UNMASKED_VENDOR_WEBGL), renderer: gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) };
+    });
+    if (gpu && gpu.renderer) {
+      for (const k of Object.keys(cache)) if (k.startsWith(`${MACHINE}|`)) delete cache[k]; // bỏ kết quả cũ của chính máy này
+      cache[key] = { ...gpu, at: new Date().toISOString() };
+      try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(GPU_CACHE_FILE, JSON.stringify(cache, null, 2)); } catch {}
+      REAL_GPU = cache[key];
+      console.log(`GPU thật của máy: ${REAL_GPU.renderer}`);
+    }
+  } catch (err) { console.warn(`Không dò được GPU thật (GPU giả giữ nguyên, không thích nghi theo máy): ${err.message}`); }
+  finally { if (browser) await browser.close().catch(() => {}); }
+  return REAL_GPU;
+})();
+// Chờ dò GPU xong (lần đầu ~vài giây) nhưng không treo Launch quá 20s
+const getRealGpu = () => Promise.race([realGpuReady, new Promise((r) => setTimeout(() => r(REAL_GPU), 20000))]);
+// GPU mà profile SẼ báo khi Launch trên máy này (bảng 🧬 hiện ra) -- tầng WebGL tắt / chưa dò xong thì null
+function effectiveGpuOf(p) {
+  if (!p.fingerprint || !REAL_GPU || !fpLayersOf(p, braveOpts(p)).webgl) return null;
+  const a = adaptGpuToHost(p.fingerprint, REAL_GPU, p.id);
+  return { label: a.label, renderer: a.webglRenderer, mode: a.gpuMode, real: REAL_GPU.renderer };
+}
+
 // -------------------------------------------------------------------
 // API: list all profiles (with live running/stopped status merged in)
 // -------------------------------------------------------------------
@@ -364,6 +408,7 @@ app.get('/api/profiles', (req, res) => {
     // is set globally it overrides this profile's own engineMode, so the
     // UI should say so rather than show a label that would be a lie.
     effectiveEngineMode: CHROME_PATH ? 'chrome-portable-global' : p.engineMode,
+    effectiveGpu: effectiveGpuOf(p), // GPU giả đã chọn lại cho hợp máy này (xem adaptGpuToHost)
     dataPath: path.join(PROFILES_ROOT, p.id), // folder trình duyệt của profile -- nút 📁 ở Home
   }));
   res.json(withStatus);
@@ -1305,16 +1350,17 @@ app.delete('/api/profiles/:id/fingerprint', (req, res) => {
 });
 
 // Bảng 🧬 các tầng fingerprint: danh sách tầng + tầng đang tắt của profile; lưu = profile.fpOffLayers (dữ liệu fingerprint giữ nguyên)
-app.get('/api/fp-layers', (req, res) => res.json(FP_LAYERS));
+app.get('/api/fp-layers', (req, res) => res.json(fpLayersFor(braveOpts(null))));
 app.post('/api/profiles/:id/fp-layers', (req, res) => {
   const profiles = readProfiles(), profile = profiles.find((p) => p.id === req.params.id);
   if (!profile) return res.status(404).json({ error: 'Profile not found' });
   // body.on = các tầng ĐANG TICK (bảng 🧬); body.off (kiểu cũ) = các tầng bỏ tick
-  const on = new Set(Array.isArray(req.body.on) ? req.body.on : FP_LAYERS.filter((l) => l.def !== false && !(req.body.off || []).includes(l.key)).map((l) => l.key)); // kiểu cũ { off }: tầng mặc định tắt vẫn tắt
-  profile.fpOffLayers = FP_LAYERS.filter((l) => l.def !== false && !on.has(l.key)).map((l) => l.key);
-  profile.fpOnLayers = FP_LAYERS.filter((l) => l.def === false && on.has(l.key)).map((l) => l.key);
+  const bo = braveOpts(profile), def = (l) => fpLayerDef(l, bo); // mặc định theo trình duyệt (Brave: Canvas / Audio / Font mặc định tắt)
+  const on = new Set(Array.isArray(req.body.on) ? req.body.on : FP_LAYERS.filter((l) => def(l) && !(req.body.off || []).includes(l.key)).map((l) => l.key)); // kiểu cũ { off }: tầng mặc định tắt vẫn tắt
+  profile.fpOffLayers = FP_LAYERS.filter((l) => def(l) && !on.has(l.key)).map((l) => l.key);
+  profile.fpOnLayers = FP_LAYERS.filter((l) => !def(l) && on.has(l.key)).map((l) => l.key);
   writeProfiles(profiles);
-  res.json({ success: true, off: Object.entries(fpLayersOf(profile)).filter(([, v]) => !v).map(([k]) => k), running: Boolean(runningContexts[profile.id]) });
+  res.json({ success: true, off: Object.entries(fpLayersOf(profile, bo)).filter(([, v]) => !v).map(([k]) => k), running: Boolean(runningContexts[profile.id]) });
 });
 // Trang kiểm tra hỏi lại header mà CHÍNH trình duyệt gửi lên (Sec-CH-UA... -- web server đọc thẳng, JS không che được)
 app.get('/api/echo-headers', (req, res) => {
@@ -1530,7 +1576,7 @@ async function launchProfileById(id) {
     prefs.profile.exit_type = 'Normal';
     prefs.profile.exit_cleanly = true;
     prefs.profile.default_content_setting_values = prefs.profile.default_content_setting_values || {};
-    if (fpLayersOf(profile).notif) prefs.profile.default_content_setting_values.notifications = 2; // 2 = block, no popup asking
+    if (fpLayersOf(profile, braveOpts(profile)).notif) prefs.profile.default_content_setting_values.notifications = 2; // 2 = block, no popup asking
     else if (prefs.profile.default_content_setting_values.notifications === 2) delete prefs.profile.default_content_setting_values.notifications; // tầng "Chặn hỏi thông báo" tắt -> về mặc định của Chrome (hỏi)
     prefs.autofill = prefs.autofill || {};
     prefs.autofill.credit_card_enabled = false; // "Save card?" bubble
@@ -1650,12 +1696,15 @@ async function launchProfileById(id) {
     ignoreDefaultArgs: ['--disable-extensions'],
   };
 
-  if (profile.userAgent && fpLayersOf(profile).ua) launchOptions.userAgent = profile.userAgent; // tầng "User-Agent riêng" (bảng 🧬) tắt -> dùng UA thật của Chrome
+  if (profile.userAgent && fpLayersOf(profile, braveOpts(profile)).ua) launchOptions.userAgent = profile.userAgent; // tầng "User-Agent riêng" (bảng 🧬) tắt -> dùng UA thật của Chrome
 
   // Nút bật / tắt fingerprint ở Home: tắt = KHÔNG áp lớp giả lập (canvas / WebGL / audio / font, màn hình, tỉ lệ điểm ảnh, vị trí) ở lần Launch
   // này, nhưng profile.fingerprint giữ nguyên -- bật lại là dùng đúng bộ cũ
-  const fp = profile.fingerprint && !profile.fingerprintOff ? profile.fingerprint : null;
-  const lay = fpLayersOf(profile); // từng tầng bật / tắt riêng (bảng 🧬 ở thẻ profile) -- xem FP_LAYERS trong fingerprint.js
+  let fp = profile.fingerprint && !profile.fingerprintOff ? profile.fingerprint : null;
+  const lay = fpLayersOf(profile, braveOpts(profile));
+  // GPU giả chọn lại cho HỢP MÁY ĐANG CHẠY (cùng hãng / mức shader / đời với GPU thật) -- profile mang sang máy khác tự đổi theo. Chỉ đổi
+  // tên GPU (webglVendor / webglRenderer) trong bản dùng cho lần Launch này, profile.fingerprint lưu trên đĩa giữ nguyên.
+  if (fp && lay.webgl) fp = adaptGpuToHost(fp, await getRealGpu(), profile.id); // từng tầng bật / tắt riêng (bảng 🧬 ở thẻ profile) -- xem FP_LAYERS trong fingerprint.js
   // Tầng "Cờ khởi động của Playwright" tắt: bỏ các cờ mặc định Playwright tự thêm (Chrome thường không có -- web soi được: --enable-automation
   // -> webdriver, --disable-field-trial-config -> thiếu thử nghiệm của Chrome...). Giữ cờ Playwright cần để điều khiển (--remote-debugging-pipe,
   // --user-data-dir) + vài cờ chỉ tắt hộp thoại lần đầu. Chuỗi phải khớp đúng cờ của Playwright 1.62 -- cờ không có thì Playwright bỏ qua.

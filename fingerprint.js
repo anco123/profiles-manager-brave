@@ -123,6 +123,14 @@ function plausibleViewport(targetWidth, targetHeight, seed, hostPlatform) {
 // -------------------------------------------------------------------
 const GPU_POOL = [
   // ---------------- win32 -- tích hợp, đời cũ/tầm thấp ----------------
+  // Mức shader 4_1 (Direct3D 10.1 -- máy rất cũ): GPU thật mức này mà khai GPU vs_5_0 là lệch, nên cần vài lựa chọn cùng mức (xem adaptGpuToHost)
+  { hostPlatform: 'win32', label: 'Intel HD 3000 (tich hop, doi rat cu, laptop)', webglVendor: 'Google Inc. (Intel)', webglRenderer: 'ANGLE (Intel, Intel(R) HD Graphics 3000 (0x00000116) Direct3D11 vs_4_1 ps_4_1, D3D11)', coreOptions: [2, 4], memoryOptions: [4, 8], weight: 3 },
+  { hostPlatform: 'win32', label: 'Intel HD 3000 (tich hop, doi rat cu, PC)', webglVendor: 'Google Inc. (Intel)', webglRenderer: 'ANGLE (Intel, Intel(R) HD Graphics 3000 (0x00000112) Direct3D11 vs_4_1 ps_4_1, D3D11)', coreOptions: [4], memoryOptions: [4, 8], weight: 2 },
+  { hostPlatform: 'win32', label: 'Intel HD 3000 (tich hop, doi rat cu, laptop GT2)', webglVendor: 'Google Inc. (Intel)', webglRenderer: 'ANGLE (Intel, Intel(R) HD Graphics 3000 (0x00000126) Direct3D11 vs_4_1 ps_4_1, D3D11)', coreOptions: [2, 4], memoryOptions: [4, 8], weight: 3 },
+  { hostPlatform: 'win32', label: 'Intel HD 2000 (tich hop, doi rat cu, PC)', webglVendor: 'Google Inc. (Intel)', webglRenderer: 'ANGLE (Intel, Intel(R) HD Graphics (0x00000102) Direct3D11 vs_4_1 ps_4_1, D3D11)', coreOptions: [2, 4], memoryOptions: [4, 8], weight: 2 },
+  { hostPlatform: 'win32', label: 'NVIDIA GeForce 210 (roi, doi rat cu)', webglVendor: 'Google Inc. (NVIDIA)', webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce 210 (0x00000A65) Direct3D11 vs_4_1 ps_4_1, D3D11)', coreOptions: [2, 4], memoryOptions: [4], weight: 2 },
+  { hostPlatform: 'win32', label: 'NVIDIA GeForce GT 220 (roi, doi rat cu)', webglVendor: 'Google Inc. (NVIDIA)', webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce GT 220 (0x00000A20) Direct3D11 vs_4_1 ps_4_1, D3D11)', coreOptions: [2, 4], memoryOptions: [4, 8], weight: 2 },
+  { hostPlatform: 'win32', label: 'NVIDIA GeForce GT 240 (roi, doi rat cu)', webglVendor: 'Google Inc. (NVIDIA)', webglRenderer: 'ANGLE (NVIDIA, NVIDIA GeForce GT 240 (0x00000CA3) Direct3D11 vs_4_1 ps_4_1, D3D11)', coreOptions: [2, 4], memoryOptions: [4, 8], weight: 2 },
   { hostPlatform: 'win32', label: 'Intel UHD 620 (tich hop)', webglVendor: 'Google Inc. (Intel)', webglRenderer: 'ANGLE (Intel, Intel(R) UHD Graphics 620 (0x00005917) Direct3D11 vs_5_0 ps_5_0, D3D11)', coreOptions: [2, 4], memoryOptions: [4, 8], weight: 10 },
   { hostPlatform: 'win32', label: 'Intel UHD 630 (tich hop)', webglVendor: 'Google Inc. (Intel)', webglRenderer: 'ANGLE (Intel, Intel(R) UHD Graphics 630 (0x00003E92) Direct3D11 vs_5_0 ps_5_0, D3D11)', coreOptions: [4, 6], memoryOptions: [8, 16], weight: 9 },
   { hostPlatform: 'win32', label: 'Intel HD 520 (tich hop, doi cu)', webglVendor: 'Google Inc. (Intel)', webglRenderer: 'ANGLE (Intel, Intel(R) HD Graphics 520 (0x00001916) Direct3D11 vs_5_0 ps_5_0, D3D11)', coreOptions: [2, 4], memoryOptions: [4, 8], weight: 5 },
@@ -266,6 +274,41 @@ function pickWeighted(rand, items) {
   return items[items.length - 1]; // floating-point rounding fallback
 }
 
+// ---- GPU giả THÍCH NGHI theo máy đang chạy ----
+// GPU giả chỉ "qua mặt" được khi nó cùng loại với GPU thật: thông số WebGL (giới hạn texture, độ chính xác shader, tốc độ vẽ, mức shader
+// vs_4_1 / vs_5_0...) vẫn là của GPU THẬT, web soi kỹ so được với tên. Nên lúc Launch chọn tên GPU giả CÙNG HÃNG, CÙNG MỨC SHADER, cùng kiểu
+// tích hợp / rời và (nếu có) cùng đời với GPU thật của máy đang chạy. Đổi sang máy khác -> tự chọn lại cho hợp máy mới.
+function gpuTier(s, vendor) {
+  if (vendor === 'Intel') return /Iris\(R\) Xe|UHD Graphics 7\d\d|Arc/i.test(s) ? 3 : /UHD Graphics 6\d\d|Iris/i.test(s) ? 2 : 1;
+  if (vendor === 'NVIDIA') return /RTX [345]\d{2,3}/i.test(s) ? 3 : /RTX 20|GTX 16|MX[3-5]\d0/i.test(s) ? 2 : 1;
+  if (vendor === 'AMD') return /RX [7-9]\d{3}|[78]\d0M/i.test(s) ? 3 : /RX [56]\d{3}|6\d0M|Radeon\(TM\) Graphics/i.test(s) ? 2 : 1;
+  return 0;
+}
+function parseGpu(renderer, label) {
+  const s = String(renderer || '');
+  const vendor = /NVIDIA/i.test(s) ? 'NVIDIA' : /\bAMD\b|\bATI\b|Radeon/i.test(s) ? 'AMD' : /Intel/i.test(s) ? 'Intel' : /Apple/i.test(s) ? 'Apple' : null;
+  const shader = (s.match(/vs_(\d_\d)/) || [])[1] || (s.match(/OpenGL (ES )?[\d.]+/) || [])[0] || null; // Windows: vs_5_0; Mac / Linux: OpenGL 4.1
+  const integrated = label ? /tich hop|Apple M/i.test(label)
+    : vendor === 'Intel' ? !/Arc\(TM\) A\d/i.test(s) : vendor === 'AMD' ? /Vega \d|\d{3}M\b|R\d Graphics|Radeon\(TM\) Graphics/i.test(s) : vendor === 'Apple';
+  return { vendor, shader, integrated, tier: gpuTier(s, vendor) };
+}
+// realGpu = { vendor, renderer } đọc từ chính trình duyệt trên máy này (UNMASKED_VENDOR / RENDERER). Trả về bản fp với webglVendor / webglRenderer
+// / label đã chọn lại + gpuMode: 'kept' (GPU giả cũ vẫn hợp máy này -> giữ nguyên), 'remapped' (chọn GPU khác hợp máy), 'real' (không có GPU giả
+// nào hợp -> báo GPU THẬT: an toàn hơn giả sai). Cố định theo profile (salt) + GPU thật: cùng máy luôn ra cùng 1 GPU, không nhảy mỗi lần mở.
+function adaptGpuToHost(fp, realGpu, salt) {
+  if (!fp || !realGpu || !realGpu.renderer) return fp;
+  const real = parseGpu(realGpu.renderer);
+  const truthful = { ...fp, webglVendor: realGpu.vendor || fp.webglVendor, webglRenderer: realGpu.renderer, label: `GPU thật: ${realGpu.renderer}`, gpuMode: 'real' };
+  if (!real.vendor || !real.shader) return truthful; // GPU lạ (SwiftShader, Microsoft Basic Render...) -> không giả
+  let cands = presetsForHost(fp.hostPlatform).filter((p) => { const g = parseGpu(p.webglRenderer, p.label); return g.vendor === real.vendor && g.shader === real.shader && g.integrated === real.integrated; });
+  const sameTier = cands.filter((p) => gpuTier(p.webglRenderer, real.vendor) === real.tier);
+  if (sameTier.length) cands = sameTier;
+  if (!cands.length) return truthful;
+  const kept = cands.find((p) => p.webglRenderer === fp.webglRenderer);
+  const pick = kept || pickWeighted(mulberry32(hashStringToInt(`${salt}|${realGpu.renderer}`)), cands);
+  return { ...fp, webglVendor: pick.webglVendor, webglRenderer: pick.webglRenderer, label: pick.label, gpuMode: kept ? 'kept' : 'remapped' };
+}
+
 // Chọn ĐỀU (không trọng số) 1 phần tử trong mảng nhỏ -- dùng cho
 // coreOptions/memoryOptions của từng GPU (đã tự thân GPU giới hạn sẵn
 // lựa chọn hợp lý rồi, không cần thêm trọng số ở đây nữa).
@@ -405,10 +448,10 @@ const FP_LAYERS = [
   { key: 'ua', kind: 'base', name: 'User-Agent riêng của profile', desc: 'dùng UA đặt riêng cho profile + Client Hints khớp UA đó (header Sec-CH-UA và navigator.userAgentData cùng version / hệ điều hành); tắt = UA thật của Chrome -- áp cả khi fingerprint OFF'},
   { key: 'tostring', kind: 'script', name: 'Che toString', desc: 'các hàm bị sửa vẫn trả "[native code]" khi trang soi Function.toString' },
   { key: 'nav', kind: 'script', name: 'Navigator', desc: 'navigator.platform / hardwareConcurrency (số nhân CPU) / deviceMemory (RAM)' },
-  { key: 'canvas', kind: 'script', name: 'Canvas', desc: 'nhiễu nhẹ ảnh canvas 2D (getImageData / toDataURL / toBlob) -- đổi canvas hash' },
-  { key: 'webgl', kind: 'script', name: 'WebGL', desc: 'GPU vendor / renderer giả, lọc danh sách extension, nhiễu readPixels' },
-  { key: 'audio', kind: 'script', name: 'Audio', desc: 'nhiễu nhẹ AudioBuffer -- đổi audio hash' },
-  { key: 'fonts', kind: 'script', name: 'Font', desc: 'document.fonts giả: chỉ báo có các font trong danh sách của fingerprint' },
+  { key: 'canvas', kind: 'script', braveDef: false, name: 'Canvas', desc: 'nhiễu nhẹ ảnh canvas 2D (getImageData / toDataURL / toBlob) -- đổi canvas hash' },
+  { key: 'webgl', kind: 'script', name: 'WebGL', desc: 'GPU vendor / renderer giả, lọc danh sách extension (nhiễu readPixels chỉ chạy khi tầng Canvas bật)' },
+  { key: 'audio', kind: 'script', braveDef: false, name: 'Audio', desc: 'nhiễu nhẹ AudioBuffer -- đổi audio hash' },
+  { key: 'fonts', kind: 'script', braveDef: false, name: 'Font', desc: 'document.fonts giả: chỉ báo có các font trong danh sách của fingerprint' },
   { key: 'uadata', kind: 'script', name: 'User-Agent Client Hints (JS, cũ)', desc: 'không còn dùng: profile có UA riêng thì Chrome tự báo Client Hints khớp UA (header + navigator.userAgentData) theo tầng "User-Agent riêng"' },
   { key: 'media', kind: 'script', name: 'Thiết bị media', desc: 'mediaDevices.enumerateDevices: mic / loa / camera giả, id cố định theo profile' },
   { key: 'avail', kind: 'script', name: 'Thanh taskbar', desc: 'screen.availHeight nhỏ hơn screen.height (giống có taskbar)' },
@@ -418,11 +461,18 @@ const FP_LAYERS = [
   { key: 'dpr', kind: 'launch', name: 'Tỉ lệ điểm ảnh', desc: 'devicePixelRatio (deviceScaleFactor) theo fingerprint' },
   { key: 'geo', kind: 'launch', name: 'Vị trí', desc: 'geolocation theo fingerprint (chỉ khi fingerprint có vị trí)' },
 ];
+// braveDef: false = khi chạy BRAVE thì mặc định TẮT (Brave Shields tự làm nhiễu canvas / WebGL readPixels / audio / font -- làm thêm là thừa,
+// 2 lớp nhiễu chồng nhau còn dễ lộ hơn). Vẫn bật lại được ở bảng 🧬 (lưu vào fpOnLayers như các tầng mặc định tắt khác).
+function fpLayerDef(l, opts = {}) { return opts.brave && l.braveDef === false ? false : l.def !== false; }
+// Danh sách tầng kèm mặc định THỰC TẾ theo trình duyệt (cho bảng 🧬): def false = mặc định tắt
+function fpLayersFor(opts = {}) {
+  return FP_LAYERS.map((l) => (opts.brave && l.braveDef === false ? { ...l, def: false, desc: `${l.desc} -- đang chạy Brave: mặc định TẮT vì Brave tự làm nhiễu` } : l));
+}
 // Tầng đang bật của 1 profile: tầng mặc định bật (def !== false) bật trừ khi có trong profile.fpOffLayers; tầng mặc định TẮT (def: false --
 // nhãn tên, tiêu đề tab: dấu vết web nhìn thấy) chỉ bật khi có trong profile.fpOnLayers
-function fpLayersOf(profile) {
+function fpLayersOf(profile, opts = {}) {
   const off = new Set((profile && profile.fpOffLayers) || []), on = new Set((profile && profile.fpOnLayers) || []);
-  return Object.fromEntries(FP_LAYERS.map((l) => [l.key, l.def === false ? on.has(l.key) : !off.has(l.key)]));
+  return Object.fromEntries(FP_LAYERS.map((l) => [l.key, !fpLayerDef(l, opts) ? on.has(l.key) : !off.has(l.key)]));
 }
 
 function buildFingerprintInitScript(fp, customUserAgent, layers) {
@@ -582,7 +632,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
       proto.readPixels = markNative(function (x, y, width, height, format, type, pixels, ...rest) {
         const result = origReadPixels.call(this, x, y, width, height, format, type, pixels, ...rest);
         try {
-          if (pixels && pixels.length && format === 6408 && type === 5121 && isProbeCanvas(this.canvas)) {
+          if (L.canvas && pixels && pixels.length && format === 6408 && type === 5121 && isProbeCanvas(this.canvas)) { // nhiễu readPixels đi theo tầng Canvas (tắt Canvas = WebGL chỉ giả tên GPU, để Brave tự làm nhiễu)
             let hash = (CANVAS_SEED ^ (width * 374761393) ^ height) | 0;
             const step = Math.max(1, Math.floor(pixels.length / 256));
             for (let i = 0; i < pixels.length; i += step) hash = (Math.imul(hash, 31) + pixels[i]) | 0;
@@ -995,7 +1045,7 @@ if (${!!L.webgl}) try {
         // Every canvas reachable from inside a worker is an OffscreenCanvas,
         // which is never "on screen" the way a captcha widget's canvas is --
         // always safe to noise, no isProbeCanvas gate needed here.
-        if (pixels && pixels.length && format === 6408 && type === 5121) {
+        if (${!!L.canvas} && pixels && pixels.length && format === 6408 && type === 5121) {
           let hash = (CANVAS_SEED ^ (width * 374761393) ^ height) | 0;
           const step = Math.max(1, Math.floor(pixels.length / 256));
           for (let i = 0; i < pixels.length; i += step) hash = (Math.imul(hash, 31) + pixels[i]) | 0;
@@ -1098,4 +1148,4 @@ function buildBaseStealthInitScript() {
 
 module.exports = {
   FP_LAYERS, uaMetadataFor,
-  fpLayersOf, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, PRESETS, presetsForHost, pickWeighted, extractMajorVersionFromUA, screenForViewport, STANDARD_SCREEN_RESOLUTIONS, plausibleViewport };
+  fpLayersOf, fpLayerDef, fpLayersFor, adaptGpuToHost, parseGpu, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, PRESETS, presetsForHost, pickWeighted, extractMajorVersionFromUA, screenForViewport, STANDARD_SCREEN_RESOLUTIONS, plausibleViewport };
