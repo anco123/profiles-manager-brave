@@ -129,9 +129,22 @@ if (process.env.DATA_DIR && process.env.DATA_DIR.trim()) process.env.DATA_DIR = 
 // tới chỗ GoogleChromePortable nằm). Dò rộng ra vài cấp như vầy để lần
 // tái cấu trúc SAU (nếu có) cũng tự nhận ra được, không phải quay lại
 // sửa .env mỗi lần đổi cấu trúc thư mục.
+// Brave portable (thư mục brave-v<phiên bản>-win32-x64 chứa brave.exe, nằm CẠNH project) được ưu tiên trước GoogleChromePortable.
+// Có nhiều bản Brave cạnh nhau thì lấy bản số phiên bản cao nhất -- cập nhật Brave chỉ cần giải nén bản mới cạnh bản cũ, không sửa .env.
+function autoDetectPortableBrave(dir) {
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => /^brave(-v[\d.]+.*)?$/i.test(n)); } catch { return ''; }
+  const ver = (n) => ((n.match(/v(\d+(?:\.\d+)*)/i) || [, '0'])[1]).split('.').map(Number);
+  names.sort((a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((y[i] || 0) !== (x[i] || 0)) return (y[i] || 0) - (x[i] || 0); return 0; });
+  for (const n of names) { const exe = path.join(dir, n, 'brave.exe'); if (fs.existsSync(exe)) return exe; }
+  return '';
+}
 function autoDetectPortableChrome() {
   for (let levelsUp = 1; levelsUp <= 4; levelsUp++) {
-    const guess = path.join(__dirname, ...Array(levelsUp).fill('..'), 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
+    const dir = path.join(__dirname, ...Array(levelsUp).fill('..'));
+    const brave = autoDetectPortableBrave(dir);
+    if (brave) return brave;
+    const guess = path.join(dir, 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
     if (fs.existsSync(guess)) return guess;
   }
   return '';

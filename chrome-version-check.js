@@ -49,7 +49,7 @@ function resolveChromePath(p) {
   p = String(p || '').trim().replace(/^(["'])(.*)\1$/, '$2').trim();
   if (!p) return '';
   if (!path.isAbsolute(p)) p = path.resolve(__dirname, p);
-  const tries = (dir) => [path.join(dir, 'App', 'Chrome-bin', 'chrome.exe'), path.join(dir, 'Chrome-bin', 'chrome.exe'), path.join(dir, 'chrome.exe')];
+  const tries = (dir) => [path.join(dir, 'brave.exe'), path.join(dir, 'App', 'Chrome-bin', 'chrome.exe'), path.join(dir, 'Chrome-bin', 'chrome.exe'), path.join(dir, 'chrome.exe')];
   let st = null; try { st = fs.statSync(p); } catch {}
   if (st && st.isDirectory()) return tries(p).find((f) => fs.existsSync(f)) || p;
   if (st && /portable\.exe$/i.test(p)) return tries(path.dirname(p)).find((f) => fs.existsSync(f)) || p;
