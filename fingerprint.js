@@ -449,14 +449,14 @@ const FP_LAYERS = [
   { key: 'tostring', kind: 'script', name: 'Che toString', desc: 'các hàm bị sửa vẫn trả "[native code]" khi trang soi Function.toString' },
   { key: 'nav', kind: 'script', name: 'Navigator', desc: 'navigator.platform / hardwareConcurrency (số nhân CPU) / deviceMemory (RAM)' },
   { key: 'canvas', kind: 'script', braveDef: false, name: 'Canvas', desc: 'nhiễu nhẹ ảnh canvas 2D (getImageData / toDataURL / toBlob) -- đổi canvas hash' },
-  { key: 'webgl', kind: 'script', name: 'WebGL', desc: 'GPU vendor / renderer giả, lọc danh sách extension (nhiễu readPixels chỉ chạy khi tầng Canvas bật)' },
+  { key: 'webgl', kind: 'script', name: 'WebGL', desc: 'GPU vendor / renderer giả (chọn cho hợp GPU thật của máy); nhiễu readPixels chỉ chạy khi tầng Canvas bật' },
   { key: 'audio', kind: 'script', braveDef: false, name: 'Audio', desc: 'nhiễu nhẹ AudioBuffer -- đổi audio hash' },
   { key: 'fonts', kind: 'script', braveDef: false, name: 'Font', desc: 'document.fonts giả: chỉ báo có các font trong danh sách của fingerprint' },
   { key: 'uadata', kind: 'script', name: 'User-Agent Client Hints (JS, cũ)', desc: 'không còn dùng: profile có UA riêng thì Chrome tự báo Client Hints khớp UA (header + navigator.userAgentData) theo tầng "User-Agent riêng"' },
   { key: 'media', kind: 'script', name: 'Thiết bị media', desc: 'mediaDevices.enumerateDevices: mic / loa / camera giả, id cố định theo profile' },
   { key: 'avail', kind: 'script', name: 'Thanh taskbar', desc: 'screen.availHeight nhỏ hơn screen.height (giống có taskbar)' },
   { key: 'conn', kind: 'script', name: 'Mạng', desc: 'navigator.connection: 4g / wifi / rtt 50 / downlink 10' },
-  { key: 'workers', kind: 'script', name: 'Worker', desc: 'bọc Worker / SharedWorker / ServiceWorker để áp các tầng trên vào trong worker' },
+  { key: 'workers', kind: 'script', name: 'Worker', desc: 'áp các tầng trên vào trong Worker / module worker / Service Worker (chèn qua CDP trước code của worker -- CSP của web không chặn)' },
   { key: 'screen', kind: 'launch', name: 'Kích thước màn hình', desc: 'screen.width / height giả (theo fingerprint hoặc suy từ viewport)' },
   { key: 'dpr', kind: 'launch', name: 'Tỉ lệ điểm ảnh', desc: 'devicePixelRatio (deviceScaleFactor) theo fingerprint' },
   { key: 'geo', kind: 'launch', name: 'Vị trí', desc: 'geolocation theo fingerprint (chỉ khi fingerprint có vị trí)' },
@@ -499,7 +499,6 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
   const MEDIA_SEED = ${JSON.stringify(fp.mediaDeviceSeed || 1)};
   const CUSTOM_UA = ${JSON.stringify(customUserAgent || null)};
   const UA_MAJOR = ${JSON.stringify(uaMajor)};
-  const WORKER_PATCH_SOURCE = ${JSON.stringify(buildWorkerPatchSource(fp, customUserAgent, L))};
   const L = ${JSON.stringify(L)}; // tầng đang bật (xem FP_LAYERS)
 
   function mulberry32(seed) {
@@ -521,25 +520,35 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
   }
 
   const nativeStrings = new WeakMap();
-  function markNative(fn, name) {
-    try { nativeStrings.set(fn, 'function ' + name + '() { [native code] }'); } catch (e) {}
-    return fn;
+  // Hàm thay thế phải giống hàm native ở mọi chỗ web hay soi: toString ra "[native code]", KHÔNG có thuộc tính prototype, KHÔNG gọi được
+  // bằng new, length đúng như bản gốc, và getter gọi sai receiver (getter.call({})) phải ném "Illegal invocation" -- nên bọc fn trong 1
+  // method (method không có prototype / không construct được) và cho getter gọi getter GỐC trước để trình duyệt tự kiểm tra receiver.
+  function markNative(fn, name, orig) {
+    let w = fn;
+    try {
+      const isGet = /^get /.test(name);
+      w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && Error.captureStackTrace) Error.captureStackTrace(e, w); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: cắt khung của hàm bọc khỏi stack (như hàm native -- không lộ dòng của script chèn vào)
+      Object.defineProperty(w, 'length', { value: orig ? orig.length : fn.length, configurable: true });
+    } catch (e) { w = fn; }
+    try { nativeStrings.set(w, 'function ' + name + '() { [native code] }'); } catch (e) {}
+    return w;
   }
+  function origGet(obj, key) { try { const d = Object.getOwnPropertyDescriptor(obj, key); return d && d.get; } catch (e) { return undefined; } }
   if (L.tostring) try {
     const origFunctionToString = Function.prototype.toString;
     function patchedToString() {
       if (nativeStrings.has(this)) return nativeStrings.get(this);
       return origFunctionToString.call(this);
     }
-    markNative(patchedToString, 'toString');
-    Object.defineProperty(Function.prototype, 'toString', { value: patchedToString, writable: true, configurable: true, enumerable: false });
+    const nativeToString = markNative(patchedToString, 'toString', origFunctionToString);
+    Object.defineProperty(Function.prototype, 'toString', { value: nativeToString, writable: true, configurable: true, enumerable: false });
   } catch (e) { /* everything below still works, just without toString cover */ }
 
   if (L.nav) try {
-    Object.defineProperty(Navigator.prototype, 'platform', { get: markNative(() => PLATFORM, 'get platform'), configurable: true, enumerable: true });
-    Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: markNative(() => HARDWARE_CONCURRENCY, 'get hardwareConcurrency'), configurable: true, enumerable: true });
+    Object.defineProperty(Navigator.prototype, 'platform', { get: markNative(() => PLATFORM, 'get platform', origGet(Navigator.prototype, 'platform')), configurable: true, enumerable: true });
+    Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', { get: markNative(() => HARDWARE_CONCURRENCY, 'get hardwareConcurrency', origGet(Navigator.prototype, 'hardwareConcurrency')), configurable: true, enumerable: true });
     if ('deviceMemory' in Navigator.prototype) {
-      Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: markNative(() => DEVICE_MEMORY, 'get deviceMemory'), configurable: true, enumerable: true });
+      Object.defineProperty(Navigator.prototype, 'deviceMemory', { get: markNative(() => DEVICE_MEMORY, 'get deviceMemory', origGet(Navigator.prototype, 'deviceMemory')), configurable: true, enumerable: true });
     }
   } catch (e) {}
 
@@ -565,7 +574,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
         noiseUint8ClampedArray(result.data, (result.width * 374761393) ^ result.height);
       }
       return result;
-    }, 'getImageData');
+    }, 'getImageData', CanvasRenderingContext2D.prototype.getImageData);
 
     if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') {
       const origOffscreenGetImageData = OffscreenCanvasRenderingContext2D.prototype.getImageData;
@@ -575,7 +584,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
           noiseUint8ClampedArray(result.data, (result.width * 374761393) ^ result.height);
         }
         return result;
-      }, 'getImageData');
+      }, 'getImageData', OffscreenCanvasRenderingContext2D.prototype.getImageData);
     }
 
     // SỬA LẦN 2: đã thử ca 2 ky thuat nhieu (tao canvas gia / nhieu-
@@ -591,12 +600,12 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
     const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = markNative(function (...args) {
       return origToDataURL.apply(this, args);
-    }, 'toDataURL');
+    }, 'toDataURL', HTMLCanvasElement.prototype.toDataURL);
 
     const origToBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = markNative(function (callback, ...rest) {
       return origToBlob.call(this, callback, ...rest);
-    }, 'toBlob');
+    }, 'toBlob', HTMLCanvasElement.prototype.toBlob);
   } catch (e) {}
   if (L.webgl) try {
     // Da xac nhan qua bisect: WebGL VO TOI, khong lien quan loi chan
@@ -604,29 +613,14 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
     function patchWebGL(proto) {
       const origGetParameter = proto.getParameter;
       proto.getParameter = markNative(function (param) {
+        if (param === 7936 || param === 37445 || param === 7937 || param === 37446) origGetParameter.call(this, 7938); // VERSION: chỉ để trình duyệt kiểm tra receiver (sai -> Illegal invocation), không sinh lỗi GL
         // 7936/7937 = VENDOR/RENDERER; 37445/37446 = UNMASKED_VENDOR_WEBGL/
         // UNMASKED_RENDERER_WEBGL -- different Chromium versions surface
         // the real GPU string through one or the other, both covered.
         if (param === 7936 || param === 37445) return WEBGL_VENDOR;
         if (param === 7937 || param === 37446) return WEBGL_RENDERER;
         return origGetParameter.call(this, param);
-      }, 'getParameter');
-      const origGetSupportedExtensions = proto.getSupportedExtensions;
-      proto.getSupportedExtensions = markNative(function () {
-        // Only advertise extensions that are BOTH in our curated generic
-        // list AND genuinely supported by the underlying GPU/driver --
-        // otherwise getExtension() below could return null for something
-        // this method just claimed was supported, a self-contradiction
-        // that's an easy, specific tell.
-        const real = origGetSupportedExtensions.call(this) || [];
-        return WEBGL_EXTENSIONS.filter((e) => real.indexOf(e) !== -1);
-      }, 'getSupportedExtensions');
-
-      const origGetExtension = proto.getExtension;
-      proto.getExtension = markNative(function (name) {
-        if (WEBGL_EXTENSIONS.indexOf(name) === -1) return null;
-        return origGetExtension.call(this, name);
-      }, 'getExtension');
+      }, 'getParameter', proto.getParameter);
 
       const origReadPixels = proto.readPixels;
       proto.readPixels = markNative(function (x, y, width, height, format, type, pixels, ...rest) {
@@ -646,7 +640,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
           }
         } catch (e) {}
         return result;
-      }, 'readPixels');
+      }, 'readPixels', proto.readPixels);
     }
     if (window.WebGLRenderingContext) patchWebGL(WebGLRenderingContext.prototype);
     if (window.WebGL2RenderingContext) patchWebGL(WebGL2RenderingContext.prototype);
@@ -674,7 +668,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
       const data = origGetChannelData.call(this, channel);
       noiseChannelInPlace(this, channel, data);
       return data;
-    }, 'getChannelData');
+    }, 'getChannelData', AudioBuffer.prototype.getChannelData);
 
     // copyFromChannel is a second, separate way to read the same samples --
     // fingerprint scripts that use it instead of getChannelData previously
@@ -688,7 +682,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
         const full = origGetChannelData.call(this, channel);
         noiseChannelInPlace(this, channel, full);
         return origCopyFromChannel.call(this, destination, channel, ...rest);
-      }, 'copyFromChannel');
+      }, 'copyFromChannel', AudioBuffer.prototype.copyFromChannel);
     }
   } catch (e) {}
 
@@ -761,7 +755,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
     // so patching the instance would make document.hasOwnProperty('fonts')
     // true when it should be false.
     Object.defineProperty(Document.prototype, 'fonts', {
-      get: markNative(() => fakeFontFaceSet, 'get fonts'),
+      get: markNative(() => fakeFontFaceSet, 'get fonts', origGet(Document.prototype, 'fonts')),
       configurable: true,
       enumerable: true,
     });
@@ -797,7 +791,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
         }, 'getHighEntropyValues'),
         toJSON: markNative(function () { return { brands: brands, mobile: false, platform: uaPlatform }; }, 'toJSON'),
       });
-      Object.defineProperty(Navigator.prototype, 'userAgentData', { get: markNative(() => fakeUAData, 'get userAgentData'), configurable: true, enumerable: true });
+      Object.defineProperty(Navigator.prototype, 'userAgentData', { get: markNative(() => fakeUAData, 'get userAgentData', origGet(Navigator.prototype, 'userAgentData')), configurable: true, enumerable: true });
     } catch (e) {}
   }
 
@@ -831,10 +825,14 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
       { deviceId: hashHex(2), kind: 'audiooutput', label: '', groupId: hashHex(10) },
       { deviceId: hashHex(3), kind: 'videoinput', label: '', groupId: hashHex(11) },
     ];
-    if (window.MediaDeviceInfo && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-      navigator.mediaDevices.enumerateDevices = markNative(function () {
+    // Ghi đè trên MediaDevices.prototype (như hàm thật), KHÔNG gắn thẳng vào navigator.mediaDevices -- gắn vào object thì
+    // Object.getOwnPropertyNames(navigator.mediaDevices) lộ ra 'enumerateDevices'. Gọi sai receiver -> để hàm gốc tự báo lỗi như thật.
+    if (window.MediaDeviceInfo && window.MediaDevices && MediaDevices.prototype.enumerateDevices) {
+      const origEnumerateDevices = MediaDevices.prototype.enumerateDevices;
+      MediaDevices.prototype.enumerateDevices = markNative(function () {
+        if (!(this instanceof MediaDevices)) return Reflect.apply(origEnumerateDevices, this, arguments);
         return Promise.resolve(fakeDeviceFields.map(makeFakeDevice));
-      }, 'enumerateDevices');
+      }, 'enumerateDevices', origEnumerateDevices);
     }
   } catch (e) {}
 
@@ -849,7 +847,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
       const TASKBAR_DEDUCTIONS = PLATFORM === 'MacIntel' ? [72, 76, 96] : [40, 48, 62];
       const deduction = TASKBAR_DEDUCTIONS[Math.floor(rng() * TASKBAR_DEDUCTIONS.length)];
       const fakeAvailHeight = Math.max(1, screen.height - deduction);
-      Object.defineProperty(Screen.prototype, 'availHeight', { get: markNative(() => fakeAvailHeight, 'get availHeight'), configurable: true, enumerable: true });
+      Object.defineProperty(Screen.prototype, 'availHeight', { get: markNative(() => fakeAvailHeight, 'get availHeight', origGet(Screen.prototype, 'availHeight')), configurable: true, enumerable: true });
     }
   } catch (e) {}
 
@@ -874,88 +872,13 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
         type: { value: 'wifi', enumerable: true, configurable: true },
         onchange: { value: null, writable: true, configurable: true },
       });
-      Object.defineProperty(Navigator.prototype, 'connection', { get: markNative(() => fakeConnection, 'get connection'), configurable: true, enumerable: true });
+      Object.defineProperty(Navigator.prototype, 'connection', { get: markNative(() => fakeConnection, 'get connection', origGet(Navigator.prototype, 'connection')), configurable: true, enumerable: true });
     }
   } catch (e) {}
 
-  // Đã bisect và loại trừ: KHÔNG phải nguyên nhân chặn đăng nhập (test
-  // thực tế xác nhận). Giữ nguyên hoạt động bình thường.
-  if (L.workers) try {
-    const OriginalWorker = window.Worker;
-    const OriginalSharedWorker = window.SharedWorker;
-
-    function wrappedWorkerUrl(scriptURL) {
-      const absoluteUrl = new URL(scriptURL, location.href).href;
-      const source = WORKER_PATCH_SOURCE + '\\ntry { importScripts(' + JSON.stringify(absoluteUrl) + '); } catch (e) { throw e; }';
-      const blob = new Blob([source], { type: 'text/javascript' });
-      return URL.createObjectURL(blob);
-    }
-
-    // KNOWN LIMITATION: unlike serviceWorker.register() below (which returns
-    // a Promise we can retry on failure), new Worker()/new SharedWorker()
-    // return synchronously, and the returned object's identity can't be
-    // swapped out after the fact. A worker-src CSP blocking the blob: URL,
-    // or a cross-origin scriptURL blocked by CORS inside importScripts, both
-    // surface as an async 'error' event on the worker -- *not* a synchronous
-    // throw -- so the try/catch below only protects against the (rarer)
-    // synchronous construction failures. We attach an error listener so a
-    // wrapping-caused failure isn't silently invisible, but we cannot
-    // transparently fall back to an unwrapped worker here the way register()
-    // can. If a target site is known to run cross-origin/CSP-restricted
-    // workers, that's a real gap worth testing against directly.
-    if (OriginalWorker) {
-      window.Worker = markNative(function (scriptURL, options) {
-        if (options && options.type === 'module') return new OriginalWorker(scriptURL, options); // importScripts unavailable in module workers -- don't break real ones
-        try {
-          const worker = new OriginalWorker(wrappedWorkerUrl(scriptURL), options);
-          worker.addEventListener('error', (e) => {
-            // Best-effort visibility only -- see limitation above.
-          });
-          return worker;
-        } catch (e) {
-          return new OriginalWorker(scriptURL, options); // anything about the wrapping failed synchronously -- real behavior beats a broken page
-        }
-      }, 'Worker');
-      window.Worker.prototype = OriginalWorker.prototype;
-    }
-
-    if (OriginalSharedWorker) {
-      window.SharedWorker = markNative(function (scriptURL, options) {
-        if (options && typeof options === 'object' && options.type === 'module') return new OriginalSharedWorker(scriptURL, options);
-        try {
-          return new OriginalSharedWorker(wrappedWorkerUrl(scriptURL), options);
-        } catch (e) {
-          return new OriginalSharedWorker(scriptURL, options);
-        }
-      }, 'SharedWorker');
-      window.SharedWorker.prototype = OriginalSharedWorker.prototype;
-    }
-
-    if (navigator.serviceWorker && navigator.serviceWorker.register) {
-      const origRegister = navigator.serviceWorker.register.bind(navigator.serviceWorker);
-      navigator.serviceWorker.register = markNative(function (scriptURL, options) {
-        if (options && options.type === 'module') return origRegister(scriptURL, options);
-        // Default scope is normally derived from scriptURL's own directory.
-        // Once scriptURL becomes a blob: URL that derivation no longer makes
-        // sense, so pin the real default explicitly rather than letting it
-        // silently change.
-        const absoluteUrl = new URL(scriptURL, location.href).href;
-        const resolvedOptions = (options && options.scope)
-          ? options
-          : Object.assign({}, options, { scope: absoluteUrl.replace(/[^/]*$/, '') });
-        try {
-          return origRegister(wrappedWorkerUrl(scriptURL), resolvedOptions)
-            // register() returns a Promise (unlike new Worker(), which
-            // returns synchronously), so a failure here -- e.g. blob: blocked
-            // by a worker-src CSP, or the real script failing to import --
-            // can be caught and retried with the real, unwrapped script.
-            .catch((e) => origRegister(scriptURL, options));
-        } catch (e) {
-          return origRegister(scriptURL, options);
-        }
-      }, 'register');
-    }
-  } catch (e) {}
+  // Worker / SharedWorker / ServiceWorker: KHÔNG bọc new Worker() bằng blob: nữa (CSP worker-src của web chặn blob: -> worker của web
+  // không chạy -> trang hỏng / không đăng nhập được). Server chèn buildWorkerPatchSource() thẳng vào worker qua CDP trước khi code của
+  // worker chạy (attachWorkerPatch trong server.js) -- không đụng gì tới trang, CSP không chặn được, áp cả module worker.
 })();
 `;
 }
@@ -963,20 +886,31 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
 function buildWorkerPatchSource(fp, customUserAgent, layers) {
   const L = layers || fpLayersOf(null); // cùng các tầng đang bật như ở trang
   const uaMajor = customUserAgent ? extractMajorVersionFromUA(customUserAgent) : null;
-  return `
+  return `(() => {
+if (self.__pmFpPatched) return; self.__pmFpPatched = true;
 const nativeStrings = new WeakMap();
-function markNative(fn, name) {
-  try { nativeStrings.set(fn, 'function ' + name + '() { [native code] }'); } catch (e) {}
-  return fn;
+// Hàm thay thế phải giống hàm native ở mọi chỗ web hay soi: toString ra "[native code]", KHÔNG có thuộc tính prototype, KHÔNG gọi được
+// bằng new, length đúng như bản gốc, và getter gọi sai receiver (getter.call({})) phải ném "Illegal invocation" -- nên bọc fn trong 1
+// method (method không có prototype / không construct được) và cho getter gọi getter GỐC trước để trình duyệt tự kiểm tra receiver.
+function markNative(fn, name, orig) {
+  let w = fn;
+  try {
+    const isGet = /^get /.test(name);
+    w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && Error.captureStackTrace) Error.captureStackTrace(e, w); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: cắt khung của hàm bọc khỏi stack (như hàm native -- không lộ dòng của script chèn vào)
+    Object.defineProperty(w, 'length', { value: orig ? orig.length : fn.length, configurable: true });
+  } catch (e) { w = fn; }
+  try { nativeStrings.set(w, 'function ' + name + '() { [native code] }'); } catch (e) {}
+  return w;
 }
+function origGet(obj, key) { try { const d = Object.getOwnPropertyDescriptor(obj, key); return d && d.get; } catch (e) { return undefined; } }
 if (${!!L.tostring}) try {
   const origFunctionToString = Function.prototype.toString;
   function patchedToString() {
     if (nativeStrings.has(this)) return nativeStrings.get(this);
     return origFunctionToString.call(this);
   }
-  markNative(patchedToString, 'toString');
-  Object.defineProperty(Function.prototype, 'toString', { value: patchedToString, writable: true, configurable: true, enumerable: false });
+  const nativeToString = markNative(patchedToString, 'toString', origFunctionToString);
+  Object.defineProperty(Function.prototype, 'toString', { value: nativeToString, writable: true, configurable: true, enumerable: false });
 } catch (e) {}
 
 function mulberry32(seed) {
@@ -992,12 +926,12 @@ const CANVAS_SEED = ${JSON.stringify(fp.canvasNoiseSeed)};
 
 if (${!!L.nav}) try {
   const proto = (typeof WorkerNavigator !== 'undefined') ? WorkerNavigator.prototype : Object.getPrototypeOf(navigator);
-  Object.defineProperty(proto, 'hardwareConcurrency', { get: markNative(() => ${JSON.stringify(fp.hardwareConcurrency)}, 'get hardwareConcurrency'), configurable: true, enumerable: true });
+  Object.defineProperty(proto, 'hardwareConcurrency', { get: markNative(() => ${JSON.stringify(fp.hardwareConcurrency)}, 'get hardwareConcurrency', origGet(proto, 'hardwareConcurrency')), configurable: true, enumerable: true });
   if ('deviceMemory' in proto) {
-    Object.defineProperty(proto, 'deviceMemory', { get: markNative(() => ${JSON.stringify(fp.deviceMemory)}, 'get deviceMemory'), configurable: true, enumerable: true });
+    Object.defineProperty(proto, 'deviceMemory', { get: markNative(() => ${JSON.stringify(fp.deviceMemory)}, 'get deviceMemory', origGet(proto, 'deviceMemory')), configurable: true, enumerable: true });
   }
   if ('platform' in proto) {
-    Object.defineProperty(proto, 'platform', { get: markNative(() => ${JSON.stringify(fp.platform)}, 'get platform'), configurable: true, enumerable: true });
+    Object.defineProperty(proto, 'platform', { get: markNative(() => ${JSON.stringify(fp.platform)}, 'get platform', origGet(proto, 'platform')), configurable: true, enumerable: true });
   }
 } catch (e) {}
 
@@ -1013,7 +947,7 @@ if (${!!L.uadata}) try {
     toJSON: markNative(function () { return { brands: brands, mobile: false, platform: uaPlatform }; }, 'toJSON'),
   });
   const navProto = (typeof WorkerNavigator !== 'undefined') ? WorkerNavigator.prototype : Object.getPrototypeOf(navigator);
-  Object.defineProperty(navProto, 'userAgentData', { get: markNative(() => fakeUAData, 'get userAgentData'), configurable: true, enumerable: true });
+  Object.defineProperty(navProto, 'userAgentData', { get: markNative(() => fakeUAData, 'get userAgentData', origGet(navProto, 'userAgentData')), configurable: true, enumerable: true });
 } catch (e) {}
 ` : ''}
 
@@ -1024,20 +958,11 @@ if (${!!L.webgl}) try {
   function patchWebGL(proto) {
     const origGetParameter = proto.getParameter;
     proto.getParameter = markNative(function (param) {
+      if (param === 7936 || param === 37445 || param === 7937 || param === 37446) origGetParameter.call(this, 7938); // kiểm tra receiver như thật
       if (param === 7936 || param === 37445) return WEBGL_VENDOR;
       if (param === 7937 || param === 37446) return WEBGL_RENDERER;
       return origGetParameter.call(this, param);
-    }, 'getParameter');
-    const origGetSupportedExtensions = proto.getSupportedExtensions;
-    proto.getSupportedExtensions = markNative(function () {
-      const real = origGetSupportedExtensions.call(this) || [];
-      return WEBGL_EXTENSIONS.filter((e) => real.indexOf(e) !== -1);
-    }, 'getSupportedExtensions');
-    const origGetExtension = proto.getExtension;
-    proto.getExtension = markNative(function (name) {
-      if (WEBGL_EXTENSIONS.indexOf(name) === -1) return null;
-      return origGetExtension.call(this, name);
-    }, 'getExtension');
+    }, 'getParameter', proto.getParameter);
     const origReadPixels = proto.readPixels;
     proto.readPixels = markNative(function (x, y, width, height, format, type, pixels, ...rest) {
       const result = origReadPixels.call(this, x, y, width, height, format, type, pixels, ...rest);
@@ -1059,7 +984,7 @@ if (${!!L.webgl}) try {
         }
       } catch (e) {}
       return result;
-    }, 'readPixels');
+    }, 'readPixels', proto.readPixels);
   }
   if (typeof WebGLRenderingContext !== 'undefined') patchWebGL(WebGLRenderingContext.prototype);
   if (typeof WebGL2RenderingContext !== 'undefined') patchWebGL(WebGL2RenderingContext.prototype);
@@ -1086,7 +1011,7 @@ if (${!!L.canvas}) try {
       const result = origGetImageData.apply(this, args);
       noiseUint8ClampedArray(result.data, (result.width * 374761393) ^ result.height);
       return result;
-    }, 'getImageData');
+    }, 'getImageData', OffscreenCanvasRenderingContext2D.prototype.getImageData);
 
     if (typeof OffscreenCanvas !== 'undefined' && OffscreenCanvas.prototype.convertToBlob) {
       const origConvertToBlob = OffscreenCanvas.prototype.convertToBlob;
@@ -1103,10 +1028,11 @@ if (${!!L.canvas}) try {
           cctx.putImageData(imageData, 0, 0);
         } catch (e) { /* tainted -- ship the clean clone */ }
         return origConvertToBlob.apply(clone, args);
-      }, 'convertToBlob');
+      }, 'convertToBlob', OffscreenCanvas.prototype.convertToBlob);
     }
   }
 } catch (e) {}
+})();
 `;
 }
 
@@ -1122,22 +1048,32 @@ function buildBaseStealthInitScript() {
     if (navigator.webdriver !== true) return; // flag already did its job -- nothing to patch
 
     const nativeStrings = new WeakMap();
-    function markNative(fn, name) {
-      try { nativeStrings.set(fn, 'function ' + name + '() { [native code] }'); } catch (e) {}
-      return fn;
+    // Hàm thay thế phải giống hàm native ở mọi chỗ web hay soi: toString ra "[native code]", KHÔNG có thuộc tính prototype, KHÔNG gọi được
+    // bằng new, length đúng như bản gốc, và getter gọi sai receiver (getter.call({})) phải ném "Illegal invocation" -- nên bọc fn trong 1
+    // method (method không có prototype / không construct được) và cho getter gọi getter GỐC trước để trình duyệt tự kiểm tra receiver.
+    function markNative(fn, name, orig) {
+      let w = fn;
+      try {
+        const isGet = /^get /.test(name);
+        w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && Error.captureStackTrace) Error.captureStackTrace(e, w); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: cắt khung của hàm bọc khỏi stack (như hàm native -- không lộ dòng của script chèn vào)
+        Object.defineProperty(w, 'length', { value: orig ? orig.length : fn.length, configurable: true });
+      } catch (e) { w = fn; }
+      try { nativeStrings.set(w, 'function ' + name + '() { [native code] }'); } catch (e) {}
+      return w;
     }
+    function origGet(obj, key) { try { const d = Object.getOwnPropertyDescriptor(obj, key); return d && d.get; } catch (e) { return undefined; } }
     try {
       const origFunctionToString = Function.prototype.toString;
       function patchedToString() {
         if (nativeStrings.has(this)) return nativeStrings.get(this);
         return origFunctionToString.call(this);
       }
-      markNative(patchedToString, 'toString');
-      Object.defineProperty(Function.prototype, 'toString', { value: patchedToString, writable: true, configurable: true, enumerable: false });
+      const nativeToString = markNative(patchedToString, 'toString', origFunctionToString);
+      Object.defineProperty(Function.prototype, 'toString', { value: nativeToString, writable: true, configurable: true, enumerable: false });
     } catch (e) { /* fallback patch below still applies either way */ }
 
     Object.defineProperty(Navigator.prototype, 'webdriver', {
-      get: markNative(() => false, 'get webdriver'), // false, matching real Chrome -- never undefined
+      get: markNative(() => false, 'get webdriver', origGet(Navigator.prototype, 'webdriver')), // false, matching real Chrome -- never undefined
       configurable: true,
       enumerable: true,
     });
@@ -1148,4 +1084,4 @@ function buildBaseStealthInitScript() {
 
 module.exports = {
   FP_LAYERS, uaMetadataFor,
-  fpLayersOf, fpLayerDef, fpLayersFor, adaptGpuToHost, parseGpu, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, PRESETS, presetsForHost, pickWeighted, extractMajorVersionFromUA, screenForViewport, STANDARD_SCREEN_RESOLUTIONS, plausibleViewport };
+  fpLayersOf, fpLayerDef, fpLayersFor, adaptGpuToHost, parseGpu, buildWorkerPatchSource, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, PRESETS, presetsForHost, pickWeighted, extractMajorVersionFromUA, screenForViewport, STANDARD_SCREEN_RESOLUTIONS, plausibleViewport };

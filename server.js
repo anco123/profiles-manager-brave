@@ -44,7 +44,7 @@ const fs = require('fs');
 const os = require('os');
 const { exec, spawn } = require('child_process');
 const { chromium } = require('playwright');
-const { FP_LAYERS, fpLayersOf, fpLayerDef, fpLayersFor, adaptGpuToHost, uaMetadataFor, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
+const { FP_LAYERS, fpLayersOf, fpLayerDef, fpLayersFor, adaptGpuToHost, buildWorkerPatchSource, uaMetadataFor, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
 const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
 const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode, recorderExports, recorderHeader } = require('./recorder');
 
@@ -1910,6 +1910,28 @@ async function launchProfileById(id) {
         const applyUA = async (p) => { try { const cdp = await context.newCDPSession(p); p.__pmUaCdp = cdp; await cdp.send('Emulation.setUserAgentOverride', { userAgent: launchOptions.userAgent, platform: fp ? fp.platform : navPlatform, userAgentMetadata: metadata }); } catch (e) {} }; // giữ phiên CDP sống: đóng phiên = mất override
         for (const p of context.pages()) await applyUA(p);
         context.on('page', applyUA);
+      }
+
+      // Tầng "Worker": chèn fingerprint vào Worker / module worker / Service Worker của mỗi tab qua CDP -- Target.setAutoAttach với
+      // waitForDebuggerOnStart giữ worker lại, chạy script vá rồi mới cho worker chạy code của web. Thay cho cách cũ bọc new Worker() bằng
+      // blob: (CSP worker-src của web chặn blob: -> worker của web chết -> trang treo / không đăng nhập được). Lỗi gì cũng cho worker chạy tiếp.
+      if (fp && lay.workers) {
+        const workerSrc = buildWorkerPatchSource(fp, '', lay);
+        const attachWorkerPatch = async (p) => {
+          try {
+            const cdp = await context.newCDPSession(p);
+            p.__pmWorkerCdp = cdp; // giữ phiên CDP sống
+            let msgId = 0;
+            const send = (sessionId, method, params = {}) => cdp.send('Target.sendMessageToTarget', { sessionId, message: JSON.stringify({ id: ++msgId, method, params }) }).catch(() => {});
+            cdp.on('Target.attachedToTarget', async ({ sessionId, targetInfo, waitingForDebugger }) => {
+              if (/worker/.test(targetInfo.type)) await send(sessionId, 'Runtime.evaluate', { expression: workerSrc });
+              if (waitingForDebugger) await send(sessionId, 'Runtime.runIfWaitingForDebugger');
+            });
+            await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: false });
+          } catch (e) {}
+        };
+        for (const p of context.pages()) await attachWorkerPatch(p);
+        context.on('page', attachWorkerPatch);
       }
 
       // Không tự mở sẵn trang nào ở đây nữa -- main.js (script được chọn
