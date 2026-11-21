@@ -366,13 +366,29 @@ function normalizeFingerprint(input, seed) {
 
 // User-Agent riêng -> bộ Client Hints khớp với nó (Emulation.setUserAgentOverride userAgentMetadata): header Sec-CH-UA* + navigator.userAgentData
 // cùng báo đúng version / hệ điều hành ghi trong UA (không có thì Chrome gửi version THẬT -> lệch, web phía server thấy)
-function uaMetadataFor(ua) {
-  const s = String(ua || ''), full = (s.match(/Chrome\/([\d.]+)/) || [])[1] || '130.0.0.0', major = full.split('.')[0];
+// Danh sách brand ĐÚNG như Chromium tự sinh (thuật toán GREASE của Chromium, seed = major version): tên brand giả ("Not/A)Brand"...),
+// version của nó và THỨ TỰ 3 brand đều đổi theo major -- ghi cứng 'Not_A Brand' v8 như trước là lệch với trình duyệt thật ở hầu hết version.
+// Đã đối chiếu với Brave 159 thật: "Brave";v="159", "Not/A)Brand";v="8", "Chromium";v="159".
+function greasedBrands(major, productBrand) {
+  const seed = parseInt(major, 10) || 0;
+  const chars = [' ', '(', ':', '-', '.', '/', ')', ';', '=', '?', '_'];
+  const grease = { brand: `Not${chars[seed % 11]}A${chars[(seed + 1) % 11]}Brand`, version: ['8', '99', '24'][seed % 3] };
+  const order = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]][seed % 6];
+  const list = [grease, { brand: 'Chromium', version: String(major) }, { brand: productBrand, version: String(major) }];
+  const out = []; list.forEach((b, i) => { out[order[i]] = b; });
+  return out;
+}
+
+// opts.brave = đang chạy Brave (brave.exe): brand "Brave" thay cho "Google Chrome" -- Brave tự báo brand Brave trong Sec-CH-UA, giả "Google Chrome"
+// là lệch ngay. Brave cũng luôn báo version đầy đủ dạng rút gọn <major>.0.0.0 (Chrome thì báo đủ số).
+function uaMetadataFor(ua, opts = {}) {
+  const s = String(ua || ''), uaFull = (s.match(/Chrome\/([\d.]+)/) || [])[1] || '130.0.0.0', major = uaFull.split('.')[0];
+  const full = opts.brave ? `${major}.0.0.0` : uaFull;
   const platform = /Windows/.test(s) ? 'Windows' : /Mac OS X|Macintosh/.test(s) ? 'macOS' : /Android/.test(s) ? 'Android' : /CrOS/.test(s) ? 'Chrome OS' : 'Linux';
-  const brands = [{ brand: 'Not_A Brand', version: '8' }, { brand: 'Chromium', version: major }, { brand: 'Google Chrome', version: major }];
+  const brands = greasedBrands(major, opts.brave ? 'Brave' : 'Google Chrome');
   return {
     navPlatform: platform === 'Windows' ? 'Win32' : platform === 'macOS' ? 'MacIntel' : platform === 'Android' ? 'Linux armv8l' : 'Linux x86_64',
-    metadata: { brands, fullVersionList: brands.map((b) => ({ brand: b.brand, version: b.brand === 'Not_A Brand' ? '8.0.0.0' : full })), fullVersion: full, platform,
+    metadata: { brands, fullVersionList: brands.map((b) => ({ brand: b.brand, version: /^Not/.test(b.brand) ? `${b.version}.0.0.0` : full })), fullVersion: full, platform,
       platformVersion: platform === 'Windows' ? '10.0.0' : platform === 'macOS' ? '14.0.0' : platform === 'Android' ? '14.0.0' : '6.5.0',
       architecture: platform === 'Android' ? 'arm' : 'x86', model: '', mobile: platform === 'Android', bitness: '64', wow64: false },
   };

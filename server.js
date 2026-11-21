@@ -1857,7 +1857,7 @@ async function launchProfileById(id) {
       // User-Agent riêng: báo cho Chrome bộ Client Hints khớp UA đó (mỗi tab, cả tab mở sau) -- header Sec-CH-UA* gửi lên web + navigator.userAgentData
       // cùng version / hệ điều hành với UA. Chỉ đổi UA qua launchOptions.userAgent thì header vẫn báo version Chrome thật (lệch, web thấy được).
       if (launchOptions.userAgent) {
-        const { metadata, navPlatform } = uaMetadataFor(launchOptions.userAgent);
+        const { metadata, navPlatform } = uaMetadataFor(launchOptions.userAgent, { brave: /brave\.exe$/i.test(launchOptions.executablePath || '') }); // Brave -> brand "Brave" (khớp header Brave tự gửi)
         const applyUA = async (p) => { try { const cdp = await context.newCDPSession(p); p.__pmUaCdp = cdp; await cdp.send('Emulation.setUserAgentOverride', { userAgent: launchOptions.userAgent, platform: fp ? fp.platform : navPlatform, userAgentMetadata: metadata }); } catch (e) {} }; // giữ phiên CDP sống: đóng phiên = mất override
         for (const p of context.pages()) await applyUA(p);
         context.on('page', applyUA);
