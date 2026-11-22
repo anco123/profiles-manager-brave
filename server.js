@@ -196,8 +196,16 @@ const SCRIPTS_DIR = path.join(__dirname, 'scripts'); // your own helper .js file
 const SNIPPETS_FILE = path.join(DATA_DIR, 'snippets.json');
 
 // --- make sure our data folders exist on first run ---
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(PROFILES_ROOT, { recursive: true }); // <folder profile>\profiles -- chưa có thì tạo luôn (máy mới, folder Profile chưa từng dùng)
+// Folder profile (VD F:\AdditionSolfware\An_AntiDetectTool\Profile) chưa có thì tạo luôn. Chỉ KHÔNG tạo được khi chính ổ đĩa không có
+// (máy không có ổ F:) -- dừng hẳn với lời nhắn rõ ràng, KHÔNG lặng lẽ dùng folder khác (dữ liệu profile sẽ bị tách ra 2 nơi).
+try {
+  fs.mkdirSync(PROFILES_ROOT, { recursive: true }); // tạo luôn cả DATA_DIR + <folder profile>\profiles
+} catch (err) {
+  const drive = path.parse(DATA_DIR).root;
+  console.error(`\nKHÔNG tạo được folder profile "${DATA_DIR}": ${err.message}`);
+  if (drive && !fs.existsSync(drive)) console.error(`Máy này (${MACHINE}) không có ổ ${drive} -- cắm / gán ổ ${drive} hoặc thêm mục "${MACHINE}": { "DATA_DIR": "<folder khác>" } vào machines.json.`);
+  process.exit(1);
+}
 if (!fs.existsSync(PROFILES_ROOT)) fs.mkdirSync(PROFILES_ROOT, { recursive: true });
 if (!fs.existsSync(PROFILES_FILE)) fs.writeFileSync(PROFILES_FILE, '[]');
 if (!fs.existsSync(SCRIPTS_DIR)) fs.mkdirSync(SCRIPTS_DIR, { recursive: true });
@@ -1580,8 +1588,17 @@ async function launchProfileById(id) {
     else if (prefs.profile.default_content_setting_values.notifications === 2) delete prefs.profile.default_content_setting_values.notifications; // tầng "Chặn hỏi thông báo" tắt -> về mặc định của Chrome (hỏi)
     prefs.autofill = prefs.autofill || {};
     prefs.autofill.credit_card_enabled = false; // "Save card?" bubble
+    // KHÔNG mở lại tab của lần trước: mỗi lần Launch chỉ có 1 tab (như mở trình duyệt mới) -- mở tiếp tab nào là do người dùng / script.
+    // Brave mặc định khôi phục phiên cũ (đóng bằng nút Close của app lúc đang có 5 tab -> mở lại vẫn hiện lại đủ 5 tab). 5 = mở trang New Tab.
+    prefs.session = prefs.session || {};
+    prefs.session.restore_on_startup = 5;
 
     fs.writeFileSync(preferencesPath, JSON.stringify(prefs));
+    // Chỉ đặt pref thì Brave vẫn khôi phục tab (đã thử) -> xoá luôn file phiên tab đã lưu trước khi mở. Chỉ là danh sách tab đang mở,
+    // KHÔNG đụng cookie / đăng nhập / lịch sử.
+    for (const f of ['Sessions', 'Current Session', 'Current Tabs', 'Last Session', 'Last Tabs']) {
+      try { fs.rmSync(path.join(defaultProfileDir, f), { recursive: true, force: true }); } catch (e) {}
+    }
   } catch (err) {
     console.warn(`Couldn't pre-set Preferences (password/notification popups) for profile ${id}: ${err.message}`);
   }

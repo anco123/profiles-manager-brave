@@ -1,6 +1,4 @@
 {
-  "_ghi_chu": "Cấu hình riêng từng máy theo TÊN MÁY (xem ở Settings -> 'Máy này', hoặc dòng 'Máy này: ...' khi npm start). Máy không có mục riêng dùng mục \"*\". DATA_DIR = folder profile tổng (chứa profiles.json, các profile nằm trong <DATA_DIR>\\profiles); đường dẫn tương đối tính từ thư mục project, chưa có thì tự tạo. machines.json ưu tiên hơn .env.",
-  "DESKTOP-BB2DOCG": { "DATA_DIR": "F:\\AdditionSolfware\\An_AntiDetectTool\\Profile" },
-  "DESKTOP-373B9KO": { "DATA_DIR": "F:\\AdditionSolfware\\An_AntiDetectTool\\Profile" },
-  "*": { "DATA_DIR": "..\\Profile" }
+  "_ghi_chu": "Cấu hình riêng từng máy theo TÊN MÁY (xem ở Settings -> 'Máy này', hoặc dòng 'Máy này: ...' khi npm start). Máy không có mục riêng dùng mục \"*\" -- hiện MỌI máy dùng chung folder profile ở ổ F. DATA_DIR = folder profile tổng (chứa profiles.json, các profile nằm trong <DATA_DIR>\\profiles); chưa có thì tự tạo lúc khởi động server; máy không có ổ F thì server dừng và báo -- thêm mục riêng theo tên máy đó nếu cần folder khác. machines.json ưu tiên hơn .env.",
+  "*": { "DATA_DIR": "F:\\AdditionSolfware\\An_AntiDetectTool\\Profile" }
 }
