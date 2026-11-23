@@ -16,7 +16,7 @@ Tóm tắt những gì đã đổi so với bản gốc (Chrome Portable), lý d
 
 ## Đã đổi (theo thứ tự commit)
 
-1. **Chuyển sang Brave** (`1dc6128`): `autoDetectPortableBrave` trong `server.js`; `resolveChromePath` nhận thư mục chứa `brave.exe`.
+1. **Chuyển sang Brave** (`1dc6128`): `autoDetectPortableBrave` (giờ nằm ở `chrome-version-check.js`); `resolveChromePath` nhận thư mục chứa `brave.exe`.
 2. **Client Hints khớp Brave** (`a1edda4`): `uaMetadataFor` trong `fingerprint.js` sinh danh sách brand theo đúng thuật toán GREASE của Chromium (seed = major version). Chạy Brave thì brand là `"Brave"` và version đầy đủ dạng `<major>.0.0.0`. Đã đối chiếu với header thật của Brave 159. Chỉ có tác dụng khi profile có User-Agent riêng.
 3. **Tầng fingerprint trên Brave + GPU theo máy** (`3918e32`):
    - Chạy Brave thì tầng **Canvas, Audio, Font mặc định TẮT** (`braveDef: false` trong `FP_LAYERS`): Brave Shields tự làm nhiễu, thêm lớp nữa là chồng nhiễu. Nhiễu `readPixels` của WebGL đi theo tầng Canvas. Vẫn bật lại được ở bảng 🧬.
@@ -30,6 +30,14 @@ Tóm tắt những gì đã đổi so với bản gốc (Chrome Portable), lý d
 5. **Folder ổ F + 1 tab** (`b4cbf34`):
    - `machines.json`: mọi máy dùng folder ổ F.
    - Mỗi lần Launch chỉ có 1 tab: Brave mặc định mở lại toàn bộ tab của lần trước. Đặt `session.restore_on_startup = 5` và xoá danh sách tab đã lưu (`Sessions`, `Current/Last Session`, `Current/Last Tabs`) trước khi mở. Cookie, đăng nhập, lịch sử giữ nguyên.
+
+6. **Rà soát + dọn dẹp**:
+   - **Chặn web lạ gọi API server** (middleware đầu `server.js`): chỉ nhận header `Host` là localhost / IP / tên máy này (chống DNS rebinding); từ chối yêu cầu `/api` mà trình duyệt đánh dấu `cross-site`, và yêu cầu ghi có `Origin` khác server. Giao diện app, script Node, curl không bị ảnh hưởng.
+   - `npm audit fix`: 0 lỗ hổng.
+   - Xoá 12 file sao lưu thừa (`* - Copy.js`, `public.zip`, `scripts_backup.rar`…).
+   - Banner phiên bản + nhãn trong giao diện ghi đúng Brave; `npm run check-chrome` nhận Brave (hàm tự dò trình duyệt chuyển sang `chrome-version-check.js`, server và lệnh này dùng chung).
+   - `.gitattributes` thống nhất kiểu xuống dòng.
+   - Test recorder: cả 4 đều qua, nhưng chậm (nested ~140 giây, cả bộ ~6 phút). Đừng chạy với giới hạn thời gian ngắn: bị cắt ngang sẽ báo "Page crashed" giả.
 
 ## Việc còn dở / hạn chế đã biết
 

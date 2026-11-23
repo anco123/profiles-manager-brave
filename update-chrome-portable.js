@@ -21,7 +21,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
+const { checkChromeVersion, resolveChromePath, autoDetectPortableChrome } = require('./chrome-version-check');
 
 // Same tiny hand-rolled .env loader as server.js (kept identical on
 // purpose, so this always agrees with the server about what
@@ -39,12 +39,15 @@ if (fs.existsSync(ENV_FILE)) {
   });
 }
 
-const CHROME_PATH = resolveChromePath(process.env.CHROME_PATH);
-const PORTABLEAPPS_URL = 'https://portableapps.com/apps/internet/google_chrome_portable';
+// Giống server.js: CHROME_PATH trong .env, không có thì tự tìm Brave / Chrome portable cạnh project
+const CHROME_PATH = resolveChromePath(process.env.CHROME_PATH) || autoDetectPortableChrome();
+const IS_BRAVE = /brave\.exe$/i.test(CHROME_PATH);
+const ENGINE = IS_BRAVE ? 'Brave' : 'Chrome';
+const UPDATE_URL = IS_BRAVE ? 'https://github.com/brave/brave-browser/releases' : 'https://portableapps.com/apps/internet/google_chrome_portable';
 
 async function main() {
   if (!CHROME_PATH) {
-    console.error('✗ CHROME_PATH is not set in .env -- nothing to check. See .env.example.');
+    console.error('✗ Không thấy trình duyệt: CHROME_PATH trong .env trống và không có thư mục brave-v...-win32-x64 / GoogleChromePortable cạnh project. Xem .env.example.');
     process.exitCode = 2;
     return;
   }
@@ -58,8 +61,8 @@ async function main() {
     return;
   }
 
-  console.log(`Installed (${CHROME_PATH}): Chrome ${status.installed}`);
-  console.log(`Latest Windows stable:     Chrome ${status.latest}`);
+  console.log(`Installed (${CHROME_PATH}): ${ENGINE} ${status.installed}`);
+  console.log(`Latest Windows stable:     Chromium ${status.latest}${IS_BRAVE ? '  (Brave đi theo Chromium -- so số major)' : ''}`);
 
   if (!status.outdated) {
     console.log('\n✓ Up to date -- no action needed.');
@@ -68,7 +71,7 @@ async function main() {
     console.log(`\n⚠ ${status.majorsBehind} major version${status.majorsBehind === 1 ? '' : 's'} behind.`);
     console.log('  Not urgent by itself (whole browsers of real users sit here too) -- but');
     console.log('  when you do update, grab the real thing here, not a generic installer:');
-    console.log(`  ${PORTABLEAPPS_URL}`);
+    console.log(`  ${UPDATE_URL}`);
     process.exitCode = 1;
   }
 }

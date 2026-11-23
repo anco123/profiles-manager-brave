@@ -134,4 +134,27 @@ async function checkChromeVersion(chromePath) {
   return { configured: true, installed, latest, outdated: majorsBehind > 0, majorsBehind, error: null };
 }
 
-module.exports = { checkChromeVersion, extractVersion, majorOf, resolveChromePath };
+// ---- Tự tìm trình duyệt portable khi CHROME_PATH để trống (server.js + update-chrome-portable.js dùng chung) ----
+// Dò lên tối đa 4 cấp thư mục cha của project (file này nằm ở thư mục project). Ưu tiên Brave portable, rồi tới GoogleChromePortable.
+// Brave portable (thư mục brave-v<phiên bản>-win32-x64 chứa brave.exe, nằm CẠNH project) được ưu tiên trước GoogleChromePortable.
+// Có nhiều bản Brave cạnh nhau thì lấy bản số phiên bản cao nhất -- cập nhật Brave chỉ cần giải nén bản mới cạnh bản cũ, không sửa .env.
+function autoDetectPortableBrave(dir) {
+  let names = [];
+  try { names = fs.readdirSync(dir).filter((n) => /^brave(-v[\d.]+.*)?$/i.test(n)); } catch { return ''; }
+  const ver = (n) => ((n.match(/v(\d+(?:\.\d+)*)/i) || [, '0'])[1]).split('.').map(Number);
+  names.sort((a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((y[i] || 0) !== (x[i] || 0)) return (y[i] || 0) - (x[i] || 0); return 0; });
+  for (const n of names) { const exe = path.join(dir, n, 'brave.exe'); if (fs.existsSync(exe)) return exe; }
+  return '';
+}
+function autoDetectPortableChrome() {
+  for (let levelsUp = 1; levelsUp <= 4; levelsUp++) {
+    const dir = path.join(__dirname, ...Array(levelsUp).fill('..'));
+    const brave = autoDetectPortableBrave(dir);
+    if (brave) return brave;
+    const guess = path.join(dir, 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
+    if (fs.existsSync(guess)) return guess;
+  }
+  return '';
+}
+
+module.exports = { checkChromeVersion, extractVersion, majorOf, resolveChromePath, autoDetectPortableChrome, autoDetectPortableBrave };

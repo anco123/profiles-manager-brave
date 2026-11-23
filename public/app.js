@@ -97,7 +97,7 @@ const ENGINE_LABELS = {
   chromium: 'Chromium',
   chrome: 'Chrome (system)',
   custom: 'Custom exe',
-  'chrome-portable-global': 'Chrome Portable (.env)',
+  'chrome-portable-global': 'Trình duyệt chung (Brave / CHROME_PATH)',
 };
 
 // -------------------------------------------------------------------

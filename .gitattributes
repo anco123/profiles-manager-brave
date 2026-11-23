@@ -1,0 +1,10 @@
+# Git lưu mọi file chữ với xuống dòng LF; trên Windows (core.autocrlf=true) file trên máy là CRLF như bình thường.
+* text=auto
+
+# File nhị phân -- không đụng tới xuống dòng
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
+*.rar binary
+*.xlsx binary

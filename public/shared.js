@@ -351,14 +351,16 @@ async function initChromeVersionBanner() {
   const banner = document.createElement('div');
   banner.className = 'chrome-version-banner';
 
+  const engine = status.engineName || 'Chrome Portable'; // server báo đúng trình duyệt đang dùng (Brave / Chrome Portable)
+  const updateUrl = status.updateUrl || 'https://portableapps.com/apps/internet/google_chrome_portable';
   if (status.error) {
     banner.classList.add('is-muted');
-    banner.innerHTML = `<span>Couldn't check Chrome Portable's version: ${status.error}</span>`;
+    banner.innerHTML = `<span>Couldn't check ${engine}'s version: ${status.error}</span>`;
   } else {
     const plural = status.majorsBehind === 1 ? '' : 's';
-    banner.innerHTML = `<span>Chrome Portable is out of date &mdash; <strong>${status.majorsBehind} major version${plural} behind</strong> ` +
-      `(installed ${status.installed}, latest ${status.latest}). ` +
-      `<a href="https://portableapps.com/apps/internet/google_chrome_portable" target="_blank" rel="noopener">Get the update</a></span>`;
+    banner.innerHTML = `<span>${engine} is out of date &mdash; <strong>${status.majorsBehind} major version${plural} behind</strong> ` +
+      `(installed ${status.installed}, latest Chromium ${status.latest}). ` +
+      `<a href="${updateUrl}" target="_blank" rel="noopener">Get the update</a></span>`;
   }
 
   const closeBtn = document.createElement('button');

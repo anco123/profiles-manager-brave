@@ -45,7 +45,7 @@ const os = require('os');
 const { exec, spawn } = require('child_process');
 const { chromium } = require('playwright');
 const { FP_LAYERS, fpLayersOf, fpLayerDef, fpLayersFor, adaptGpuToHost, buildWorkerPatchSource, uaMetadataFor, generateFingerprint, normalizeFingerprint, buildFingerprintInitScript, buildBaseStealthInitScript, screenForViewport, plausibleViewport } = require('./fingerprint');
-const { checkChromeVersion, resolveChromePath } = require('./chrome-version-check');
+const { checkChromeVersion, resolveChromePath, autoDetectPortableChrome } = require('./chrome-version-check');
 const { startRecorder, stopRecorder, pauseRecorder, recorderState, recorderCode, recorderExports, recorderHeader } = require('./recorder');
 
 const app = express();
@@ -129,26 +129,7 @@ if (process.env.DATA_DIR && process.env.DATA_DIR.trim()) process.env.DATA_DIR = 
 // tới chỗ GoogleChromePortable nằm). Dò rộng ra vài cấp như vầy để lần
 // tái cấu trúc SAU (nếu có) cũng tự nhận ra được, không phải quay lại
 // sửa .env mỗi lần đổi cấu trúc thư mục.
-// Brave portable (thư mục brave-v<phiên bản>-win32-x64 chứa brave.exe, nằm CẠNH project) được ưu tiên trước GoogleChromePortable.
-// Có nhiều bản Brave cạnh nhau thì lấy bản số phiên bản cao nhất -- cập nhật Brave chỉ cần giải nén bản mới cạnh bản cũ, không sửa .env.
-function autoDetectPortableBrave(dir) {
-  let names = [];
-  try { names = fs.readdirSync(dir).filter((n) => /^brave(-v[\d.]+.*)?$/i.test(n)); } catch { return ''; }
-  const ver = (n) => ((n.match(/v(\d+(?:\.\d+)*)/i) || [, '0'])[1]).split('.').map(Number);
-  names.sort((a, b) => { const x = ver(a), y = ver(b); for (let i = 0; i < Math.max(x.length, y.length); i++) if ((y[i] || 0) !== (x[i] || 0)) return (y[i] || 0) - (x[i] || 0); return 0; });
-  for (const n of names) { const exe = path.join(dir, n, 'brave.exe'); if (fs.existsSync(exe)) return exe; }
-  return '';
-}
-function autoDetectPortableChrome() {
-  for (let levelsUp = 1; levelsUp <= 4; levelsUp++) {
-    const dir = path.join(__dirname, ...Array(levelsUp).fill('..'));
-    const brave = autoDetectPortableBrave(dir);
-    if (brave) return brave;
-    const guess = path.join(dir, 'GoogleChromePortable', 'App', 'Chrome-bin', 'chrome.exe');
-    if (fs.existsSync(guess)) return guess;
-  }
-  return '';
-}
+// Hàm dò nằm ở chrome-version-check.js (dùng chung với lệnh npm run check-chrome) -- thư mục mốc là thư mục project.
 // resolveChromePath: bỏ dấu ngoặc kép, trỏ vào thư mục / GoogleChromePortable.exe -> tự tìm chrome.exe bên trong (xem chrome-version-check.js)
 const CHROME_PATH = resolveChromePath(process.env.CHROME_PATH) || autoDetectPortableChrome();
 // Profile này mở bằng Brave? (CHROME_PATH luôn thắng; không có thì theo engine riêng của profile) -- Brave: tầng Canvas / Audio / Font mặc định tắt
@@ -288,6 +269,34 @@ function clearScriptsRequireCache() {
     if (cachedPath.startsWith(prefix)) delete require.cache[cachedPath];
   }
 }
+
+// ---- Chặn trang web LẠ gọi API của server (server có API ghi + chạy script Node = chạy được code bất kỳ trên máy) ----
+// Chính các profile đang vào đủ loại web trên CÙNG máy, nên phải chặn 2 đường:
+//  1. DNS rebinding: web độc hại cho tên miền của nó trỏ về 127.0.0.1 -> trình duyệt coi là CÙNG origin, gọi API thoải mái. Chặn bằng header
+//     Host: chỉ nhận localhost / *.localhost / địa chỉ IP (kể cả IP mạng LAN khi HOST=0.0.0.0) -- tên miền thật thì từ chối.
+//  2. Web khác gửi yêu cầu thẳng tới http://localhost:PORT (form / fetch no-cors / <img>): trình duyệt gắn Origin / Sec-Fetch-Site -> từ chối
+//     mọi yêu cầu tới /api mà trình duyệt đánh dấu là cross-site, và mọi yêu cầu thay đổi dữ liệu có Origin khác chính server.
+// Giao diện của app (cùng origin) và script Node / curl (không có Origin) không bị ảnh hưởng.
+// Tên máy (DESKTOP-xxx, DESKTOP-xxx.local) cũng nhận -- để máy khác trong LAN mở bằng tên máy khi đặt HOST=0.0.0.0.
+const OWN_HOSTNAMES = new Set([os.hostname().toLowerCase(), os.hostname().toLowerCase() + '.local']);
+function isLocalHostHeader(host) {
+  const h = String(host || '').toLowerCase().replace(/:\d+$/, '');
+  return h === 'localhost' || h.endsWith('.localhost') || OWN_HOSTNAMES.has(h) || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || /^\[[0-9a-f:.]+\]$/.test(h);
+}
+app.use((req, res, next) => {
+  if (!isLocalHostHeader(req.headers.host)) return res.status(403).type('text').send('Forbidden: Host không hợp lệ');
+  const isApi = req.path.startsWith('/api/');
+  const site = req.headers['sec-fetch-site'];
+  if (isApi && site === 'cross-site') return res.status(403).json({ error: 'Forbidden: yêu cầu từ trang web khác' });
+  const origin = req.headers.origin;
+  if (origin && origin !== 'null' && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    let originHost = ''; try { originHost = new URL(origin).host; } catch {}
+    if (originHost.toLowerCase() !== String(req.headers.host || '').toLowerCase()) return res.status(403).json({ error: 'Forbidden: Origin khác server' });
+  } else if (origin === 'null' && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return res.status(403).json({ error: 'Forbidden: Origin null' });
+  }
+  next();
+});
 
 // Giới hạn mặc định của express.json() là 100KB -- quá nhỏ cho snapshot
 // toàn bộ sheet Excel nếu file có vài trăm dòng trở lên (dễ vượt 100KB).
@@ -3082,8 +3091,14 @@ app.get('/api/queue', (req, res) => {
 // their own page load and show a small banner if it's outdated -- see
 // initChromeVersionBanner() in public/shared.js.
 let chromeVersionStatus = { checking: true, configured: false, installed: null, latest: null, outdated: false, majorsBehind: 0, error: null };
+// Tên + trang tải bản mới đúng theo trình duyệt đang dùng (Brave portable hay Chrome Portable) -- banner ở shared.js đọc 2 trường này.
+// Brave đi theo Chromium nên vẫn so major version với Chrome stable như cũ.
+const ENGINE_INFO = isBraveExe(CHROME_PATH)
+  ? { engineName: 'Brave', updateUrl: 'https://github.com/brave/brave-browser/releases' }
+  : { engineName: 'Chrome Portable', updateUrl: 'https://portableapps.com/apps/internet/google_chrome_portable' };
+chromeVersionStatus = { ...chromeVersionStatus, ...ENGINE_INFO };
 checkChromeVersion(CHROME_PATH).then((result) => {
-  chromeVersionStatus = { checking: false, ...result };
+  chromeVersionStatus = { checking: false, ...ENGINE_INFO, ...result };
 });
 
 app.get('/api/chrome-version', (req, res) => {
