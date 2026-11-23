@@ -486,7 +486,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
   // chính các trang nội bộ của Chrome, và việc ghi đè hàng loạt
   // prototype (Navigator, Canvas, WebGL, Audio...) trên đó có nguy cơ
   // làm hỏng ngầm JS nội bộ của những trang này (VD chrome://extensions).
-  if (!/^https?:$/.test(location.protocol)) return;
+  if (!/^https?:$/.test(location.protocol) && !(location.protocol === 'about:' && /^https?:/.test(self.origin))) return; // iframe about:blank / srcdoc CÙNG origin với trang (web hay tạo để soi: lấy hàm gốc / toString chưa bị vá từ trong iframe) -> phải vá luôn
   const PLATFORM = ${JSON.stringify(fp.platform)};
   const HARDWARE_CONCURRENCY = ${JSON.stringify(fp.hardwareConcurrency)};
   const DEVICE_MEMORY = ${JSON.stringify(fp.deviceMemory)};
@@ -519,7 +519,22 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
     } catch (e) { return true; }
   }
 
-  const nativeStrings = new WeakMap();
+  // Danh sách "hàm đã che -> chuỗi [native code]" DÙNG CHUNG cho trang + mọi iframe cùng origin: web hay lấy toString của 1 iframe soi hàm
+  // của trang (và ngược lại) -- mỗi nơi 1 danh sách riêng thì toString của iframe trả nguyên mã nguồn hàm bọc. Iframe hỏi toString đã vá của
+  // trang cha bằng 1 khoá riêng của profile (toString thật bỏ qua tham số -> web không thấy khác biệt) để lấy danh sách của cha.
+  const REG_KEY = '__pm' + CANVAS_SEED;
+  let nativeStrings = null;
+  try {
+    let w = self;
+    while (w.parent && w.parent !== w) {
+      const p = w.parent;
+      let m = null;
+      try { m = p.Function.prototype.toString.call(p.Function, REG_KEY); } catch (e) { break; } // khác origin -> dừng
+      if (m && typeof m === 'object' && typeof m.has === 'function') { nativeStrings = m; break; }
+      w = p;
+    }
+  } catch (e) {}
+  if (!nativeStrings) nativeStrings = new WeakMap();
   // Hàm thay thế phải giống hàm native ở mọi chỗ web hay soi: toString ra "[native code]", KHÔNG có thuộc tính prototype, KHÔNG gọi được
   // bằng new, length đúng như bản gốc, và getter gọi sai receiver (getter.call({})) phải ném "Illegal invocation" -- nên bọc fn trong 1
   // method (method không có prototype / không construct được) và cho getter gọi getter GỐC trước để trình duyệt tự kiểm tra receiver.
@@ -527,7 +542,7 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
     let w = fn;
     try {
       const isGet = /^get /.test(name);
-      w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && Error.captureStackTrace) Error.captureStackTrace(e, w); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: cắt khung của hàm bọc khỏi stack (như hàm native -- không lộ dòng của script chèn vào)
+      w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && typeof e.stack === "string") e.stack = e.stack.split("\\n").filter((l) => /eval at/.test(l) || !(/^\\s*at [^(]*\\(<anonymous>:\\d+:\\d+\\)$/.test(l) || /^\\s*at <anonymous>:\\d+:\\d+$/.test(l) || /^\\s*at Reflect\\.apply \\(<anonymous>\\)$/.test(l))).join("\\n"); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: chỉ bỏ các dòng stack của script chèn vào (<anonymous>:dòng:cột) + Reflect.apply, GIỮ dòng của hàm native (at Function.toString (<anonymous>)) -- CreepJS soi đúng dòng đó
       Object.defineProperty(w, 'length', { value: orig ? orig.length : fn.length, configurable: true });
     } catch (e) { w = fn; }
     try { nativeStrings.set(w, 'function ' + name + '() { [native code] }'); } catch (e) {}
@@ -536,9 +551,10 @@ function buildFingerprintInitScript(fp, customUserAgent, layers) {
   function origGet(obj, key) { try { const d = Object.getOwnPropertyDescriptor(obj, key); return d && d.get; } catch (e) { return undefined; } }
   if (L.tostring) try {
     const origFunctionToString = Function.prototype.toString;
-    function patchedToString() {
+    function patchedToString(key) {
+      if (key === REG_KEY && this === Function) return nativeStrings; // iframe con cùng origin xin danh sách dùng chung (xem REG_KEY)
       if (nativeStrings.has(this)) return nativeStrings.get(this);
-      return origFunctionToString.call(this);
+      return Reflect.apply(origFunctionToString, this, arguments);
     }
     const nativeToString = markNative(patchedToString, 'toString', origFunctionToString);
     Object.defineProperty(Function.prototype, 'toString', { value: nativeToString, writable: true, configurable: true, enumerable: false });
@@ -887,7 +903,7 @@ function buildWorkerPatchSource(fp, customUserAgent, layers) {
   const L = layers || fpLayersOf(null); // cùng các tầng đang bật như ở trang
   const uaMajor = customUserAgent ? extractMajorVersionFromUA(customUserAgent) : null;
   return `(() => {
-if (self.__pmFpPatched) return; self.__pmFpPatched = true;
+/* server chỉ chèn 1 lần / worker -- không đặt cờ toàn cục (web đọc được) */
 const nativeStrings = new WeakMap();
 // Hàm thay thế phải giống hàm native ở mọi chỗ web hay soi: toString ra "[native code]", KHÔNG có thuộc tính prototype, KHÔNG gọi được
 // bằng new, length đúng như bản gốc, và getter gọi sai receiver (getter.call({})) phải ném "Illegal invocation" -- nên bọc fn trong 1
@@ -896,7 +912,7 @@ function markNative(fn, name, orig) {
   let w = fn;
   try {
     const isGet = /^get /.test(name);
-    w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && Error.captureStackTrace) Error.captureStackTrace(e, w); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: cắt khung của hàm bọc khỏi stack (như hàm native -- không lộ dòng của script chèn vào)
+    w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && typeof e.stack === "string") e.stack = e.stack.split("\\n").filter((l) => /eval at/.test(l) || !(/^\\s*at [^(]*\\(<anonymous>:\\d+:\\d+\\)$/.test(l) || /^\\s*at <anonymous>:\\d+:\\d+$/.test(l) || /^\\s*at Reflect\\.apply \\(<anonymous>\\)$/.test(l))).join("\\n"); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: chỉ bỏ các dòng stack của script chèn vào (<anonymous>:dòng:cột) + Reflect.apply, GIỮ dòng của hàm native (at Function.toString (<anonymous>)) -- CreepJS soi đúng dòng đó
     Object.defineProperty(w, 'length', { value: orig ? orig.length : fn.length, configurable: true });
   } catch (e) { w = fn; }
   try { nativeStrings.set(w, 'function ' + name + '() { [native code] }'); } catch (e) {}
@@ -1044,7 +1060,7 @@ function buildBaseStealthInitScript() {
     // buildFingerprintInitScript(). Không có lý do gì để patch
     // navigator.webdriver/Function.prototype.toString trên các trang
     // nội bộ của Chrome.
-    if (!/^https?:$/.test(location.protocol)) return;
+    if (!/^https?:$/.test(location.protocol) && !(location.protocol === 'about:' && /^https?:/.test(self.origin))) return; // iframe about:blank / srcdoc CÙNG origin với trang (web hay tạo để soi: lấy hàm gốc / toString chưa bị vá từ trong iframe) -> phải vá luôn
     if (navigator.webdriver !== true) return; // flag already did its job -- nothing to patch
 
     const nativeStrings = new WeakMap();
@@ -1055,7 +1071,7 @@ function buildBaseStealthInitScript() {
       let w = fn;
       try {
         const isGet = /^get /.test(name);
-        w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && Error.captureStackTrace) Error.captureStackTrace(e, w); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: cắt khung của hàm bọc khỏi stack (như hàm native -- không lộ dòng của script chèn vào)
+        w = ({ [name](...args) { try { if (isGet && orig) Reflect.apply(orig, this, args); return Reflect.apply(fn, this, args); } catch (e) { try { if (e && typeof e === "object" && typeof e.stack === "string") e.stack = e.stack.split("\\n").filter((l) => /eval at/.test(l) || !(/^\\s*at [^(]*\\(<anonymous>:\\d+:\\d+\\)$/.test(l) || /^\\s*at <anonymous>:\\d+:\\d+$/.test(l) || /^\\s*at Reflect\\.apply \\(<anonymous>\\)$/.test(l))).join("\\n"); } catch (_) {} throw e; } } })[name]; // lỗi ném ra: chỉ bỏ các dòng stack của script chèn vào (<anonymous>:dòng:cột) + Reflect.apply, GIỮ dòng của hàm native (at Function.toString (<anonymous>)) -- CreepJS soi đúng dòng đó
         Object.defineProperty(w, 'length', { value: orig ? orig.length : fn.length, configurable: true });
       } catch (e) { w = fn; }
       try { nativeStrings.set(w, 'function ' + name + '() { [native code] }'); } catch (e) {}
@@ -1066,7 +1082,7 @@ function buildBaseStealthInitScript() {
       const origFunctionToString = Function.prototype.toString;
       function patchedToString() {
         if (nativeStrings.has(this)) return nativeStrings.get(this);
-        return origFunctionToString.call(this);
+        return Reflect.apply(origFunctionToString, this, arguments);
       }
       const nativeToString = markNative(patchedToString, 'toString', origFunctionToString);
       Object.defineProperty(Function.prototype, 'toString', { value: nativeToString, writable: true, configurable: true, enumerable: false });

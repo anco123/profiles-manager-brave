@@ -39,7 +39,22 @@ Tóm tắt những gì đã đổi so với bản gốc (Chrome Portable), lý d
    - `.gitattributes` thống nhất kiểu xuống dòng.
    - Test recorder: cả 4 đều qua, nhưng chậm (nested ~140 giây, cả bộ ~6 phút). Đừng chạy với giới hạn thời gian ngắn: bị cắt ngang sẽ báo "Page crashed" giả.
 
+7. **Sửa lỗi CreepJS bắt được lớp fingerprint** (đo bằng CreepJS, Brave chạy ẩn):
+   - Trước: bật fingerprint → **423 "lies"**, 20% stealth (gốc ở `Function.toString`). Tắt fingerprint → 6 lies (mức bình thường của Brave).
+   - Nguyên nhân 1: khi hàm bọc ném lỗi, `markNative` cắt mất dòng `at Function.toString (<anonymous>)` của hàm native trong stack. Giờ chỉ bỏ các dòng của script chèn vào.
+   - Nguyên nhân 2: script fingerprint bỏ qua iframe `about:blank` (điều kiện chỉ chạy trên `http(s)`), nên trong iframe số nhân CPU là của máy thật, và `toString` của iframe đọc được mã nguồn hàm bọc của trang. Giờ vá cả iframe cùng origin, và trang + iframe dùng chung danh sách hàm đã che (`REG_KEY`).
+   - Sau khi sửa: bật fingerprint → 6 lies, 0% stealth, giống hệt lúc tắt.
+   - Test tự động không hiện cửa sổ: chạy server với `PM_TEST_HEADLESS=1` thì Launch mở Brave ẩn.
+
 ## Việc còn dở / hạn chế đã biết
+
+- **Đã xác nhận bằng Brave có cửa sổ (bật / tắt fingerprint):** CreepJS cả 2 đều 0% headless, 0% stealth, 4 lies giống nhau (Screen "failed matchMedia", nhiễu audio, nhiễu canvas, plugins). Cả 4 đều có sẵn ở Brave khi TẮT fingerprint, kể cả khi bỏ giả lập viewport (đã thử, không hết, đã hoàn tác). Pixelscan báo "Your Browser Fingerprint is inconsistent" ở CẢ 2 -- không phải do lớp fingerprint; "No automated behavior detected".
+- **Worker thỉnh thoảng không được vá** (~3% worker, đo 210 worker chạy ẩn, nhiều nhất khi tạo hàng loạt cùng lúc): Worker đó báo giá trị Brave thật / tự nhiễu, lệch với trang. Nguyên nhân đã xác định: Playwright cũng tự gắn vào mỗi Worker và tự cho chạy ngay (`Runtime.runIfWaitingForDebugger` trong `coreBundle.js`); Worker KHÔNG chờ phiên CDP của mình (đã thử trì hoãn lệnh cho chạy của mình 1,5 giây: Worker vẫn chạy sau ~20ms). Đã thử và bỏ:
+  - Điểm dừng `Debugger.setInstrumentationBreakpoint('beforeScriptExecution')`: tệ hơn (lệnh của mình vẫn tới sau khi Worker chạy; với worker thường, `Runtime.evaluate` gửi sớm bị giữ tới sau code của web và chặn luôn các lệnh sau nó).
+  - `Emulation.setHardwareConcurrencyOverride`: Worker không kế thừa.
+  - Muốn hết hẳn phải chặn lệnh cho chạy của Playwright (can thiệp nội bộ / sửa `node_modules`) -- chưa làm vì dễ vỡ khi cập nhật Playwright.
+  - Đã bỏ biến toàn cục `self.__pmFpPatched` trong worker (web đọc được); server chỉ chèn 1 lần mỗi worker nên không cần.
+- Tầng "Chặn hỏi thông báo" làm `Notification.permission = "denied"`: CreepJS tính là 1 dấu hiệu "giống headless" (Chrome thật là `"default"`).
 
 - **Chưa thử fingerprint trên chính web bị chặn.** Mới thử bằng trang soi lỗi tự viết. Nếu vẫn không vào được: lấy tên web, mở profile, tắt dần từng tầng ở bảng 🧬 để tìm tầng gây lỗi.
 - **Chưa chạy thử trong app**: phần "chỉ mở 1 tab", và dòng "GPU trên máy này" ở bảng 🧬.

@@ -1637,7 +1637,7 @@ async function launchProfileById(id) {
   }
 
   const launchOptions = {
-    headless: false, // a profile manager's whole point is a real window you can drive by hand
+    headless: process.env.PM_TEST_HEADLESS === '1', // a profile manager's whole point is a real window you can drive by hand (PM_TEST_HEADLESS=1: chỉ để test tự động, không hiện cửa sổ)
     viewport: { width: profile.viewportWidth, height: profile.viewportHeight },
     locale: profile.locale,
     timezoneId: profile.timezoneId,
