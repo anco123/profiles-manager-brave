@@ -35,21 +35,21 @@ function getProxyResetUrl(proxyServer, proxyUsername, proxyPassword) {
   // sp07v2-01.v98proxy.xyz:37185:sp07v2-37185:UXWUG
   // (proxyServer lưu dạng "http://host:port" -- xem parseProxyLine() trong server.js)
   if (
-    proxyServer === 'http://sp07v2-01.v98proxy.xyz:37100' &&
-    proxyUsername === 'sp07v2-37100' &&
-    proxyPassword === 'USDNO'
+    proxyServer === 'http://sp07v2-02.v98proxy.xyz:37238' &&
+    proxyUsername === 'sp07v2-37238' &&
+    proxyPassword === 'WNFET'
   ) {
-    return 'https://v98proxy.xyz/sp07v2/37100-BAGUSQLGWK';
+    return 'https://v98proxy.xyz/sp07v2/37238-CKGPEMMEOL';
   }
 
 
-  if (
-    proxyServer === 'http://sp07v2-03.v98proxy.xyz:37565' &&
-    proxyUsername === 'sp07v2-37565' &&
-    proxyPassword === 'QRFWZ'
-  ) {
-    return 'https://v98proxy.xyz/sp07v2/37565-IJGUTGBQTE';
-  }
+  // if (
+  //   proxyServer === 'http://sp07v2-03.v98proxy.xyz:37565' &&
+  //   proxyUsername === 'sp07v2-37565' &&
+  //   proxyPassword === 'QRFWZ'
+  // ) {
+  //   return 'https://v98proxy.xyz/sp07v2/37565-IJGUTGBQTE';
+  // }
   // Mua thêm proxy: copy khối if ở trên, đổi cả 3 giá trị cho đúng
   // proxy mới (đúng như đã điền vào profile) + resetUrl mới, VD:
   // if (
